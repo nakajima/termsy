@@ -20,6 +20,7 @@ struct TabBarRepresentable: UIViewRepresentable {
 		view.onCloseTab = { [coordinator] id in coordinator.closeTab(id) }
 		view.onReorderTabs = { [coordinator] ids in coordinator.reorderTabs(ids) }
 		view.onAddTab = { [coordinator] in coordinator.isShowingSessionPicker = true }
+		view.onSettings = { [coordinator] in coordinator.isShowingSettings = true }
 		view.applyTheme(theme)
 		view.update(tabs: coordinator.tabs, selectedID: coordinator.selectedTabID)
 		return view
@@ -30,6 +31,7 @@ struct TabBarRepresentable: UIViewRepresentable {
 		view.onCloseTab = { [coordinator] id in coordinator.closeTab(id) }
 		view.onReorderTabs = { [coordinator] ids in coordinator.reorderTabs(ids) }
 		view.onAddTab = { [coordinator] in coordinator.isShowingSessionPicker = true }
+		view.onSettings = { [coordinator] in coordinator.isShowingSettings = true }
 		view.applyTheme(theme)
 		view.update(tabs: coordinator.tabs, selectedID: coordinator.selectedTabID)
 	}
@@ -56,6 +58,7 @@ final class TabBarCollectionView: UIView {
 	var onCloseTab: ((Session.ID) -> Void)?
 	var onReorderTabs: (([Int64]) -> Void)?
 	var onAddTab: (() -> Void)?
+	var onSettings: (() -> Void)?
 
 	private var theme: AppTheme = TerminalTheme.current.appTheme
 	private var collectionView: UICollectionView!
@@ -63,6 +66,7 @@ final class TabBarCollectionView: UIView {
 	private var items: [TabBarItem] = []
 	private var selectedID: Int64?
 	private var addButton: UIButton!
+	private var settingsButton: UIButton!
 
 	override init(frame: CGRect) {
 		super.init(frame: frame)
@@ -94,6 +98,15 @@ final class TabBarCollectionView: UIView {
 		collectionView.dragDelegate = self
 		collectionView.dropDelegate = self
 
+		// Settings button
+		settingsButton = UIButton(type: .system)
+		settingsButton.translatesAutoresizingMaskIntoConstraints = false
+		let gearImage = UIImage(systemName: "gearshape", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .medium))
+		settingsButton.setImage(gearImage, for: .normal)
+		settingsButton.tintColor = theme.secondaryTextUIColor
+		settingsButton.addAction(UIAction { [weak self] _ in self?.onSettings?() }, for: .touchUpInside)
+		addSubview(settingsButton)
+
 		// + button
 		addButton = UIButton(type: .system)
 		addButton.translatesAutoresizingMaskIntoConstraints = false
@@ -107,7 +120,11 @@ final class TabBarCollectionView: UIView {
 			collectionView.topAnchor.constraint(equalTo: topAnchor),
 			collectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
 			collectionView.leadingAnchor.constraint(equalTo: leadingAnchor),
-			collectionView.trailingAnchor.constraint(equalTo: addButton.leadingAnchor),
+			collectionView.trailingAnchor.constraint(equalTo: settingsButton.leadingAnchor),
+
+			settingsButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+			settingsButton.trailingAnchor.constraint(equalTo: addButton.leadingAnchor),
+			settingsButton.widthAnchor.constraint(equalToConstant: 36),
 
 			addButton.centerYAnchor.constraint(equalTo: centerYAnchor),
 			addButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),

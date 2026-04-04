@@ -7,12 +7,69 @@ import SwiftUI
 
 struct SettingsView: View {
 	@AppStorage("terminalTheme") private var selectedTheme = TerminalTheme.mocha.rawValue
+	@AppStorage("cursorStyle") private var cursorStyle = "block"
+	@AppStorage("cursorBlink") private var cursorBlink = true
+	@AppStorage(TerminalScrollSettings.reverseVerticalScrollKey) private var reverseVerticalScroll = TerminalScrollSettings.defaultReverseVerticalScroll
+	@AppStorage(TerminalScrollSettings.sensitivityKey) private var scrollSensitivity = TerminalScrollSettings.defaultSensitivity
 	@Environment(\.appTheme) private var theme
 	@Environment(\.dismiss) private var dismiss
+
+	private var sensitivityLabel: String {
+		"\(scrollSensitivity.formatted(.number.precision(.fractionLength(2))))×"
+	}
 
 	var body: some View {
 		NavigationStack {
 			Form {
+				Section("Cursor") {
+					Picker("Style", selection: $cursorStyle) {
+						Text("Block").tag("block")
+						Text("Bar").tag("bar")
+						Text("Underline").tag("underline")
+					}
+					.listRowBackground(theme.cardBackground)
+					.onChange(of: cursorStyle) { _, _ in
+						GhosttyApp.shared.reloadConfig()
+					}
+
+					Toggle("Blink", isOn: $cursorBlink)
+						.listRowBackground(theme.cardBackground)
+						.onChange(of: cursorBlink) { _, _ in
+							GhosttyApp.shared.reloadConfig()
+						}
+				}
+
+				Section {
+					Toggle("Reverse Vertical Scrolling", isOn: $reverseVerticalScroll)
+						.listRowBackground(theme.cardBackground)
+
+					VStack(alignment: .leading, spacing: 8) {
+						HStack {
+							Text("Sensitivity")
+							Spacer()
+							Text(sensitivityLabel)
+								.foregroundStyle(theme.secondaryText)
+								.monospacedDigit()
+						}
+
+						Slider(value: $scrollSensitivity, in: TerminalScrollSettings.minSensitivity...TerminalScrollSettings.maxSensitivity, step: 0.25)
+							.tint(theme.accent)
+
+						HStack {
+							Text("Slower")
+							Spacer()
+							Text("Faster")
+						}
+						.font(.caption)
+						.foregroundStyle(theme.secondaryText)
+					}
+					.listRowBackground(theme.cardBackground)
+				} header: {
+					Text("Scrolling")
+				} footer: {
+					Text("Direction and sensitivity apply to two-finger touch, trackpad, and mouse-wheel scrolling.")
+				}
+
 				Section("Theme") {
 					ForEach(TerminalTheme.allCases) { terminalTheme in
 						Button {

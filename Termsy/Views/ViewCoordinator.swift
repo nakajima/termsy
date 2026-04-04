@@ -13,6 +13,7 @@ class ViewCoordinator {
 	var path = NavigationPath()
 	var isShowingConnectView = false
 	var isShowingSessionPicker = false
+	var isShowingSettings = false
 
 	/// All open terminal tabs.
 	var tabs: [TerminalTab] = []

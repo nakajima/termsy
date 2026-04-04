@@ -19,10 +19,12 @@ final class GhosttyApp {
 		.appendingPathComponent("termsy-ghostty.conf")
 
 	private static func buildConfigText(theme: TerminalTheme) -> String {
-		"""
+		let cursorStyle = UserDefaults.standard.string(forKey: "cursorStyle") ?? "block"
+		let cursorBlink = UserDefaults.standard.object(forKey: "cursorBlink") as? Bool ?? true
+		return """
 		font-size = 14
-		cursor-style = block
-		cursor-style-blink = true
+		cursor-style = \(cursorStyle)
+		cursor-style-blink = \(cursorBlink)
 		term = xterm-256color
 		\(theme.ghosttyConfig)
 		"""
@@ -97,7 +99,13 @@ final class GhosttyApp {
 	}
 
 	func applyTheme(_ theme: TerminalTheme) {
+		reloadConfig(theme: theme)
+	}
+
+	/// Reloads the full config from current UserDefaults + the given theme.
+	func reloadConfig(theme: TerminalTheme? = nil) {
 		guard let app else { return }
+		let theme = theme ?? TerminalTheme.current
 		guard let cfg = Self.loadConfig(theme: theme) else { return }
 		if let old = config { ghostty_config_free(old) }
 		config = cfg

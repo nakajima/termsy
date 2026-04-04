@@ -31,10 +31,17 @@ final class TerminalView: UIView, UIKeyInput {
 		isUserInteractionEnabled = true
 		isMultipleTouchEnabled = false
 
-		let scrollRecognizer = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
-		scrollRecognizer.minimumNumberOfTouches = 2
-		scrollRecognizer.maximumNumberOfTouches = 2
-		addGestureRecognizer(scrollRecognizer)
+		let touchScrollRecognizer = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
+		touchScrollRecognizer.minimumNumberOfTouches = 2
+		touchScrollRecognizer.maximumNumberOfTouches = 2
+		addGestureRecognizer(touchScrollRecognizer)
+
+		if #available(iOS 13.4, *) {
+			let indirectScrollRecognizer = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
+			indirectScrollRecognizer.allowedScrollTypesMask = [.continuous, .discrete]
+			indirectScrollRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)]
+			addGestureRecognizer(indirectScrollRecognizer)
+		}
 	}
 
 	@available(*, unavailable)
@@ -145,6 +152,11 @@ final class TerminalView: UIView, UIKeyInput {
 		}
 	}
 
+	/// Call from the parent when the view's bounds change externally.
+	func forceSyncSize() {
+		syncSize()
+	}
+
 	private func syncSize() {
 		guard let surface else { return }
 		let scale = resolvedScale()
@@ -218,10 +230,11 @@ final class TerminalView: UIView, UIKeyInput {
 
 	@objc private func handleScroll(_ recognizer: UIPanGestureRecognizer) {
 		guard let surface else { return }
-		let velocity = recognizer.translation(in: self)
+		let delta = recognizer.translation(in: self)
 		recognizer.setTranslation(.zero, in: self)
-		// Negate Y so swiping up scrolls up (positive dy = scroll up in ghostty)
-		ghostty_surface_mouse_scroll(surface, velocity.x, -velocity.y, 0)
+		guard delta != .zero else { return }
+		let adjustedDelta = TerminalScrollSettings.adjustedDelta(from: delta)
+		ghostty_surface_mouse_scroll(surface, adjustedDelta.x, adjustedDelta.y, 0)
 	}
 
 	// MARK: - First Responder

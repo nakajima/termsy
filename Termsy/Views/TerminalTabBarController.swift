@@ -65,6 +65,12 @@ final class TerminalHostController: UIViewController {
 		terminalView?.becomeFirstResponder()
 	}
 
+	override func viewDidLayoutSubviews() {
+		super.viewDidLayoutSubviews()
+		terminalView?.frame = view.bounds
+		terminalView?.forceSyncSize()
+	}
+
 	func applyTheme(_ theme: AppTheme) {
 		self.theme = theme
 		view.backgroundColor = theme.backgroundUIColor

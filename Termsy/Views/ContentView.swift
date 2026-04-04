@@ -59,6 +59,10 @@ struct ContentView: View {
 			SessionPickerView()
 				.inspectorColumnWidth(min: 280, ideal: 320, max: 400)
 		}
+		.sheet(isPresented: $coordinator.isShowingSettings) {
+			SettingsView()
+				.environment(coordinator)
+		}
 		.task {
 			guard !didAutoconnect else { return }
 			didAutoconnect = true
