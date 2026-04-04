@@ -82,7 +82,7 @@ struct ContentView: View {
 		.background {
 			ForEach(Array(coordinator.tabs.enumerated()), id: \.element.id) { index, tab in
 				if index < 9 {
-					Button("") { coordinator.selectTab(tab.session.id) }
+					Button("") { coordinator.selectTab(tab.id) }
 						.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
 						.hidden()
 				}
@@ -100,7 +100,7 @@ private struct TerminalContainer: View {
 		ZStack {
 			if let tab = coordinator.selectedTab {
 				TerminalHostRepresentable(tab: tab)
-					.id(tab.session.id)
+					.id(tab.id)
 					.ignoresSafeArea(.container, edges: .bottom)
 			}
 		}

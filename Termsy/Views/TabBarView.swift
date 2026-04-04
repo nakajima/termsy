@@ -40,7 +40,7 @@ struct TabBarRepresentable: UIViewRepresentable {
 // MARK: - Tab Data
 
 nonisolated struct TabBarItem: Hashable, Sendable {
-	let id: Int64
+	let id: UUID
 	let title: String
 	let isConnected: Bool
 	let hasError: Bool
@@ -54,9 +54,9 @@ private let minCellWidth: CGFloat = 120
 private let cellSpacing: CGFloat = 6
 
 final class TabBarCollectionView: UIView {
-	var onSelectTab: ((Session.ID) -> Void)?
-	var onCloseTab: ((Session.ID) -> Void)?
-	var onReorderTabs: (([Int64]) -> Void)?
+	var onSelectTab: ((UUID) -> Void)?
+	var onCloseTab: ((UUID) -> Void)?
+	var onReorderTabs: (([UUID]) -> Void)?
 	var onAddTab: (() -> Void)?
 	var onSettings: (() -> Void)?
 
@@ -64,7 +64,7 @@ final class TabBarCollectionView: UIView {
 	private var collectionView: UICollectionView!
 	private var dataSource: UICollectionViewDiffableDataSource<Int, TabBarItem>!
 	private var items: [TabBarItem] = []
-	private var selectedID: Int64?
+	private var selectedID: UUID?
 	private var addButton: UIButton!
 	private var settingsButton: UIButton!
 
@@ -166,13 +166,12 @@ final class TabBarCollectionView: UIView {
 	}
 
 	@MainActor
-	func update(tabs: [TerminalTab], selectedID: Session.ID?) {
-		self.selectedID = selectedID.flatMap { $0 }
+	func update(tabs: [TerminalTab], selectedID: UUID?) {
+		self.selectedID = selectedID
 		backgroundColor = theme.backgroundUIColor
 
-		let newItems = tabs.compactMap { tab -> TabBarItem? in
-			guard let id = tab.session.id else { return nil }
-			return TabBarItem(id: id, title: "\(tab.session.username)@\(tab.session.hostname)", isConnected: tab.isConnected, hasError: tab.connectionError != nil)
+		let newItems = tabs.map { tab in
+			TabBarItem(id: tab.id, title: "\(tab.session.username)@\(tab.session.hostname)", isConnected: tab.isConnected, hasError: tab.connectionError != nil)
 		}
 
 		let changed = newItems != items

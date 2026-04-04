@@ -19,42 +19,36 @@ class ViewCoordinator {
 	var tabs: [TerminalTab] = []
 
 	/// The currently selected tab, or nil if showing the session list.
-	var selectedTabID: Session.ID?
+	var selectedTabID: UUID?
 
 	var selectedTab: TerminalTab? {
-		tabs.first { $0.session.id == selectedTabID }
+		tabs.first { $0.id == selectedTabID }
 	}
 
 	func openTab(for session: Session) {
-		// Don't open a duplicate tab for the same session
-		if let existing = tabs.first(where: { $0.session.id == session.id }) {
-			selectTab(existing.session.id)
-			return
-		}
-
 		let tab = TerminalTab(session: session)
 		tabs.append(tab)
-		selectTab(session.id)
+		selectTab(tab.id)
 	}
 
-	func selectTab(_ id: Session.ID?) {
+	func selectTab(_ id: UUID?) {
 		let previousID = selectedTabID
 		selectedTabID = id
 
 		// Background the previous tab
 		if let previousID, previousID != id,
-		   let prevTab = tabs.first(where: { $0.session.id == previousID }) {
+		   let prevTab = tabs.first(where: { $0.id == previousID }) {
 			prevTab.sshSession.enterBackground()
 		}
 
 		// Foreground the new tab
-		if let id, let tab = tabs.first(where: { $0.session.id == id }) {
+		if let id, let tab = tabs.first(where: { $0.id == id }) {
 			tab.sshSession.enterForeground()
 		}
 	}
 
-	func closeTab(_ id: Session.ID?) {
-		guard let id, let index = tabs.firstIndex(where: { $0.session.id == id }) else { return }
+	func closeTab(_ id: UUID?) {
+		guard let id, let index = tabs.firstIndex(where: { $0.id == id }) else { return }
 		let tab = tabs[index]
 		tab.sshSession.disconnect()
 		tabs.remove(at: index)
@@ -64,17 +58,17 @@ class ViewCoordinator {
 				selectedTabID = nil
 			} else {
 				let newIndex = min(index, tabs.count - 1)
-				selectTab(tabs[newIndex].session.id)
+				selectTab(tabs[newIndex].id)
 			}
 		}
 	}
 
-	func closeOtherTabs(_ id: Session.ID?) {
-		let toClose = tabs.filter { $0.session.id != id }
+	func closeOtherTabs(_ id: UUID?) {
+		let toClose = tabs.filter { $0.id != id }
 		for tab in toClose {
 			tab.sshSession.disconnect()
 		}
-		tabs.removeAll { $0.session.id != id }
+		tabs.removeAll { $0.id != id }
 		if let id { selectTab(id) }
 	}
 
@@ -82,10 +76,10 @@ class ViewCoordinator {
 		tabs.move(fromOffsets: source, toOffset: destination)
 	}
 
-	func reorderTabs(_ orderedIDs: [Int64]) {
+	func reorderTabs(_ orderedIDs: [UUID]) {
 		var reordered: [TerminalTab] = []
 		for id in orderedIDs {
-			if let tab = tabs.first(where: { $0.session.id == id }) {
+			if let tab = tabs.first(where: { $0.id == id }) {
 				reordered.append(tab)
 			}
 		}
@@ -102,7 +96,7 @@ class TerminalTab: Identifiable {
 	var connectionError: String?
 	var needsPassword = false
 
-	var id: Session.ID? { session.id }
+	let id = UUID()
 
 	init(session: Session) {
 		self.session = session
