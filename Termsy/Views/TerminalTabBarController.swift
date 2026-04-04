@@ -2,8 +2,8 @@
 //  TerminalTabBarController.swift
 //  Termsy
 //
-//  UITabBarController-based tab management for terminal sessions.
-//  Gives us native Cmd+#, reorder, and top-bar styling on iPad for free.
+//  UIViewController that hosts a terminal session.
+//  Manages the TerminalView lifecycle — creates on appear, tears down on background.
 //
 
 import SwiftUI
@@ -11,119 +11,31 @@ import UIKit
 
 // MARK: - SwiftUI Bridge
 
-struct TerminalTabBarRepresentable: UIViewControllerRepresentable {
-	@Environment(ViewCoordinator.self) var coordinator
+struct TerminalHostRepresentable: UIViewControllerRepresentable {
+	let tab: TerminalTab
 
-	func makeUIViewController(context: Context) -> TerminalTabBarController {
-		let controller = TerminalTabBarController()
-		controller.coordinator = coordinator
-		context.coordinator.coordinator = coordinator
-		controller.delegate = context.coordinator
-		return controller
+	func makeUIViewController(context: Context) -> TerminalHostController {
+		TerminalHostController(terminalTab: tab)
 	}
 
-	func updateUIViewController(_ controller: TerminalTabBarController, context: Context) {
-		context.coordinator.coordinator = coordinator
-		controller.syncTabs()
-	}
+	func updateUIViewController(_ controller: TerminalHostController, context: Context) {}
 
-	func makeCoordinator() -> TabBarDelegate {
-		TabBarDelegate()
-	}
-
-	class TabBarDelegate: NSObject, UITabBarControllerDelegate {
-		weak var coordinator: ViewCoordinator?
-
-		func tabBarController(_ tabBarController: UITabBarController, didSelectTab selectedTab: UITab, previousTab: UITab?) {
-			guard let coordinator else { return }
-			guard let selectedID = (selectedTab.viewController as? TerminalHostController)?.terminalTab.session.id else { return }
-
-			// Background the previous
-			if let prevVC = previousTab?.viewController as? TerminalHostController,
-			   prevVC.terminalTab.session.id != selectedID {
-				prevVC.terminalTab.sshSession.enterBackground()
-				prevVC.teardownTerminal()
-			}
-
-			// Foreground the new
-			if let tab = coordinator.tabs.first(where: { $0.session.id == selectedID }) {
-				tab.sshSession.enterForeground()
-			}
-
-			coordinator.selectedTabID = selectedID
-		}
-	}
-}
-
-// MARK: - Tab Bar Controller
-
-@MainActor
-final class TerminalTabBarController: UITabBarController {
-	var coordinator: ViewCoordinator?
-	private var tabsBySessionID: [Int64: UITab] = [:]
-
-	func syncTabs() {
-		guard let coordinator else { return }
-
-		let currentIDs = Set(coordinator.tabs.compactMap(\.session.id))
-		let existingIDs = Set(tabsBySessionID.keys)
-
-		// Remove closed tabs
-		for id in existingIDs.subtracting(currentIDs) {
-			tabsBySessionID.removeValue(forKey: id)
-		}
-
-		// Add new tabs
-		for terminalTab in coordinator.tabs {
-			guard let id = terminalTab.session.id, tabsBySessionID[id] == nil else { continue }
-			let vc = TerminalHostController(terminalTab: terminalTab, coordinator: coordinator)
-			let uiTab = UITab(
-				title: "\(terminalTab.session.username)@\(terminalTab.session.hostname)",
-				image: UIImage(systemName: "terminal"),
-				identifier: "session-\(id)",
-				viewControllerProvider: { _ in vc }
-			)
-			tabsBySessionID[id] = uiTab
-		}
-
-		// Build ordered tabs array matching coordinator.tabs order
-		let orderedTabs: [UITab] = coordinator.tabs.compactMap { terminalTab in
-			guard let id = terminalTab.session.id else { return nil }
-			return tabsBySessionID[id]
-		}
-
-		self.tabs = orderedTabs
-
-		// Sync selection
-		if let selectedID = coordinator.selectedTabID,
-		   let id = selectedID,
-		   let selectedUITab = tabsBySessionID[id] {
-			self.selectedTab = selectedUITab
-		}
-	}
-
-	override func viewDidLoad() {
-		super.viewDidLoad()
-		mode = .tabBar
-		syncTabs()
+	static func dismantleUIViewcontroller(_ controller: TerminalHostController, coordinator: ()) {
+		controller.teardownTerminal()
 	}
 }
 
 // MARK: - Per-Tab Host Controller
 
-/// UIViewController that hosts a terminal session.
-/// Manages the TerminalView lifecycle — creates it when visible, tears it down when backgrounded.
 @MainActor
 final class TerminalHostController: UIViewController {
 	let terminalTab: TerminalTab
-	weak var coordinator: ViewCoordinator?
 	private var terminalView: TerminalView?
 	private var overlayHostController: UIHostingController<AnyView>?
 	private var connectTask: Task<Void, Never>?
 
-	init(terminalTab: TerminalTab, coordinator: ViewCoordinator) {
+	init(terminalTab: TerminalTab) {
 		self.terminalTab = terminalTab
-		self.coordinator = coordinator
 		super.init(nibName: nil, bundle: nil)
 	}
 
@@ -139,7 +51,6 @@ final class TerminalHostController: UIViewController {
 
 	override func viewDidAppear(_ animated: Bool) {
 		super.viewDidAppear(animated)
-		// If returning from background, set up terminal and replay
 		if terminalView == nil {
 			setupTerminal()
 		}
@@ -212,7 +123,7 @@ final class TerminalHostController: UIViewController {
 
 // MARK: - Overlay (connecting / error states)
 
-private struct TerminalOverlay: View {
+struct TerminalOverlay: View {
 	let tab: TerminalTab
 	var onRetryWithPassword: (String) -> Void
 

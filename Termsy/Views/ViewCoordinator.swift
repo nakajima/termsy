@@ -26,13 +26,29 @@ class ViewCoordinator {
 	func openTab(for session: Session) {
 		// Don't open a duplicate tab for the same session
 		if let existing = tabs.first(where: { $0.session.id == session.id }) {
-			selectedTabID = existing.session.id
+			selectTab(existing.session.id)
 			return
 		}
 
 		let tab = TerminalTab(session: session)
 		tabs.append(tab)
-		selectedTabID = session.id
+		selectTab(session.id)
+	}
+
+	func selectTab(_ id: Session.ID?) {
+		let previousID = selectedTabID
+		selectedTabID = id
+
+		// Background the previous tab
+		if let previousID, previousID != id,
+		   let prevTab = tabs.first(where: { $0.session.id == previousID }) {
+			prevTab.sshSession.enterBackground()
+		}
+
+		// Foreground the new tab
+		if let id, let tab = tabs.first(where: { $0.session.id == id }) {
+			tab.sshSession.enterForeground()
+		}
 	}
 
 	func closeTab(_ id: Session.ID?) {
@@ -41,15 +57,27 @@ class ViewCoordinator {
 		tab.sshSession.disconnect()
 		tabs.remove(at: index)
 
-		// If we closed the selected tab, select an adjacent one
 		if selectedTabID == id {
 			if tabs.isEmpty {
 				selectedTabID = nil
 			} else {
 				let newIndex = min(index, tabs.count - 1)
-				selectedTabID = tabs[newIndex].session.id
+				selectTab(tabs[newIndex].session.id)
 			}
 		}
+	}
+
+	func closeOtherTabs(_ id: Session.ID?) {
+		let toClose = tabs.filter { $0.session.id != id }
+		for tab in toClose {
+			tab.sshSession.disconnect()
+		}
+		tabs.removeAll { $0.session.id != id }
+		if let id { selectTab(id) }
+	}
+
+	func moveTab(from source: IndexSet, to destination: Int) {
+		tabs.move(fromOffsets: source, toOffset: destination)
 	}
 }
 
