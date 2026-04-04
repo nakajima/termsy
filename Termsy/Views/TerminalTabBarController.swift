@@ -12,13 +12,16 @@ import UIKit
 // MARK: - SwiftUI Bridge
 
 struct TerminalHostRepresentable: UIViewControllerRepresentable {
+	@Environment(\.appTheme) private var theme
 	let tab: TerminalTab
 
 	func makeUIViewController(context: Context) -> TerminalHostController {
-		TerminalHostController(terminalTab: tab)
+		TerminalHostController(terminalTab: tab, theme: theme)
 	}
 
-	func updateUIViewController(_ controller: TerminalHostController, context: Context) {}
+	func updateUIViewController(_ controller: TerminalHostController, context: Context) {
+		controller.applyTheme(theme)
+	}
 
 	static func dismantleUIViewcontroller(_ controller: TerminalHostController, coordinator: ()) {
 		controller.teardownTerminal()
@@ -30,12 +33,14 @@ struct TerminalHostRepresentable: UIViewControllerRepresentable {
 @MainActor
 final class TerminalHostController: UIViewController {
 	let terminalTab: TerminalTab
+	private var theme: AppTheme
 	private var terminalView: TerminalView?
 	private var overlayHostController: UIHostingController<AnyView>?
 	private var connectTask: Task<Void, Never>?
 
-	init(terminalTab: TerminalTab) {
+	init(terminalTab: TerminalTab, theme: AppTheme) {
 		self.terminalTab = terminalTab
+		self.theme = theme
 		super.init(nibName: nil, bundle: nil)
 	}
 
@@ -44,7 +49,7 @@ final class TerminalHostController: UIViewController {
 
 	override func viewDidLoad() {
 		super.viewDidLoad()
-		view.backgroundColor = .black
+		applyTheme(theme)
 		setupTerminal()
 		connectIfNeeded()
 	}
@@ -60,10 +65,18 @@ final class TerminalHostController: UIViewController {
 		terminalView?.becomeFirstResponder()
 	}
 
+	func applyTheme(_ theme: AppTheme) {
+		self.theme = theme
+		view.backgroundColor = theme.backgroundUIColor
+		terminalView?.applyTheme(theme)
+		updateOverlay()
+	}
+
 	func setupTerminal() {
 		guard terminalView == nil else { return }
 
 		let tv = TerminalView(frame: view.bounds)
+		tv.applyTheme(theme)
 		tv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 		tv.onWrite = { [weak self] data in
 			self?.terminalTab.sshSession.connection.send(data)
@@ -101,6 +114,7 @@ final class TerminalHostController: UIViewController {
 				self.updateOverlay()
 			}
 		})
+		.environment(\.appTheme, theme)
 
 		if let existing = overlayHostController {
 			existing.rootView = AnyView(overlayView)
@@ -124,6 +138,7 @@ final class TerminalHostController: UIViewController {
 // MARK: - Overlay (connecting / error states)
 
 struct TerminalOverlay: View {
+	@Environment(\.appTheme) private var theme
 	let tab: TerminalTab
 	var onRetryWithPassword: (String) -> Void
 
@@ -132,33 +147,38 @@ struct TerminalOverlay: View {
 	var body: some View {
 		ZStack {
 			if !tab.isConnected, tab.connectionError == nil, !tab.needsPassword {
-				Color.black
+				theme.background
 				ProgressView("Connecting to \(tab.session.hostname)…")
-					.tint(.white)
-					.foregroundStyle(.white)
+					.tint(theme.accent)
+					.foregroundStyle(theme.primaryText)
 			}
 
 			if tab.sshSession.isReplaying {
-				Color.black
+				theme.background
 				ProgressView("Restoring session…")
-					.tint(.white)
-					.foregroundStyle(.white)
+					.tint(theme.accent)
+					.foregroundStyle(theme.primaryText)
 			}
 
 			if let error = tab.connectionError {
 				VStack(spacing: 12) {
 					Image(systemName: "xmark.circle")
 						.font(.largeTitle)
-						.foregroundStyle(.red)
+						.foregroundStyle(theme.error)
 					Text("Connection Failed")
 						.font(.headline)
+						.foregroundStyle(theme.primaryText)
 					Text(error)
 						.font(.caption)
-						.foregroundStyle(.secondary)
+						.foregroundStyle(theme.secondaryText)
 						.multilineTextAlignment(.center)
 				}
 				.padding()
-				.background(.ultraThinMaterial, in: .rect(cornerRadius: 12))
+				.background(theme.cardBackground, in: .rect(cornerRadius: 12))
+				.overlay {
+					RoundedRectangle(cornerRadius: 12)
+						.stroke(theme.divider, lineWidth: 1)
+				}
 			}
 		}
 		.allowsHitTesting(!tab.isConnected || tab.connectionError != nil || tab.sshSession.isReplaying)
@@ -180,4 +200,17 @@ struct TerminalOverlay: View {
 			Text("\(tab.session.username)@\(tab.session.hostname)")
 		}
 	}
+}
+
+#Preview("Terminal Overlay Error") {
+	let tab = TerminalTab(session: Session(
+		id: 1,
+		hostname: "example.local",
+		username: "pat",
+		port: 22,
+		createdAt: Date()
+	))
+	tab.connectionError = "Host key verification failed"
+	return TerminalOverlay(tab: tab, onRetryWithPassword: { _ in })
+		.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 }

@@ -20,6 +20,7 @@ struct SessionsRequest: ValueObservationQueryable {
 struct SessionListView: View {
 	@Environment(ViewCoordinator.self) var coordinator
 	@Environment(\.databaseContext) var dbContext
+	@Environment(\.appTheme) private var theme
 	@Query(SessionsRequest()) var sessions: [Session]
 
 	var body: some View {
@@ -28,17 +29,28 @@ struct SessionListView: View {
 				Button {
 					coordinator.openTab(for: session)
 				} label: {
-					VStack(alignment: .leading) {
+					VStack(alignment: .leading, spacing: 4) {
 						Text("\(session.username)@\(session.hostname)")
+							.font(.headline)
+							.foregroundStyle(theme.primaryText)
+						if let tmuxSessionName = session.tmuxSessionName, !tmuxSessionName.isEmpty {
+							Text("tmux • \(tmuxSessionName)")
+								.font(.caption)
+								.foregroundStyle(theme.secondaryText)
+						}
 					}
+					.frame(maxWidth: .infinity, alignment: .leading)
+					.padding(.vertical, 6)
 				}
+				.listRowBackground(theme.cardBackground)
 			}
 			.onDelete { index in
 				let session = sessions[index.first!]
 				_ = try? dbContext.writer.write { try session.delete($0) }
 			}
 		}
-		
+		.scrollContentBackground(.hidden)
+		.background(theme.background)
 		.navigationTitle("Termsy")
 		.toolbar {
 			ToolbarItem(placement: .topBarTrailing) {
@@ -55,4 +67,27 @@ struct SessionListView: View {
 			}
 		}
 	}
+}
+
+#Preview {
+	let db = DB.memory()
+	try? db.migrate()
+	try? db.queue.write { db in
+		var session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: "api",
+			port: 22,
+			autoconnect: true
+		)
+		try session.save(db)
+	}
+
+	let coordinator = ViewCoordinator()
+	return NavigationStack {
+		SessionListView()
+	}
+	.databaseContext(.readWrite { db.queue })
+	.environment(coordinator)
+	.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 }

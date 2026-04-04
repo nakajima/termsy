@@ -12,6 +12,7 @@ import Observation
 class ViewCoordinator {
 	var path = NavigationPath()
 	var isShowingConnectView = false
+	var isShowingSessionPicker = false
 
 	/// All open terminal tabs.
 	var tabs: [TerminalTab] = []
@@ -79,6 +80,16 @@ class ViewCoordinator {
 	func moveTab(from source: IndexSet, to destination: Int) {
 		tabs.move(fromOffsets: source, toOffset: destination)
 	}
+
+	func reorderTabs(_ orderedIDs: [Int64]) {
+		var reordered: [TerminalTab] = []
+		for id in orderedIDs {
+			if let tab = tabs.first(where: { $0.session.id == id }) {
+				reordered.append(tab)
+			}
+		}
+		tabs = reordered
+	}
 }
 
 /// Represents a single open terminal tab.
@@ -98,14 +109,17 @@ class TerminalTab: Identifiable {
 	}
 
 	func connect() async {
+		// Try none auth first, then fall back to keychain password
+		let keychainPassword = Keychain.password(for: session)
 		do {
 			try await sshSession.connect(
 				host: session.hostname,
 				port: session.port,
 				username: session.username,
-				password: nil
+				password: keychainPassword
 			)
 			isConnected = true
+			startTmuxIfNeeded()
 		} catch SSHConnectionError.authenticationFailed {
 			print("[SSH] auth failed, prompting for password")
 			needsPassword = true
@@ -113,6 +127,12 @@ class TerminalTab: Identifiable {
 			print("[SSH] connection error: \(error)")
 			connectionError = "\(error)"
 		}
+	}
+
+	private func startTmuxIfNeeded() {
+		guard let name = session.tmuxSessionName, !name.isEmpty else { return }
+		let command = "tmux new-session -A -s \(name)\n"
+		sshSession.connection.send(Data(command.utf8))
 	}
 
 	func connectWithPassword(_ password: String) async {
@@ -127,6 +147,8 @@ class TerminalTab: Identifiable {
 				password: password
 			)
 			isConnected = true
+			Keychain.setPassword(password, for: session)
+			startTmuxIfNeeded()
 		} catch {
 			print("[SSH] connection error: \(error)")
 			connectionError = "\(error)"

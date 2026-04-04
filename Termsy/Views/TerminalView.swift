@@ -27,7 +27,7 @@ final class TerminalView: UIView, UIKeyInput {
 
 	override init(frame: CGRect) {
 		super.init(frame: frame)
-		backgroundColor = .black
+		applyTheme(TerminalTheme.current.appTheme)
 		isUserInteractionEnabled = true
 		isMultipleTouchEnabled = false
 
@@ -39,6 +39,10 @@ final class TerminalView: UIView, UIKeyInput {
 
 	@available(*, unavailable)
 	required init?(coder _: NSCoder) { fatalError() }
+
+	func applyTheme(_ theme: AppTheme) {
+		backgroundColor = theme.backgroundUIColor
+	}
 
 	func start() {
 		guard surface == nil, let app = GhosttyApp.shared.app else { return }

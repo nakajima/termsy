@@ -5,7 +5,7 @@ Plain ol' terminal app.
 ## features
 
 - Full libghostty terminal on ios.
-- Minimal theme picker
+- Minimal theme picker (hope u like catpuccin)
 - Font picker
 - Tabs
 

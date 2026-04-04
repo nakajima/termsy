@@ -19,6 +19,7 @@ struct ConnectView: View {
 	var onConnect: (Session) -> Void
 
 	@Environment(\.databaseContext) var dbContext
+	@Environment(\.appTheme) private var theme
 	@Environment(ViewCoordinator.self) var coordinator
 
 	@State private var host = ""
@@ -30,6 +31,10 @@ struct ConnectView: View {
 	@State private var autoconnect: Bool = true
 
 	@FocusState private var isFocused
+
+	private var canConnect: Bool {
+		!host.isEmpty && !username.isEmpty
+	}
 
 	var body: some View {
 		Form {
@@ -43,21 +48,29 @@ struct ConnectView: View {
 						.onAppear {
 							self.isFocused = true
 						}
+						.foregroundStyle(theme.primaryText)
 					Text("@")
+						.foregroundStyle(theme.secondaryText)
 					TextField("Host", text: $host)
 						.textContentType(.URL)
 						.autocorrectionDisabled()
 						.textInputAutocapitalization(.never)
+						.foregroundStyle(theme.primaryText)
 				}
+				.listRowBackground(theme.cardBackground)
 			}
 			Section(header: Text("Tmux Session Name"), footer: Text("Will be started using `tmux new-session -A -s`")) {
 				TextField("Tmux Session Name", text: $tmuxSessionName)
 					.textContentType(.username)
 					.autocorrectionDisabled()
 					.textInputAutocapitalization(.never)
+					.foregroundStyle(theme.primaryText)
+					.listRowBackground(theme.cardBackground)
 			}
 			Section {
 				Toggle("Autoconnect to this session", isOn: $autoconnect)
+					.tint(theme.accent)
+					.listRowBackground(theme.cardBackground)
 			}
 			Section {
 				Button("Connect") {
@@ -86,23 +99,32 @@ struct ConnectView: View {
 					coordinator.isShowingConnectView = false
 				}
 				.animation(.easeInOut, value: host)
-				.disabled(host.isEmpty || username.isEmpty)
-				.listRowBackground(host.isEmpty ? Color.secondary.opacity(0.5) : Color.accentColor)
-				.foregroundStyle(host.isEmpty ? Color.secondary.opacity(0.5) : Color.white)
+				.disabled(!canConnect)
+				.listRowBackground(canConnect ? theme.accent : theme.controlBackground)
+				.foregroundStyle(canConnect ? theme.crust : theme.tertiaryText)
 				if let errorMessage {
 					Text(errorMessage)
-						.foregroundStyle(.red)
+						.foregroundStyle(theme.error)
+						.listRowBackground(theme.cardBackground)
 				}
 			}
 		}
+		.scrollContentBackground(.hidden)
+		.background(theme.background)
 		.navigationTitle("New Session")
 	}
 }
 
 #Preview {
-	NavigationStack {
+	let db = DB.memory()
+	try? db.migrate()
+	let coordinator = ViewCoordinator()
+	return NavigationStack {
 		ConnectView { config in
 			print("Connect to \(config.hostname)")
 		}
 	}
+	.databaseContext(.readWrite { db.queue })
+	.environment(coordinator)
+	.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 }
