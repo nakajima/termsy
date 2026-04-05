@@ -89,6 +89,29 @@ class ViewCoordinator {
 		return false
 	}
 
+	func appWillResignActive() {
+		for tab in tabs {
+			tab.noteAppWillResignActive()
+			tab.setDisplayActive(false)
+		}
+	}
+
+	func appDidBecomeActive() {
+		for tab in tabs {
+			tab.noteAppDidBecomeActive()
+			tab.setDisplayActive(tab.id == selectedTabID)
+		}
+
+		guard let selectedTab else { return }
+		if selectedTab.consumeReconnectOnActivation() {
+			selectedTab.requestReconnect()
+			return
+		}
+		guard selectedTab.isConnected else { return }
+		guard !selectedTab.sshSession.connection.isActive else { return }
+		selectedTab.requestReconnect()
+	}
+
 	func selectTab(_ id: UUID?) {
 		let previousID = selectedTabID
 		selectedTabID = id
@@ -170,7 +193,7 @@ class ViewCoordinator {
 /// Represents a single open terminal tab.
 @Observable @MainActor
 class TerminalTab: Identifiable {
-	let session: Session
+	var session: Session
 	let sshSession: SSHTerminalSession
 	var terminalView: TerminalView
 	var isConnected = false
@@ -184,6 +207,7 @@ class TerminalTab: Identifiable {
 	var onRequestShowSettings: (() -> Void)?
 	var onRequestDismissAuxiliaryUI: (() -> Bool)?
 	var onRequestReconnect: (() -> Void)?
+	var onConnectionEstablished: ((Session) -> Void)?
 
 	private var wasConnectedWhenAppResignedActive = false
 	private var shouldReconnectOnActivation = false
@@ -218,7 +242,9 @@ class TerminalTab: Identifiable {
 				password: keychainPassword
 			)
 			isConnected = true
+			session.lastConnectedAt = Date()
 			clearAppInactiveState()
+			onConnectionEstablished?(session)
 			startTmuxIfNeeded()
 		} catch SSHConnectionError.authenticationFailed {
 			print("[SSH] auth failed, prompting for password")
@@ -259,8 +285,10 @@ class TerminalTab: Identifiable {
 				password: password
 			)
 			isConnected = true
+			session.lastConnectedAt = Date()
 			clearAppInactiveState()
 			Keychain.setPassword(password, for: session)
+			onConnectionEstablished?(session)
 			startTmuxIfNeeded()
 		} catch {
 			print("[SSH] connection error: \(error)")
@@ -393,6 +421,10 @@ class TerminalTab: Identifiable {
 		onRequestShowSettings?()
 	}
 
+	func requestReconnect() {
+		onRequestReconnect?()
+	}
+
 	@discardableResult
 	func requestDismissAuxiliaryUI() -> Bool {
 		onRequestDismissAuxiliaryUI?() ?? false
@@ -414,7 +446,7 @@ class TerminalTab: Identifiable {
 			if shouldAutoReconnect(for: message) {
 				print("[SSH] TCP transport shut down around app switch; reconnecting: \(message)")
 				connectionError = nil
-				if UIApplication.shared.applicationState == .active {
+				if UIApplication.shared.applicationState == .active, terminalView.window != nil {
 					onRequestReconnect?()
 				} else {
 					shouldReconnectOnActivation = true

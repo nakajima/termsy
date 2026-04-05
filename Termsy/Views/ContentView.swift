@@ -8,6 +8,7 @@
 import GRDB
 import GRDBQuery
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
 	@Environment(ViewCoordinator.self) var coordinator
@@ -71,6 +72,12 @@ struct ContentView: View {
 			SettingsView()
 				.environment(coordinator)
 		}
+		.onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+			coordinator.appWillResignActive()
+		}
+		.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+			coordinator.appDidBecomeActive()
+		}
 		.task {
 			guard !didAutoconnect else { return }
 			didAutoconnect = true
@@ -78,7 +85,7 @@ struct ContentView: View {
 			let sessions = try? dbContext.reader.read { db in
 				try Session
 					.filter(Column("autoconnect") == true)
-					.order(Column("lastConnectedAt").descNullsFirst)
+					.order(Column("lastConnectedAt").desc, Column("createdAt").desc)
 					.fetchAll(db)
 			}
 
@@ -93,16 +100,31 @@ struct ContentView: View {
 
 private struct TerminalContainer: View {
 	@Environment(ViewCoordinator.self) var coordinator
+	@Environment(\.databaseContext) private var dbContext
 
 	var body: some View {
 		ZStack {
 			if let tab = coordinator.selectedTab {
-				TerminalHostRepresentable(tab: tab)
+				TerminalHostRepresentable(tab: tab) { session in
+					markSessionConnected(session)
+				}
 					.id(tab.id)
 					.ignoresSafeArea(.container, edges: .bottom)
 			}
 		}
 		.frame(maxWidth: .infinity, maxHeight: .infinity)
+	}
+
+	private func markSessionConnected(_ session: Session) {
+		guard session.id != nil else { return }
+		do {
+			try dbContext.writer.write { db in
+				let updatedSession = session
+				try updatedSession.update(db)
+			}
+		} catch {
+			print("[DB] failed to persist lastConnectedAt for \(session.username)@\(session.hostname): \(error)")
+		}
 	}
 }
 

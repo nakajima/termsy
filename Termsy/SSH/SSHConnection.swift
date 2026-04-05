@@ -14,8 +14,6 @@ struct TerminalWindowSize: Sendable, Equatable {
 	var rows: Int
 	var pixelWidth: Int
 	var pixelHeight: Int
-
-	nonisolated(unsafe) static let `default` = Self(columns: 80, rows: 24, pixelWidth: 0, pixelHeight: 0)
 }
 
 enum SSHConnectionError: Error, LocalizedError {
@@ -44,7 +42,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	private var sshChildChannel: Channel?
 	private var authDelegate: PasswordOrNoneAuthDelegate?
 	private var isDisconnecting = false
-	private var pendingTerminalSize = TerminalWindowSize.default
+	private var pendingTerminalSize = TerminalWindowSize(columns: 80, rows: 24, pixelWidth: 0, pixelHeight: 0)
 
 	private let onData: @Sendable (Data) -> Void
 	private let onClose: @Sendable (CloseReason) -> Void
@@ -205,12 +203,17 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 	deinit {
 		disconnect()
+		group.shutdownGracefully(queue: .global(qos: .utility)) { error in
+			if let error {
+				print("[SSH] failed to shut down event loop group: \(error)")
+			}
+		}
 	}
 }
 
 // MARK: - Auth Delegates
 
-private final nonisolated class PasswordOrNoneAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
+private final nonisolated class PasswordOrNoneAuthDelegate: NIOSSHClientUserAuthenticationDelegate, @unchecked Sendable {
 	private let username: String
 	private let password: String
 	private var attemptedNone = false
@@ -263,7 +266,7 @@ private final nonisolated class PasswordOrNoneAuthDelegate: NIOSSHClientUserAuth
 	}
 }
 
-private final nonisolated class AcceptAllHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate {
+private final nonisolated class AcceptAllHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate, @unchecked Sendable {
 	func validateHostKey(
 		hostKey: NIOSSHPublicKey,
 		validationCompletePromise: EventLoopPromise<Void>

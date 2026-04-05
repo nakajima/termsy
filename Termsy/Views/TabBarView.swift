@@ -18,9 +18,10 @@ struct TabBarRepresentable: UIViewRepresentable {
 		let view = TabBarCollectionView()
 		view.onSelectTab = { [coordinator] id in coordinator.selectTab(id) }
 		view.onCloseTab = { [coordinator] id in coordinator.closeTab(id) }
+		view.onCloseOtherTabs = { [coordinator] id in coordinator.closeOtherTabs(id) }
 		view.onReorderTabs = { [coordinator] ids in coordinator.reorderTabs(ids) }
-		view.onAddTab = { [coordinator] in coordinator.isShowingSessionPicker = true }
-		view.onSettings = { [coordinator] in coordinator.isShowingSettings = true }
+		view.onAddTab = { [coordinator] in coordinator.openNewTabUI() }
+		view.onSettings = { [coordinator] in coordinator.openSettings() }
 		view.applyTheme(theme)
 		view.update(tabs: coordinator.tabs, selectedID: coordinator.selectedTabID)
 		return view
@@ -29,9 +30,10 @@ struct TabBarRepresentable: UIViewRepresentable {
 	func updateUIView(_ view: TabBarCollectionView, context: Context) {
 		view.onSelectTab = { [coordinator] id in coordinator.selectTab(id) }
 		view.onCloseTab = { [coordinator] id in coordinator.closeTab(id) }
+		view.onCloseOtherTabs = { [coordinator] id in coordinator.closeOtherTabs(id) }
 		view.onReorderTabs = { [coordinator] ids in coordinator.reorderTabs(ids) }
-		view.onAddTab = { [coordinator] in coordinator.isShowingSessionPicker = true }
-		view.onSettings = { [coordinator] in coordinator.isShowingSettings = true }
+		view.onAddTab = { [coordinator] in coordinator.openNewTabUI() }
+		view.onSettings = { [coordinator] in coordinator.openSettings() }
 		view.applyTheme(theme)
 		view.update(tabs: coordinator.tabs, selectedID: coordinator.selectedTabID)
 	}
@@ -56,6 +58,7 @@ private let cellSpacing: CGFloat = 6
 final class TabBarCollectionView: UIView {
 	var onSelectTab: ((UUID) -> Void)?
 	var onCloseTab: ((UUID) -> Void)?
+	var onCloseOtherTabs: ((UUID) -> Void)?
 	var onReorderTabs: (([UUID]) -> Void)?
 	var onAddTab: (() -> Void)?
 	var onSettings: (() -> Void)?
@@ -234,10 +237,7 @@ extension TabBarCollectionView: UICollectionViewDelegateFlowLayout {
 			var actions: [UIMenuElement] = [close]
 			if (self?.items.count ?? 0) > 1 {
 				let closeOthers = UIAction(title: "Close Other Tabs", image: UIImage(systemName: "xmark.circle")) { _ in
-					guard let self else { return }
-					for other in self.items where other.id != item.id {
-						self.onCloseTab?(other.id)
-					}
+					self?.onCloseOtherTabs?(item.id)
 				}
 				actions.append(closeOthers)
 			}

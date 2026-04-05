@@ -14,12 +14,15 @@ import UIKit
 struct TerminalHostRepresentable: UIViewControllerRepresentable {
 	@Environment(\.appTheme) private var theme
 	let tab: TerminalTab
+	let onConnectionEstablished: (Session) -> Void
 
 	func makeUIViewController(context: Context) -> TerminalHostController {
-		TerminalHostController(terminalTab: tab, theme: theme)
+		tab.onConnectionEstablished = onConnectionEstablished
+		return TerminalHostController(terminalTab: tab, theme: theme)
 	}
 
 	func updateUIViewController(_ controller: TerminalHostController, context: Context) {
+		tab.onConnectionEstablished = onConnectionEstablished
 		controller.applyTheme(theme)
 	}
 
@@ -54,20 +57,6 @@ final class TerminalHostController: UIViewController {
 		}
 		applyTheme(theme)
 		setupTerminal()
-		connectIfNeeded()
-
-		NotificationCenter.default.addObserver(
-			self,
-			selector: #selector(appWillResignActive),
-			name: UIApplication.willResignActiveNotification,
-			object: nil
-		)
-		NotificationCenter.default.addObserver(
-			self,
-			selector: #selector(appDidBecomeActive),
-			name: UIApplication.didBecomeActiveNotification,
-			object: nil
-		)
 	}
 
 	override func viewDidAppear(_ animated: Bool) {
@@ -78,6 +67,7 @@ final class TerminalHostController: UIViewController {
 		terminalTab.setDisplayActive(true)
 		_ = terminalView?.becomeFirstResponder()
 		_ = terminalView?.syncSizeAndReadBack()
+		restoreConnectionIfNeeded()
 	}
 
 	override func viewDidLayoutSubviews() {
@@ -138,6 +128,7 @@ final class TerminalHostController: UIViewController {
 				guard let self else { return }
 				Task {
 					await self.terminalTab.connectWithPassword(password)
+					self.syncTerminalSizeToSession()
 					self.updateOverlay()
 				}
 			}
@@ -172,27 +163,20 @@ final class TerminalHostController: UIViewController {
 		terminalTab.sshSession.updateTerminalSize(size)
 	}
 
-	@objc private func appWillResignActive() {
-		terminalTab.noteAppWillResignActive()
-		terminalTab.setDisplayActive(false)
-	}
-
-	@objc private func appDidBecomeActive() {
-		terminalTab.noteAppDidBecomeActive()
-		terminalTab.setDisplayActive(true)
+	private func restoreConnectionIfNeeded() {
 		if terminalTab.consumeReconnectOnActivation() {
 			reconnectAfterBackgroundLoss()
 			return
 		}
-		guard terminalTab.isConnected else {
-			terminalTab.clearAppInactiveState()
+		if terminalTab.isConnected {
+			guard terminalTab.sshSession.connection.isActive else {
+				reconnectAfterBackgroundLoss()
+				return
+			}
+			syncTerminalSizeToSession()
 			return
 		}
-		guard terminalTab.sshSession.connection.isActive else {
-			reconnectAfterBackgroundLoss()
-			return
-		}
-		syncTerminalSizeToSession()
+		connectIfNeeded()
 	}
 
 	private func reconnectAfterBackgroundLoss() {

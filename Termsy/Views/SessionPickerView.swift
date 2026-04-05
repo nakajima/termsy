@@ -49,10 +49,7 @@ struct SessionPickerView: View {
 							}
 							.listRowBackground(theme.cardBackground)
 						}
-						.onDelete { index in
-							let session = sessions[index.first!]
-							_ = try? dbContext.writer.write { try session.delete($0) }
-						}
+						.onDelete(perform: deleteSessions)
 					}
 				}
 
@@ -84,6 +81,23 @@ struct SessionPickerView: View {
 			.toolbarBackground(theme.elevatedBackground, for: .navigationBar)
 			.toolbarBackground(.visible, for: .navigationBar)
 			.toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+		}
+	}
+
+	@MainActor
+	private func deleteSessions(at offsets: IndexSet) {
+		let sessionsToDelete = offsets.map { sessions[$0] }
+		guard !sessionsToDelete.isEmpty else { return }
+
+		do {
+			try dbContext.writer.write { db in
+				for session in sessionsToDelete {
+					try session.delete(db)
+				}
+			}
+			sessionsToDelete.forEach(Keychain.removePassword)
+		} catch {
+			print("[DB] failed to delete sessions: \(error)")
 		}
 	}
 }

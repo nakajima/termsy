@@ -13,7 +13,9 @@ struct SessionsRequest: ValueObservationQueryable {
 	static var defaultValue: [Session] { [] }
 
 	func fetch(_ db: Database) throws -> [Session] {
-		try Session.order(Column("lastConnectedAt").descNullsFirst).fetchAll(db)
+		try Session
+			.order(Column("lastConnectedAt").desc, Column("createdAt").desc)
+			.fetchAll(db)
 	}
 }
 
@@ -44,10 +46,7 @@ struct SessionListView: View {
 				}
 				.listRowBackground(theme.cardBackground)
 			}
-			.onDelete { index in
-				let session = sessions[index.first!]
-				_ = try? dbContext.writer.write { try session.delete($0) }
-			}
+			.onDelete(perform: deleteSessions)
 		}
 		.scrollContentBackground(.hidden)
 		.background(theme.background)
@@ -55,7 +54,7 @@ struct SessionListView: View {
 		.toolbar {
 			ToolbarItem(placement: .topBarTrailing) {
 				Button {
-					coordinator.isShowingConnectView = true
+					coordinator.openNewTabUI()
 				} label: {
 					Label("New Session", systemImage: "plus")
 				}
@@ -66,6 +65,23 @@ struct SessionListView: View {
 			if sessions.isEmpty {
 				coordinator.isShowingConnectView = true
 			}
+		}
+	}
+
+	@MainActor
+	private func deleteSessions(at offsets: IndexSet) {
+		let sessionsToDelete = offsets.map { sessions[$0] }
+		guard !sessionsToDelete.isEmpty else { return }
+
+		do {
+			try dbContext.writer.write { db in
+				for session in sessionsToDelete {
+					try session.delete(db)
+				}
+			}
+			sessionsToDelete.forEach(Keychain.removePassword)
+		} catch {
+			print("[DB] failed to delete sessions: \(error)")
 		}
 	}
 }

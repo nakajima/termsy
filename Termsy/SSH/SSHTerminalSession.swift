@@ -10,6 +10,10 @@ import Foundation
 
 @MainActor
 final class SSHTerminalSession {
+	private final class CallbackRelay: @unchecked Sendable {
+		weak var session: SSHTerminalSession?
+	}
+
 	enum CloseReason {
 		case localDisconnect
 		case cleanExit
@@ -27,26 +31,24 @@ final class SSHTerminalSession {
 	var onClose: ((CloseReason) -> Void)?
 
 	init() {
-		nonisolated(unsafe) var sessionRef: SSHTerminalSession?
+		let relay = CallbackRelay()
 
 		self.connection = SSHConnection(
 			onData: { data in
-				let ref = sessionRef
 				DispatchQueue.main.async {
-					ref?.handleIncomingData(data)
+					relay.session?.handleIncomingData(data)
 				}
 			},
 			onClose: { reason in
-				let ref = sessionRef
 				DispatchQueue.main.async {
-					ref?.handleConnectionClose(reason)
+					relay.session?.handleConnectionClose(reason)
 				}
 			}
 		)
-		sessionRef = self
+		relay.session = self
 	}
 
-	private(set) var terminalSize = TerminalWindowSize.default
+	private(set) var terminalSize = TerminalWindowSize(columns: 80, rows: 24, pixelWidth: 0, pixelHeight: 0)
 
 	func updateTerminalSize(_ size: TerminalWindowSize) {
 		guard size.columns > 0, size.rows > 0 else { return }
