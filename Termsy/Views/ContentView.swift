@@ -95,11 +95,6 @@ private struct TerminalContainer: View {
 			}
 		}
 		.frame(maxWidth: .infinity, maxHeight: .infinity)
-		.task(id: coordinator.selectedTab?.sshSession.isForeground) {
-			if let tab = coordinator.selectedTab, tab.sshSession.isForeground {
-				await tab.sshSession.replayIfNeeded()
-			}
-		}
 	}
 }
 

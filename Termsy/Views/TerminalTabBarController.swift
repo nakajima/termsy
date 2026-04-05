@@ -23,7 +23,7 @@ struct TerminalHostRepresentable: UIViewControllerRepresentable {
 		controller.applyTheme(theme)
 	}
 
-	static func dismantleUIViewcontroller(_ controller: TerminalHostController, coordinator: ()) {
+	static func dismantleUIViewController(_ controller: TerminalHostController, coordinator: ()) {
 		controller.teardownTerminal()
 	}
 }
@@ -66,10 +66,8 @@ final class TerminalHostController: UIViewController {
 		if terminalView == nil {
 			setupTerminal()
 		}
-		if terminalTab.sshSession.isForeground {
-			Task { await terminalTab.sshSession.replayIfNeeded() }
-		}
 		terminalView?.becomeFirstResponder()
+		restoreTranscriptIfNeeded()
 	}
 
 	override func viewDidLayoutSubviews() {
@@ -153,6 +151,16 @@ final class TerminalHostController: UIViewController {
 		}
 	}
 
+	private func restoreTranscriptIfNeeded() {
+		guard terminalTab.isConnected, terminalTab.connectionError == nil else { return }
+		Task { [weak self] in
+			guard let self else { return }
+			self.terminalTab.isRestoring = true
+			defer { self.terminalTab.isRestoring = false }
+			await self.terminalTab.sshSession.replayIfNeeded()
+		}
+	}
+
 	private func syncTerminalSizeToSession() {
 		guard let terminalView else { return }
 		terminalView.frame = view.bounds
@@ -193,7 +201,7 @@ struct TerminalOverlay: View {
 					.foregroundStyle(theme.primaryText)
 			}
 
-			if tab.sshSession.isReplaying {
+			if tab.isRestoring {
 				theme.background
 				ProgressView("Restoring session…")
 					.tint(theme.accent)
@@ -221,7 +229,7 @@ struct TerminalOverlay: View {
 				}
 			}
 		}
-		.allowsHitTesting(!tab.isConnected || tab.connectionError != nil || tab.sshSession.isReplaying)
+		.allowsHitTesting(!tab.isConnected || tab.connectionError != nil || tab.isRestoring)
 		.alert("Password Required", isPresented: .init(
 			get: { tab.needsPassword },
 			set: { if !$0 { tab.needsPassword = false } }

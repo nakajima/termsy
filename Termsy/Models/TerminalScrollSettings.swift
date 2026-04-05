@@ -22,12 +22,12 @@ enum TerminalScrollSettings {
 	static let defaultSensitivity: Double = 1.0
 	static let minSensitivity: Double = 0.25
 	static let maxSensitivity: Double = 3.0
-	static let defaultTouchSensitivity: Double = defaultSensitivity
-	static let defaultIndirectSensitivity: Double = 0.06
-	static let minTouchSensitivity: Double = minSensitivity
-	static let maxTouchSensitivity: Double = maxSensitivity
-	static let minIndirectSensitivity: Double = 0.01
-	static let maxIndirectSensitivity: Double = 0.25
+	static let defaultTouchSensitivity: Double = 1.0
+	static let defaultIndirectSensitivity: Double = 1.0
+	static let minTouchSensitivity: Double = 0.1
+	static let maxTouchSensitivity: Double = 6.0
+	static let minIndirectSensitivity: Double = 0.05
+	static let maxIndirectSensitivity: Double = 4.0
 
 	static var reverseVerticalScroll: Bool {
 		UserDefaults.standard.object(forKey: reverseVerticalScrollKey) as? Bool ?? defaultReverseVerticalScroll

@@ -106,6 +106,7 @@ class TerminalTab: Identifiable {
 	var isConnected = false
 	var connectionError: String?
 	var needsPassword = false
+	var isRestoring = false
 	var onRequestClose: (() -> Void)?
 	var onRequestNewTab: (() -> Void)?
 	var onRequestSelectTab: ((Int) -> Void)?
@@ -188,6 +189,7 @@ class TerminalTab: Identifiable {
 	private func handleSessionClose(_ reason: SSHTerminalSession.CloseReason) {
 		isConnected = false
 		needsPassword = false
+		isRestoring = false
 
 		switch reason {
 		case .localDisconnect:

@@ -16,6 +16,9 @@ final class TerminalView: UIView, UIKeyInput {
 	private var surface: ghostty_surface_t?
 	private var displayLink: CADisplayLink?
 	private var hardwareKeyHandled = false
+	private var keyRepeatTimer: DispatchSourceTimer?
+	private var repeatingHardwareKey: UIKey?
+	private var repeatingKeyCode: UInt16?
 	private weak var touchScrollRecognizer: UIPanGestureRecognizer?
 	private weak var indirectScrollRecognizer: UIPanGestureRecognizer?
 
@@ -46,6 +49,9 @@ final class TerminalView: UIView, UIKeyInput {
 			target: self, action: #selector(handleScroll(_:)))
 		touchScrollRecognizer.minimumNumberOfTouches = 2
 		touchScrollRecognizer.maximumNumberOfTouches = 2
+		touchScrollRecognizer.cancelsTouchesInView = false
+		touchScrollRecognizer.delaysTouchesBegan = false
+		touchScrollRecognizer.delaysTouchesEnded = false
 		addGestureRecognizer(touchScrollRecognizer)
 		self.touchScrollRecognizer = touchScrollRecognizer
 
@@ -56,6 +62,9 @@ final class TerminalView: UIView, UIKeyInput {
 			indirectScrollRecognizer.allowedTouchTypes = [
 				NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
 			]
+			indirectScrollRecognizer.cancelsTouchesInView = false
+			indirectScrollRecognizer.delaysTouchesBegan = false
+			indirectScrollRecognizer.delaysTouchesEnded = false
 			addGestureRecognizer(indirectScrollRecognizer)
 			self.indirectScrollRecognizer = indirectScrollRecognizer
 		}
@@ -104,6 +113,7 @@ final class TerminalView: UIView, UIKeyInput {
 
 	func stop() {
 		stopDisplayLink()
+		stopKeyRepeat()
 		if let s = surface {
 			ghostty_surface_set_focus(s, false)
 			ghostty_surface_free(s)
@@ -124,6 +134,18 @@ final class TerminalView: UIView, UIKeyInput {
 		ghostty_surface_process_exit(surface, code, runtimeMs)
 	}
 
+	func setDisplayActive(_ isActive: Bool) {
+		guard let surface else { return }
+		ghostty_surface_set_focus(surface, isActive)
+		if isActive {
+			startDisplayLink()
+			ghostty_surface_refresh(surface)
+			ghostty_surface_draw(surface)
+		} else {
+			stopDisplayLink()
+		}
+	}
+
 	// MARK: - Layout & Sublayers
 
 	override func didMoveToWindow() {
@@ -139,6 +161,7 @@ final class TerminalView: UIView, UIKeyInput {
 			}
 		} else {
 			stopDisplayLink()
+			stopKeyRepeat()
 		}
 	}
 
@@ -329,16 +352,23 @@ final class TerminalView: UIView, UIKeyInput {
 					continue
 				}
 			}
-			// Suppress UIKit's insertText for all keys we handle here.
-			// Enter, backspace, etc. would otherwise double-send.
+			// Suppress UIKit's insertText for the initial hardware key press.
+			// Character repeats still arrive through text input, while non-text keys
+			// are repeated manually below.
 			hardwareKeyHandled = true
-			handleKey(key, action: GHOSTTY_ACTION_PRESS, surface: surface)
+			if handleKey(key, action: GHOSTTY_ACTION_PRESS, surface: surface) {
+				startKeyRepeat(for: key)
+			}
 		}
 	}
 
 	override func pressesEnded(_ presses: Set<UIPress>, with _: UIPressesEvent?) {
 		for press in presses {
 			guard let key = press.key, let surface else { continue }
+			let keyCode = UInt16(key.keyCode.rawValue)
+			if repeatingKeyCode == keyCode {
+				stopKeyRepeat()
+			}
 			if key.modifierFlags.contains(.command) {
 				if ["w", "t"].contains(where: {
 					key.charactersIgnoringModifiers.compare($0, options: .caseInsensitive) == .orderedSame
@@ -352,6 +382,64 @@ final class TerminalView: UIView, UIKeyInput {
 			handleKey(key, action: GHOSTTY_ACTION_RELEASE, surface: surface)
 		}
 		hardwareKeyHandled = false
+	}
+
+	override func pressesCancelled(_ presses: Set<UIPress>, with _: UIPressesEvent?) {
+		for press in presses {
+			guard let key = press.key else { continue }
+			if repeatingKeyCode == UInt16(key.keyCode.rawValue) {
+				stopKeyRepeat()
+			}
+		}
+		hardwareKeyHandled = false
+	}
+
+	private func shouldRepeatHardwareKey(_ key: UIKey) -> Bool {
+		switch key.keyCode {
+		case .keyboardDeleteOrBackspace,
+		     .keyboardDeleteForward,
+		     .keyboardUpArrow,
+		     .keyboardDownArrow,
+		     .keyboardLeftArrow,
+		     .keyboardRightArrow,
+		     .keyboardHome,
+		     .keyboardEnd,
+		     .keyboardPageUp,
+		     .keyboardPageDown:
+			return true
+		default:
+			return false
+		}
+	}
+
+	private func startKeyRepeat(for key: UIKey) {
+		guard surface != nil else { return }
+		guard shouldRepeatHardwareKey(key) else { return }
+		let blockedModifiers: UIKeyModifierFlags = [.command, .control, .alternate]
+		guard key.modifierFlags.intersection(blockedModifiers).isEmpty else { return }
+
+		stopKeyRepeat()
+		repeatingHardwareKey = key
+		repeatingKeyCode = UInt16(key.keyCode.rawValue)
+
+		let timer = DispatchSource.makeTimerSource(queue: .main)
+		timer.schedule(deadline: .now() + 0.35, repeating: 0.05)
+		timer.setEventHandler { [weak self] in
+			guard let self,
+			      let repeatKey = self.repeatingHardwareKey,
+			      let surface = self.surface
+			else { return }
+			_ = self.handleKey(repeatKey, action: GHOSTTY_ACTION_REPEAT, surface: surface)
+		}
+		keyRepeatTimer = timer
+		timer.resume()
+	}
+
+	private func stopKeyRepeat() {
+		keyRepeatTimer?.cancel()
+		keyRepeatTimer = nil
+		repeatingHardwareKey = nil
+		repeatingKeyCode = nil
 	}
 
 	@discardableResult

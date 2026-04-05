@@ -3,8 +3,8 @@
 //  Termsy
 //
 //  Bridges an SSH connection to a TerminalView.
-//  When backgrounded (no surface), incoming data is buffered to disk.
-//  When foregrounded, a new surface is created and the buffer is replayed.
+//  When no terminal surface exists, all terminal output is recorded to disk.
+//  When a surface is recreated, the transcript is replayed to restore state.
 //
 
 import Foundation
@@ -17,22 +17,25 @@ final class SSHTerminalSession {
 		case error(String)
 	}
 
+	private enum Transcript {
+		static let chunkSize = 64 * 1024
+	}
+
 	let connection: SSHConnection
 
-	/// Set by the terminal representable when the view is created.
+	/// Set by the terminal host controller when the view is created.
 	weak var terminalView: TerminalView?
 
 	/// Whether the terminal surface is active (tab is selected).
 	private(set) var isForeground = true
 
-	/// File handle for writing buffered data while backgrounded.
-	private var bufferFileHandle: FileHandle?
-	private var bufferURL: URL?
-
-	/// Whether we're currently replaying buffered data.
+	/// Whether we're currently replaying the transcript into a fresh surface.
 	private(set) var isReplaying = false
 
 	var onClose: ((CloseReason) -> Void)?
+
+	private var transcriptFileHandle: FileHandle?
+	private var transcriptURL: URL?
 
 	init() {
 		nonisolated(unsafe) var sessionRef: SSHTerminalSession?
@@ -63,13 +66,14 @@ final class SSHTerminalSession {
 	}
 
 	func connect(host: String, port: Int, username: String, password: String?) async throws {
+		resetTranscript()
 		try await connection.connect(host: host, port: port, username: username, password: password)
 		try await connection.startShell(size: terminalSize)
 	}
 
 	func disconnect() {
 		connection.disconnect()
-		cleanupBuffer()
+		cleanupTranscript()
 	}
 
 	// MARK: - Foreground / Background
@@ -78,52 +82,34 @@ final class SSHTerminalSession {
 	func enterForeground() {
 		guard !isForeground else { return }
 		isForeground = true
-		// Replay happens after the TerminalView is created and calls replayIfNeeded()
 	}
 
 	/// Call when another tab is selected (this tab goes to background).
 	func enterBackground() {
 		guard isForeground else { return }
 		isForeground = false
-		startBuffering()
 		// The caller is responsible for destroying the TerminalView/surface.
 		terminalView = nil
 	}
 
-	/// Replays buffered data into the terminal view in chunks, yielding between
-	/// each chunk so the run loop can render frames and handle input.
+	/// Replays the full transcript into a fresh terminal view. While replaying,
+	/// newly arriving data is still appended to the transcript and is caught up
+	/// before replay finishes.
 	func replayIfNeeded() async {
-		guard let bufferURL, FileManager.default.fileExists(atPath: bufferURL.path) else { return }
-		guard let view = terminalView else { return }
-
-		// Close the write handle so all data is flushed
-		bufferFileHandle?.closeFile()
-		bufferFileHandle = nil
-
-		guard let data = try? Data(contentsOf: bufferURL, options: .mappedIfSafe) else {
-			cleanupBuffer()
-			return
-		}
-
-		guard !data.isEmpty else {
-			cleanupBuffer()
-			return
-		}
+		guard let terminalView else { return }
+		guard let transcriptURL, FileManager.default.fileExists(atPath: transcriptURL.path) else { return }
+		guard transcriptSize(at: transcriptURL) > 0 else { return }
 
 		isReplaying = true
-		let chunkSize = 64 * 1024 // 64KB per chunk
-		var offset = 0
+		defer { isReplaying = false }
 
-		while offset < data.count {
-			let end = min(offset + chunkSize, data.count)
-			let chunk = data[offset..<end]
-			view.feedData(Data(chunk))
-			offset = end
-			await Task.yield()
+		var replayedBytes: UInt64 = 0
+		while true {
+			let size = transcriptSize(at: transcriptURL)
+			guard size > replayedBytes else { break }
+			await replayTranscript(at: transcriptURL, from: replayedBytes, to: size, into: terminalView)
+			replayedBytes = size
 		}
-
-		isReplaying = false
-		cleanupBuffer()
 	}
 
 	// MARK: - Private
@@ -134,51 +120,87 @@ final class SSHTerminalSession {
 			onClose?(.localDisconnect)
 		case .cleanExit:
 			terminalView?.processExited()
-			cleanupBuffer()
 			onClose?(.cleanExit)
 		case let .error(message):
 			terminalView?.processExited()
-			cleanupBuffer()
 			onClose?(.error(message))
 		}
 	}
 
 	private func handleIncomingData(_ data: Data) {
-		if isForeground {
-			terminalView?.feedData(data)
-		} else {
-			writeToBuffer(data)
+		appendToTranscript(data)
+
+		if let terminalView, !isReplaying {
+			terminalView.feedData(data)
 		}
 	}
 
-	private func startBuffering() {
-		cleanupBuffer()
+	private func replayTranscript(
+		at url: URL,
+		from startOffset: UInt64,
+		to endOffset: UInt64,
+		into terminalView: TerminalView
+	) async {
+		guard let fileHandle = try? FileHandle(forReadingFrom: url) else { return }
+		defer {
+			try? fileHandle.close()
+		}
+
+		try? fileHandle.seek(toOffset: startOffset)
+		var remaining = endOffset - startOffset
+
+		while remaining > 0 {
+			let count = Int(min(UInt64(Transcript.chunkSize), remaining))
+			guard let chunk = try? fileHandle.read(upToCount: count), !chunk.isEmpty else {
+				break
+			}
+			terminalView.feedData(chunk)
+			remaining -= UInt64(chunk.count)
+			await Task.yield()
+		}
+	}
+
+	private func appendToTranscript(_ data: Data) {
+		guard !data.isEmpty else { return }
+		guard let fileHandle = ensureTranscriptFile() else { return }
+		fileHandle.seekToEndOfFile()
+		fileHandle.write(data)
+	}
+
+	private func ensureTranscriptFile() -> FileHandle? {
+		if let transcriptFileHandle {
+			return transcriptFileHandle
+		}
+
 		let url = FileManager.default.temporaryDirectory
-			.appendingPathComponent("termsy-buffer-\(UUID().uuidString).bin")
+			.appendingPathComponent("termsy-transcript-\(UUID().uuidString).bin")
 		FileManager.default.createFile(atPath: url.path, contents: nil)
-		bufferFileHandle = try? FileHandle(forWritingTo: url)
-		bufferURL = url
+		guard let fileHandle = try? FileHandle(forWritingTo: url) else { return nil }
+		transcriptURL = url
+		transcriptFileHandle = fileHandle
+		return fileHandle
 	}
 
-	private func writeToBuffer(_ data: Data) {
-		if bufferFileHandle == nil {
-			startBuffering()
-		}
-		bufferFileHandle?.write(data)
+	private func transcriptSize(at url: URL) -> UInt64 {
+		let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? NSNumber
+		return size?.uint64Value ?? 0
 	}
 
-	private func cleanupBuffer() {
-		bufferFileHandle?.closeFile()
-		bufferFileHandle = nil
-		if let url = bufferURL {
+	private func resetTranscript() {
+		cleanupTranscript()
+		_ = ensureTranscriptFile()
+	}
+
+	private func cleanupTranscript() {
+		transcriptFileHandle?.closeFile()
+		transcriptFileHandle = nil
+		if let url = transcriptURL {
 			try? FileManager.default.removeItem(at: url)
-			bufferURL = nil
+			transcriptURL = nil
 		}
 	}
 
 	deinit {
-		// Can't call cleanupBuffer() directly since we might not be on MainActor.
-		// The temp file will be cleaned up by the OS eventually.
-		bufferFileHandle?.closeFile()
+		transcriptFileHandle?.closeFile()
 	}
 }
