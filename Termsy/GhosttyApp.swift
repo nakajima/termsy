@@ -84,13 +84,21 @@ final class GhosttyApp {
 				UIPasteboard.general.string = string
 			}
 		}
-		rt.read_clipboard_cb = { userdata, _, opaquePtr in
-			guard let userdata else { return false }
-			guard let _ = ghostty_surface_userdata(
-				Unmanaged<GhosttyApp>.fromOpaque(userdata).takeUnretainedValue().app!
-			) else { return false }
-			// Simplified: not implementing full clipboard read for now.
-			return false
+		rt.read_clipboard_cb = { userdata, clipboard, opaquePtr in
+			guard clipboard == GHOSTTY_CLIPBOARD_STANDARD else { return false }
+			guard let userdata, let opaquePtr else { return false }
+			guard ClipboardAccessAuthorization.consumeUserInitiatedPaste(for: userdata) else {
+				return false
+			}
+			let view = Unmanaged<TerminalView>.fromOpaque(userdata).takeUnretainedValue()
+			guard let surface = view.surface,
+			      let string = UIPasteboard.general.string,
+			      !string.isEmpty
+			else { return false }
+			string.withCString { cString in
+				ghostty_surface_complete_clipboard_request(surface, cString, opaquePtr, true)
+			}
+			return true
 		}
 
 		self.app = ghostty_app_new(&rt, cfg)

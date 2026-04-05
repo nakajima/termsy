@@ -23,10 +23,12 @@ struct ContentView: View {
 					SessionListView()
 						.toolbar {
 							ToolbarItem(placement: .topBarTrailing) {
-								SheetButton(buttonLabel: { Label("Settings", systemImage: "gearshape") }) {
-									SettingsView()
-										.environment(coordinator)
+								Button {
+									coordinator.openSettings()
+								} label: {
+									Label("Settings", systemImage: "gearshape")
 								}
+								.keyboardShortcut(",", modifiers: .command)
 							}
 						}
 						.toolbarBackground(theme.elevatedBackground, for: .navigationBar)
@@ -44,6 +46,12 @@ struct ContentView: View {
 			}
 		}
 		.background(theme.background.ignoresSafeArea())
+		.overlay(alignment: .topLeading) {
+			if !coordinator.tabs.isEmpty {
+				TabKeyboardShortcuts()
+					.environment(coordinator)
+			}
+		}
 		.environment(coordinator)
 		.sheet(isPresented: $coordinator.isShowingConnectView) {
 			NavigationStack {
@@ -95,6 +103,61 @@ private struct TerminalContainer: View {
 			}
 		}
 		.frame(maxWidth: .infinity, maxHeight: .infinity)
+	}
+}
+
+private struct TabKeyboardShortcuts: View {
+	@Environment(ViewCoordinator.self) private var coordinator
+
+	private var shortcutsEnabled: Bool {
+		!coordinator.isPresentingAuxiliaryUI && !(coordinator.selectedTab?.terminalView.isFirstResponder ?? false)
+	}
+
+	var body: some View {
+		VStack(spacing: 0) {
+			Button("Settings") {
+				coordinator.openSettings()
+			}
+			.keyboardShortcut(",", modifiers: .command)
+			.disabled(!shortcutsEnabled)
+
+			Button("New Tab") {
+				coordinator.openNewTabUI()
+			}
+			.keyboardShortcut("t", modifiers: .command)
+			.disabled(!shortcutsEnabled)
+
+			Button("Close Tab") {
+				coordinator.closeTab(coordinator.selectedTabID)
+			}
+			.keyboardShortcut("w", modifiers: .command)
+			.disabled(!shortcutsEnabled || coordinator.selectedTabID == nil)
+
+			Button("Previous Tab") {
+				coordinator.moveTabSelection(by: -1)
+			}
+			.keyboardShortcut("[", modifiers: [.command, .shift])
+			.disabled(!shortcutsEnabled || coordinator.tabs.count < 2)
+
+			Button("Next Tab") {
+				coordinator.moveTabSelection(by: 1)
+			}
+			.keyboardShortcut("]", modifiers: [.command, .shift])
+			.disabled(!shortcutsEnabled || coordinator.tabs.count < 2)
+
+			ForEach(1 ... 9, id: \.self) { number in
+				Button("Select Tab \(number)") {
+					coordinator.selectTabNumber(number)
+				}
+				.keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)
+				.disabled(!shortcutsEnabled || coordinator.tabs.count < number)
+			}
+		}
+		.frame(width: 1, height: 1)
+		.clipped()
+		.opacity(0.001)
+		.allowsHitTesting(false)
+		.accessibilityHidden(true)
 	}
 }
 

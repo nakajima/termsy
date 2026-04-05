@@ -12,13 +12,14 @@ import GhosttyKit
 import UIKit
 
 @MainActor
-final class TerminalView: UIView, UIKeyInput {
-	private var surface: ghostty_surface_t?
+final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
+	nonisolated(unsafe) private(set) var surface: ghostty_surface_t?
 	private var displayLink: CADisplayLink?
 	private var hardwareKeyHandled = false
 	private var keyRepeatTimer: DispatchSourceTimer?
 	private var repeatingHardwareKey: UIKey?
 	private var repeatingKeyCode: UInt16?
+	private var suppressedKeyReleaseCodes = Set<UInt16>()
 	private var lastMouseLocation: CGPoint?
 	private var activePointerButton: ghostty_input_mouse_button_e?
 	private weak var touchScrollRecognizer: UIPanGestureRecognizer?
@@ -41,6 +42,12 @@ final class TerminalView: UIView, UIKeyInput {
 
 	/// Called when the user requests moving the current tab selection by a relative offset.
 	var onMoveTabSelectionRequest: ((Int) -> Void)?
+
+	/// Called when the user requests opening app settings.
+	var onShowSettingsRequest: (() -> Void)?
+
+	/// Called when Escape should dismiss auxiliary app UI instead of reaching the terminal.
+	var onDismissAuxiliaryUIRequest: (() -> Bool)?
 
 	// MARK: - Lifecycle
 
@@ -75,10 +82,16 @@ final class TerminalView: UIView, UIKeyInput {
 			addGestureRecognizer(indirectScrollRecognizer)
 			self.indirectScrollRecognizer = indirectScrollRecognizer
 		}
+
+		addInteraction(UIContextMenuInteraction(delegate: self))
 	}
 
 	@available(*, unavailable)
 	required init?(coder _: NSCoder) { fatalError() }
+
+	deinit {
+		ClipboardAccessAuthorization.clear(for: self)
+	}
 
 	func applyTheme(_ theme: AppTheme) {
 		backgroundColor = theme.backgroundUIColor
@@ -129,6 +142,8 @@ final class TerminalView: UIView, UIKeyInput {
 	func stop() {
 		stopDisplayLink()
 		stopKeyRepeat()
+		suppressedKeyReleaseCodes.removeAll()
+		ClipboardAccessAuthorization.clear(for: self)
 		lastMouseLocation = nil
 		activePointerButton = nil
 		if let s = surface {
@@ -357,6 +372,31 @@ final class TerminalView: UIView, UIKeyInput {
 	override var canBecomeFirstResponder: Bool { true }
 	var hasText: Bool { true }
 
+	override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+		switch action {
+		case #selector(copy(_:)):
+			return hasTerminalSelection
+		case #selector(paste(_:)):
+			return canPasteFromClipboard
+		case #selector(selectAll(_:)):
+			return surface != nil
+		default:
+			return super.canPerformAction(action, withSender: sender)
+		}
+	}
+
+	override func copy(_ sender: Any?) {
+		_ = performCopyToClipboard()
+	}
+
+	override func paste(_ sender: Any?) {
+		_ = performPasteFromClipboard()
+	}
+
+	override func selectAll(_ sender: Any?) {
+		_ = performBindingAction("select_all")
+	}
+
 	// MARK: - UIKeyInput
 
 	func insertText(_ text: String) {
@@ -393,23 +433,10 @@ final class TerminalView: UIView, UIKeyInput {
 	override func pressesBegan(_ presses: Set<UIPress>, with _: UIPressesEvent?) {
 		for press in presses {
 			guard let key = press.key, let surface else { continue }
-			if key.modifierFlags.contains(.command) {
-				if key.charactersIgnoringModifiers.compare("w", options: .caseInsensitive) == .orderedSame {
-					onCloseTabRequest?()
-					continue
-				}
-				if key.charactersIgnoringModifiers.compare("t", options: .caseInsensitive) == .orderedSame {
-					onNewTabRequest?()
-					continue
-				}
-				if let tabSelectionOffset = tabSelectionOffset(for: key) {
-					onMoveTabSelectionRequest?(tabSelectionOffset)
-					continue
-				}
-				if let digit = Int(key.charactersIgnoringModifiers), (1 ... 9).contains(digit) {
-					onSelectTabRequest?(digit)
-					continue
-				}
+			let keyCode = UInt16(key.keyCode.rawValue)
+			if handleAppShortcutIfNeeded(for: key) {
+				suppressedKeyReleaseCodes.insert(keyCode)
+				continue
 			}
 			// Suppress UIKit's insertText for the initial hardware key press.
 			// Character repeats still arrive through text input, while non-text keys
@@ -428,18 +455,8 @@ final class TerminalView: UIView, UIKeyInput {
 			if repeatingKeyCode == keyCode {
 				stopKeyRepeat()
 			}
-			if key.modifierFlags.contains(.command) {
-				if ["w", "t"].contains(where: {
-					key.charactersIgnoringModifiers.compare($0, options: .caseInsensitive) == .orderedSame
-				}) {
-					continue
-				}
-				if tabSelectionOffset(for: key) != nil {
-					continue
-				}
-				if let digit = Int(key.charactersIgnoringModifiers), (1 ... 9).contains(digit) {
-					continue
-				}
+			if suppressedKeyReleaseCodes.remove(keyCode) != nil {
+				continue
 			}
 			handleKey(key, action: GHOSTTY_ACTION_RELEASE, surface: surface)
 		}
@@ -449,11 +466,134 @@ final class TerminalView: UIView, UIKeyInput {
 	override func pressesCancelled(_ presses: Set<UIPress>, with _: UIPressesEvent?) {
 		for press in presses {
 			guard let key = press.key else { continue }
-			if repeatingKeyCode == UInt16(key.keyCode.rawValue) {
+			let keyCode = UInt16(key.keyCode.rawValue)
+			if repeatingKeyCode == keyCode {
 				stopKeyRepeat()
 			}
+			suppressedKeyReleaseCodes.remove(keyCode)
 		}
 		hardwareKeyHandled = false
+	}
+
+	private func handleAppShortcutIfNeeded(for key: UIKey) -> Bool {
+		let modifiers = key.modifierFlags.intersection([.shift, .control, .alternate, .command])
+		if key.keyCode == .keyboardEscape, modifiers.isEmpty {
+			return onDismissAuxiliaryUIRequest?() == true
+		}
+
+		guard key.modifierFlags.contains(.command) else { return false }
+
+		if key.charactersIgnoringModifiers == "," {
+			onShowSettingsRequest?()
+			return true
+		}
+		if key.charactersIgnoringModifiers.compare("w", options: .caseInsensitive) == .orderedSame {
+			onCloseTabRequest?()
+			return true
+		}
+		if key.charactersIgnoringModifiers.compare("t", options: .caseInsensitive) == .orderedSame {
+			onNewTabRequest?()
+			return true
+		}
+		if key.charactersIgnoringModifiers.compare("v", options: .caseInsensitive) == .orderedSame {
+			return performPasteFromClipboard()
+		}
+		if key.charactersIgnoringModifiers.compare("a", options: .caseInsensitive) == .orderedSame {
+			selectAll(nil)
+			return true
+		}
+		if key.charactersIgnoringModifiers.compare("c", options: .caseInsensitive) == .orderedSame {
+			return performCopyToClipboard()
+		}
+		if let tabSelectionOffset = tabSelectionOffset(for: key) {
+			onMoveTabSelectionRequest?(tabSelectionOffset)
+			return true
+		}
+		if let digit = Int(key.charactersIgnoringModifiers), (1 ... 9).contains(digit) {
+			onSelectTabRequest?(digit)
+			return true
+		}
+
+		return false
+	}
+
+	private var hasTerminalSelection: Bool {
+		guard let surface else { return false }
+		return ghostty_surface_has_selection(surface)
+	}
+
+	private var canPasteFromClipboard: Bool {
+		guard surface != nil else { return false }
+		return UIPasteboard.general.hasStrings
+	}
+
+	@discardableResult
+	private func performCopyToClipboard() -> Bool {
+		guard hasTerminalSelection else { return false }
+		return performBindingAction("copy_to_clipboard")
+	}
+
+	@discardableResult
+	private func performPasteFromClipboard() -> Bool {
+		guard canPasteFromClipboard else { return false }
+		ClipboardAccessAuthorization.noteUserInitiatedPaste(for: self)
+		let didStartPaste = performBindingAction("paste_from_clipboard")
+		if !didStartPaste {
+			ClipboardAccessAuthorization.clear(for: self)
+		}
+		return didStartPaste
+	}
+
+	@discardableResult
+	private func performBindingAction(_ action: String) -> Bool {
+		guard let surface else { return false }
+		return action.withCString { cString in
+			ghostty_surface_binding_action(surface, cString, UInt(action.utf8.count))
+		}
+	}
+
+	func contextMenuInteraction(
+		_ interaction: UIContextMenuInteraction,
+		configurationForMenuAtLocation location: CGPoint
+	) -> UIContextMenuConfiguration? {
+		guard surface != nil else { return nil }
+		return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+			self?.makeClipboardContextMenu()
+		}
+	}
+
+	private func makeClipboardContextMenu() -> UIMenu {
+		let copy = UIAction(
+			title: "Copy",
+			image: UIImage(systemName: "doc.on.doc")
+		) { [weak self] _ in
+			guard let self else { return }
+			self.becomeFirstResponder()
+			self.copy(nil)
+		}
+		copy.attributes = hasTerminalSelection ? [] : [.disabled]
+
+		let paste = UIAction(
+			title: "Paste",
+			image: UIImage(systemName: "doc.on.clipboard")
+		) { [weak self] _ in
+			guard let self else { return }
+			self.becomeFirstResponder()
+			self.paste(nil)
+		}
+		paste.attributes = canPasteFromClipboard ? [] : [.disabled]
+
+		let selectAll = UIAction(
+			title: "Select All",
+			image: UIImage(systemName: "selection.pin.in.out")
+		) { [weak self] _ in
+			guard let self else { return }
+			self.becomeFirstResponder()
+			self.selectAll(nil)
+		}
+		selectAll.attributes = surface == nil ? [.disabled] : []
+
+		return UIMenu(children: [copy, paste, selectAll])
 	}
 
 	private func tabSelectionOffset(for key: UIKey) -> Int? {
@@ -722,4 +862,38 @@ final class TerminalView: UIView, UIKeyInput {
 		0x80: 0x0048,  // AudioVolumeUp
 		0x81: 0x0049,  // AudioVolumeDown
 	]
+}
+
+enum ClipboardAccessAuthorization {
+	private static let lock = NSLock()
+	private static var pendingUserInitiatedPastes = [UnsafeMutableRawPointer: Date]()
+	private static let lifetime: TimeInterval = 2
+
+	static func noteUserInitiatedPaste(for view: TerminalView) {
+		let pointer = Unmanaged.passUnretained(view).toOpaque()
+		lock.lock()
+		pendingUserInitiatedPastes[pointer] = Date().addingTimeInterval(lifetime)
+		lock.unlock()
+	}
+
+	static func consumeUserInitiatedPaste(for pointer: UnsafeMutableRawPointer) -> Bool {
+		lock.lock()
+		defer { lock.unlock() }
+
+		let now = Date()
+		pendingUserInitiatedPastes = pendingUserInitiatedPastes.filter { $0.value > now }
+		guard let expiry = pendingUserInitiatedPastes[pointer], expiry > now else {
+			pendingUserInitiatedPastes.removeValue(forKey: pointer)
+			return false
+		}
+		pendingUserInitiatedPastes.removeValue(forKey: pointer)
+		return true
+	}
+
+	static func clear(for view: TerminalView) {
+		let pointer = Unmanaged.passUnretained(view).toOpaque()
+		lock.lock()
+		pendingUserInitiatedPastes.removeValue(forKey: pointer)
+		lock.unlock()
+	}
 }

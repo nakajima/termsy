@@ -16,10 +16,17 @@ struct ConnectionConfig: Hashable {
 }
 
 struct ConnectView: View {
+	private enum Field: Hashable {
+		case username
+		case host
+		case tmuxSessionName
+	}
+
 	var onConnect: (Session) -> Void
 
 	@Environment(\.databaseContext) var dbContext
 	@Environment(\.appTheme) private var theme
+	@Environment(\.dismiss) private var dismiss
 	@Environment(ViewCoordinator.self) var coordinator
 
 	@State private var host = ""
@@ -30,7 +37,7 @@ struct ConnectView: View {
 	@State private var errorMessage: String? = nil
 	@State private var autoconnect: Bool = true
 
-	@FocusState private var isFocused
+	@FocusState private var focusedField: Field?
 
 	private var canConnect: Bool {
 		!host.isEmpty && !username.isEmpty
@@ -44,10 +51,8 @@ struct ConnectView: View {
 						.textContentType(.username)
 						.autocorrectionDisabled()
 						.textInputAutocapitalization(.never)
-						.focused($isFocused)
-						.onAppear {
-							self.isFocused = true
-						}
+						.focused($focusedField, equals: .username)
+						.submitLabel(.next)
 						.foregroundStyle(theme.primaryText)
 					Text("@")
 						.foregroundStyle(theme.secondaryText)
@@ -55,6 +60,8 @@ struct ConnectView: View {
 						.textContentType(.URL)
 						.autocorrectionDisabled()
 						.textInputAutocapitalization(.never)
+						.focused($focusedField, equals: .host)
+						.submitLabel(.next)
 						.foregroundStyle(theme.primaryText)
 				}
 				.listRowBackground(theme.cardBackground)
@@ -64,6 +71,8 @@ struct ConnectView: View {
 					.textContentType(.username)
 					.autocorrectionDisabled()
 					.textInputAutocapitalization(.never)
+					.focused($focusedField, equals: .tmuxSessionName)
+					.submitLabel(canConnect ? .go : .done)
 					.foregroundStyle(theme.primaryText)
 					.listRowBackground(theme.cardBackground)
 			}
@@ -74,32 +83,11 @@ struct ConnectView: View {
 			}
 			Section {
 				Button("Connect") {
-					var session = Session(
-						hostname: host,
-						username: username,
-						tmuxSessionName: tmuxSessionName.trimmingCharacters(
-							in: .whitespacesAndNewlines) == "" ? nil : tmuxSessionName,
-						port: Int(port) ?? 22,
-						autoconnect: autoconnect
-					)
-
-					do {
-						try dbContext.writer.write { db in
-							try session.save(db)
-						}
-					} catch {
-						withAnimation {
-							self.errorMessage = "\(error.localizedDescription)"
-						}
-
-						return
-					}
-
-					onConnect(session)
-					coordinator.isShowingConnectView = false
+					connect()
 				}
 				.animation(.easeInOut, value: host)
 				.disabled(!canConnect)
+				.keyboardShortcut(.defaultAction)
 				.listRowBackground(canConnect ? theme.accent : theme.controlBackground)
 				.foregroundStyle(canConnect ? theme.crust : theme.tertiaryText)
 				if let errorMessage {
@@ -112,6 +100,64 @@ struct ConnectView: View {
 		.scrollContentBackground(.hidden)
 		.background(theme.background)
 		.navigationTitle("New Session")
+		.navigationBarTitleDisplayMode(.inline)
+		.toolbar {
+			ToolbarItem(placement: .topBarLeading) {
+				Button("Cancel") {
+					dismissConnectView()
+				}
+				.keyboardShortcut(.cancelAction)
+			}
+		}
+		.onAppear {
+			focusedField = username.isEmpty ? .username : .host
+		}
+		.onSubmit {
+			handleSubmit()
+		}
+	}
+
+	private func handleSubmit() {
+		switch focusedField {
+		case .username:
+			focusedField = .host
+		case .host:
+			focusedField = .tmuxSessionName
+		case .tmuxSessionName, .none:
+			connect()
+		}
+	}
+
+	private func connect() {
+		guard canConnect else { return }
+
+		var session = Session(
+			hostname: host,
+			username: username,
+			tmuxSessionName: tmuxSessionName.trimmingCharacters(
+				in: .whitespacesAndNewlines) == "" ? nil : tmuxSessionName,
+			port: Int(port) ?? 22,
+			autoconnect: autoconnect
+		)
+
+		do {
+			try dbContext.writer.write { db in
+				try session.save(db)
+			}
+		} catch {
+			withAnimation {
+				errorMessage = "\(error.localizedDescription)"
+			}
+			return
+		}
+
+		onConnect(session)
+		dismissConnectView()
+	}
+
+	private func dismissConnectView() {
+		coordinator.isShowingConnectView = false
+		dismiss()
 	}
 }
 

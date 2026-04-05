@@ -49,6 +49,9 @@ final class TerminalHostController: UIViewController {
 
 	override func viewDidLoad() {
 		super.viewDidLoad()
+		terminalTab.onRequestReconnect = { [weak self] in
+			self?.reconnectAfterBackgroundLoss()
+		}
 		applyTheme(theme)
 		setupTerminal()
 		connectIfNeeded()
@@ -126,13 +129,19 @@ final class TerminalHostController: UIViewController {
 	}
 
 	private func updateOverlay() {
-		let overlayView = TerminalOverlay(tab: terminalTab, onRetryWithPassword: { [weak self] password in
-			guard let self else { return }
-			Task {
-				await self.terminalTab.connectWithPassword(password)
-				self.updateOverlay()
+		let overlayView = TerminalOverlay(
+			tab: terminalTab,
+			onReconnect: { [weak self] in
+				self?.reconnectAfterBackgroundLoss()
+			},
+			onRetryWithPassword: { [weak self] password in
+				guard let self else { return }
+				Task {
+					await self.terminalTab.connectWithPassword(password)
+					self.updateOverlay()
+				}
 			}
-		})
+		)
 		.environment(\.appTheme, theme)
 
 		let overlayNeedsInteraction = !terminalTab.isConnected
@@ -169,6 +178,7 @@ final class TerminalHostController: UIViewController {
 	}
 
 	@objc private func appDidBecomeActive() {
+		terminalTab.noteAppDidBecomeActive()
 		terminalTab.setDisplayActive(true)
 		if terminalTab.consumeReconnectOnActivation() {
 			reconnectAfterBackgroundLoss()
@@ -183,16 +193,6 @@ final class TerminalHostController: UIViewController {
 			return
 		}
 		syncTerminalSizeToSession()
-
-		Task { @MainActor [weak self] in
-			try? await Task.sleep(nanoseconds: 750_000_000)
-			guard let self else { return }
-			if self.terminalTab.consumeReconnectOnActivation() {
-				self.reconnectAfterBackgroundLoss()
-			} else if self.terminalTab.isConnected, self.terminalTab.sshSession.connection.isActive {
-				self.terminalTab.clearAppInactiveState()
-			}
-		}
 	}
 
 	private func reconnectAfterBackgroundLoss() {
@@ -214,9 +214,20 @@ final class TerminalHostController: UIViewController {
 struct TerminalOverlay: View {
 	@Environment(\.appTheme) private var theme
 	let tab: TerminalTab
+	var onReconnect: () -> Void
 	var onRetryWithPassword: (String) -> Void
 
 	@State private var password = ""
+
+	private var errorDescription: String {
+		guard let error = tab.connectionError else { return "" }
+		if error.localizedCaseInsensitiveContains("tcpShutdown")
+			|| error.localizedCaseInsensitiveContains("tcp shutdown")
+		{
+			return "The SSH connection was dropped while the app was inactive."
+		}
+		return error
+	}
 
 	var body: some View {
 		ZStack {
@@ -234,7 +245,7 @@ struct TerminalOverlay: View {
 					.foregroundStyle(theme.primaryText)
 			}
 
-			if let error = tab.connectionError {
+			if tab.connectionError != nil {
 				VStack(spacing: 12) {
 					Image(systemName: "xmark.circle")
 						.font(.largeTitle)
@@ -242,10 +253,18 @@ struct TerminalOverlay: View {
 					Text("Connection Failed")
 						.font(.headline)
 						.foregroundStyle(theme.primaryText)
-					Text(error)
+					Text(errorDescription)
 						.font(.caption)
 						.foregroundStyle(theme.secondaryText)
 						.multilineTextAlignment(.center)
+					Button {
+						onReconnect()
+					} label: {
+						Label("Reconnect", systemImage: "arrow.clockwise")
+							.frame(maxWidth: .infinity)
+					}
+					.buttonStyle(.borderedProminent)
+					.tint(theme.accent)
 				}
 				.padding()
 				.background(theme.cardBackground, in: .rect(cornerRadius: 12))
@@ -285,6 +304,6 @@ struct TerminalOverlay: View {
 		createdAt: Date()
 	))
 	tab.connectionError = "Host key verification failed"
-	return TerminalOverlay(tab: tab, onRetryWithPassword: { _ in })
+	return TerminalOverlay(tab: tab, onReconnect: {}, onRetryWithPassword: { _ in })
 		.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 }

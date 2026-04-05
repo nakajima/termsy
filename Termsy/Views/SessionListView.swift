@@ -59,6 +59,7 @@ struct SessionListView: View {
 				} label: {
 					Label("New Session", systemImage: "plus")
 				}
+				.keyboardShortcut("t", modifiers: .command)
 			}
 		}
 		.onAppear {

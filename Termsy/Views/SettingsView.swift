@@ -23,6 +23,10 @@ struct SettingsView: View {
 		"\(indirectScrollSensitivity.formatted(.number.precision(.fractionLength(2))))×"
 	}
 
+	private var whatsNewPreview: String {
+		WhatsNewGenerated.current.previewChange
+	}
+
 	var body: some View {
 		NavigationStack {
 			Form {
@@ -79,6 +83,30 @@ struct SettingsView: View {
 					Text("Scrolling")
 				} footer: {
 					Text("Touch and trackpad/mouse scrolling are tuned separately. Trackpad and mouse wheel use precise scrolling and target the pointer location.")
+				}
+
+				Section("What's New") {
+					NavigationLink {
+						WhatsNewView()
+					} label: {
+						VStack(alignment: .leading, spacing: 6) {
+							HStack {
+								Label("Latest changes", systemImage: "sparkles")
+									.foregroundStyle(theme.primaryText)
+								Spacer()
+								Text(AppReleaseInfo.currentVersionDisplay)
+									.font(.subheadline)
+									.foregroundStyle(theme.secondaryText)
+							}
+
+							Text(whatsNewPreview)
+								.font(.subheadline)
+								.foregroundStyle(theme.secondaryText)
+								.lineLimit(2)
+						}
+						.padding(.vertical, 2)
+					}
+					.listRowBackground(theme.cardBackground)
 				}
 
 				Section("Theme") {

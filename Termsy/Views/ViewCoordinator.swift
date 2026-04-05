@@ -5,8 +5,9 @@
 //  Created by Pat Nakajima on 4/3/26.
 //
 
-import SwiftUI
+import UIKit
 import Observation
+import SwiftUI
 
 @Observable @MainActor
 class ViewCoordinator {
@@ -14,6 +15,10 @@ class ViewCoordinator {
 	var isShowingConnectView = false
 	var isShowingSessionPicker = false
 	var isShowingSettings = false
+
+	var isPresentingAuxiliaryUI: Bool {
+		isShowingConnectView || isShowingSessionPicker || isShowingSettings
+	}
 
 	/// All open terminal tabs.
 	var tabs: [TerminalTab] = []
@@ -32,17 +37,56 @@ class ViewCoordinator {
 			self?.closeTab(tabID)
 		}
 		tab.onRequestNewTab = { [weak self] in
-			self?.isShowingSessionPicker = true
+			self?.openNewTabUI()
 		}
 		tab.onRequestSelectTab = { [weak self] index in
-			guard let self, index >= 1, index <= self.tabs.count else { return }
-			self.selectTab(self.tabs[index - 1].id)
+			self?.selectTabNumber(index)
 		}
 		tab.onRequestMoveTabSelection = { [weak self] offset in
 			self?.moveTabSelection(by: offset)
 		}
+		tab.onRequestShowSettings = { [weak self] in
+			self?.openSettings()
+		}
+		tab.onRequestDismissAuxiliaryUI = { [weak self] in
+			self?.dismissPresentedUI() ?? false
+		}
 		tabs.append(tab)
 		selectTab(tab.id)
+	}
+
+	func openSettings() {
+		isShowingConnectView = false
+		isShowingSessionPicker = false
+		isShowingSettings = true
+	}
+
+	func openNewTabUI() {
+		isShowingSettings = false
+		if tabs.isEmpty {
+			isShowingConnectView = true
+			isShowingSessionPicker = false
+		} else {
+			isShowingConnectView = false
+			isShowingSessionPicker = true
+		}
+	}
+
+	@discardableResult
+	func dismissPresentedUI() -> Bool {
+		if isShowingSettings {
+			isShowingSettings = false
+			return true
+		}
+		if isShowingConnectView {
+			isShowingConnectView = false
+			return true
+		}
+		if isShowingSessionPicker {
+			isShowingSessionPicker = false
+			return true
+		}
+		return false
 	}
 
 	func selectTab(_ id: UUID?) {
@@ -61,6 +105,11 @@ class ViewCoordinator {
 			tab.sshSession.enterForeground()
 			tab.setDisplayActive(true)
 		}
+	}
+
+	func selectTabNumber(_ number: Int) {
+		guard number >= 1, number <= tabs.count else { return }
+		selectTab(tabs[number - 1].id)
 	}
 
 	func moveTabSelection(by offset: Int) {
@@ -132,9 +181,14 @@ class TerminalTab: Identifiable {
 	var onRequestNewTab: (() -> Void)?
 	var onRequestSelectTab: ((Int) -> Void)?
 	var onRequestMoveTabSelection: ((Int) -> Void)?
+	var onRequestShowSettings: (() -> Void)?
+	var onRequestDismissAuxiliaryUI: (() -> Bool)?
+	var onRequestReconnect: (() -> Void)?
 
 	private var wasConnectedWhenAppResignedActive = false
 	private var shouldReconnectOnActivation = false
+	private var backgroundReconnectGraceDeadline: Date?
+	private var reconnectGraceTask: Task<Void, Never>?
 
 	let id = UUID()
 
@@ -164,6 +218,7 @@ class TerminalTab: Identifiable {
 				password: keychainPassword
 			)
 			isConnected = true
+			clearAppInactiveState()
 			startTmuxIfNeeded()
 		} catch SSHConnectionError.authenticationFailed {
 			print("[SSH] auth failed, prompting for password")
@@ -204,6 +259,7 @@ class TerminalTab: Identifiable {
 				password: password
 			)
 			isConnected = true
+			clearAppInactiveState()
 			Keychain.setPassword(password, for: session)
 			startTmuxIfNeeded()
 		} catch {
@@ -239,7 +295,20 @@ class TerminalTab: Identifiable {
 	}
 
 	func noteAppWillResignActive() {
+		reconnectGraceTask?.cancel()
+		reconnectGraceTask = nil
+		backgroundReconnectGraceDeadline = nil
 		wasConnectedWhenAppResignedActive = isConnected
+	}
+
+	func noteAppDidBecomeActive() {
+		guard wasConnectedWhenAppResignedActive else { return }
+		backgroundReconnectGraceDeadline = Date().addingTimeInterval(5)
+		reconnectGraceTask?.cancel()
+		reconnectGraceTask = Task { @MainActor [weak self] in
+			try? await Task.sleep(nanoseconds: 5_000_000_000)
+			self?.clearAppInactiveState()
+		}
 	}
 
 	func consumeReconnectOnActivation() -> Bool {
@@ -251,14 +320,29 @@ class TerminalTab: Identifiable {
 	func clearAppInactiveState() {
 		wasConnectedWhenAppResignedActive = false
 		shouldReconnectOnActivation = false
+		backgroundReconnectGraceDeadline = nil
+		reconnectGraceTask?.cancel()
+		reconnectGraceTask = nil
 	}
 
 	func prepareForReconnectAfterBackgroundLoss() {
+		clearAppInactiveState()
 		connectionError = nil
 		needsPassword = false
 		isRestoring = false
 		disconnect()
 		resetTerminalView()
+	}
+
+	private func shouldAutoReconnect(for message: String) -> Bool {
+		let isTcpShutdown = message.localizedCaseInsensitiveContains("tcpShutdown")
+			|| message.localizedCaseInsensitiveContains("tcp shutdown")
+		guard isTcpShutdown else { return false }
+		if UIApplication.shared.applicationState != .active {
+			return wasConnectedWhenAppResignedActive
+		}
+		guard let deadline = backgroundReconnectGraceDeadline else { return false }
+		return Date() < deadline
 	}
 
 	private func configureTerminalView() {
@@ -273,6 +357,12 @@ class TerminalTab: Identifiable {
 		}
 		terminalView.onMoveTabSelectionRequest = { [weak self] offset in
 			self?.requestMoveTabSelection(offset)
+		}
+		terminalView.onShowSettingsRequest = { [weak self] in
+			self?.requestShowSettings()
+		}
+		terminalView.onDismissAuxiliaryUIRequest = { [weak self] in
+			self?.requestDismissAuxiliaryUI() ?? false
 		}
 		terminalView.onWrite = { [weak self] data in
 			self?.sshSession.connection.send(data)
@@ -299,6 +389,15 @@ class TerminalTab: Identifiable {
 		onRequestMoveTabSelection?(offset)
 	}
 
+	func requestShowSettings() {
+		onRequestShowSettings?()
+	}
+
+	@discardableResult
+	func requestDismissAuxiliaryUI() -> Bool {
+		onRequestDismissAuxiliaryUI?() ?? false
+	}
+
 	private func handleSessionClose(_ reason: SSHTerminalSession.CloseReason) {
 		isConnected = false
 		needsPassword = false
@@ -306,17 +405,22 @@ class TerminalTab: Identifiable {
 
 		switch reason {
 		case .localDisconnect:
-			break
+			clearAppInactiveState()
 		case .cleanExit:
 			clearAppInactiveState()
 			terminalView.processExited()
 			onRequestClose?()
 		case let .error(message):
-			if wasConnectedWhenAppResignedActive {
-				print("[SSH] connection closed while app inactive; will reconnect on activation: \(message)")
-				shouldReconnectOnActivation = true
+			if shouldAutoReconnect(for: message) {
+				print("[SSH] TCP transport shut down around app switch; reconnecting: \(message)")
 				connectionError = nil
+				if UIApplication.shared.applicationState == .active {
+					onRequestReconnect?()
+				} else {
+					shouldReconnectOnActivation = true
+				}
 			} else {
+				clearAppInactiveState()
 				connectionError = message
 			}
 		}

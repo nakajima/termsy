@@ -65,6 +65,7 @@ struct SessionPickerView: View {
 							.font(.body)
 							.foregroundStyle(.tint)
 					}
+					.keyboardShortcut("t", modifiers: .command)
 					.listRowBackground(theme.cardBackground)
 				}
 			}
@@ -77,6 +78,7 @@ struct SessionPickerView: View {
 					Button("Done") {
 						coordinator.isShowingSessionPicker = false
 					}
+					.keyboardShortcut(.cancelAction)
 				}
 			}
 			.toolbarBackground(theme.elevatedBackground, for: .navigationBar)
@@ -84,4 +86,25 @@ struct SessionPickerView: View {
 			.toolbarColorScheme(theme.colorScheme, for: .navigationBar)
 		}
 	}
+}
+
+#Preview {
+	let db = DB.memory()
+	try? db.migrate()
+	try? db.queue.write { db in
+		var session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: "api",
+			port: 22,
+			autoconnect: true
+		)
+		try session.save(db)
+	}
+
+	let coordinator = ViewCoordinator()
+	return SessionPickerView()
+		.databaseContext(.readWrite { db.queue })
+		.environment(coordinator)
+		.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 }
