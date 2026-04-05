@@ -79,7 +79,10 @@ final class GhosttyApp {
 			guard contentsLen > 0, let content = contents?.pointee,
 			      let data = content.data
 			else { return }
-			UIPasteboard.general.string = String(cString: data)
+			let string = String(cString: data)
+			DispatchQueue.main.async {
+				UIPasteboard.general.string = string
+			}
 		}
 		rt.read_clipboard_cb = { userdata, _, opaquePtr in
 			guard let userdata else { return false }

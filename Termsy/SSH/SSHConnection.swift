@@ -63,6 +63,9 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 	func connect(host: String, port: Int, username: String, password: String?) async throws {
 		print("[SSH] connecting to \(host):\(port) as \(username)")
+		channel = nil
+		sshChildChannel = nil
+		authDelegate = nil
 		isDisconnecting = false
 
 		let authDelegate = PasswordOrNoneAuthDelegate(
@@ -128,7 +131,12 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 					SSHChannelDataHandler(onData: onData),
 					SSHChannelLifecycleHandler(
 						isDisconnecting: { [weak self] in self?.isDisconnecting ?? false },
-						onClose: onClose
+						onClose: { [weak self] reason in
+							self?.sshChildChannel = nil
+							self?.channel = nil
+							self?.authDelegate = nil
+							onClose(reason)
+						}
 					),
 				])
 			}
@@ -159,8 +167,9 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	}
 
 	func send(_ data: Data) {
-		guard let sshChildChannel else { return }
+		guard let sshChildChannel, sshChildChannel.isActive else { return }
 		sshChildChannel.eventLoop.execute {
+			guard sshChildChannel.isActive else { return }
 			var buffer = sshChildChannel.allocator.buffer(capacity: data.count)
 			buffer.writeBytes(data)
 			let channelData = SSHChannelData(type: .channel, data: .byteBuffer(buffer))
@@ -170,8 +179,9 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 	func resize(_ size: TerminalWindowSize) {
 		pendingTerminalSize = size
-		guard let sshChildChannel else { return }
+		guard let sshChildChannel, sshChildChannel.isActive else { return }
 		sshChildChannel.eventLoop.execute {
+			guard sshChildChannel.isActive else { return }
 			let req = SSHChannelRequestEvent.WindowChangeRequest(
 				terminalCharacterWidth: size.columns,
 				terminalRowHeight: size.rows,
@@ -184,8 +194,13 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 	func disconnect() {
 		isDisconnecting = true
-		sshChildChannel?.close(mode: .all, promise: nil)
-		channel?.close(mode: .all, promise: nil)
+		let childChannel = sshChildChannel
+		let parentChannel = channel
+		sshChildChannel = nil
+		channel = nil
+		authDelegate = nil
+		childChannel?.close(mode: .all, promise: nil)
+		parentChannel?.close(mode: .all, promise: nil)
 	}
 
 	deinit {

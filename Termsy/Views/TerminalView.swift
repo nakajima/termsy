@@ -12,7 +12,7 @@ import GhosttyKit
 import UIKit
 
 @MainActor
-final class TerminalView: UIView, UIKeyInput {
+final class TerminalView: UIView, UIKeyInput, UIPointerInteractionDelegate {
 	private var surface: ghostty_surface_t?
 	private var displayLink: CADisplayLink?
 	private var hardwareKeyHandled = false
@@ -22,7 +22,7 @@ final class TerminalView: UIView, UIKeyInput {
 	private var lastMouseLocation: CGPoint?
 	private weak var touchScrollRecognizer: UIPanGestureRecognizer?
 	private weak var indirectScrollRecognizer: UIPanGestureRecognizer?
-	private weak var pointerHoverRecognizer: UIHoverGestureRecognizer?
+	private weak var pointerInteraction: UIPointerInteraction?
 
 	/// Called when the terminal produces bytes (user input, query responses).
 	var onWrite: ((Data) -> Void)?
@@ -73,14 +73,9 @@ final class TerminalView: UIView, UIKeyInput {
 			addGestureRecognizer(indirectScrollRecognizer)
 			self.indirectScrollRecognizer = indirectScrollRecognizer
 
-			let pointerHoverRecognizer = UIHoverGestureRecognizer(
-				target: self, action: #selector(handlePointerHover(_:)))
-			pointerHoverRecognizer.allowedTouchTypes = [
-				NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
-			]
-			pointerHoverRecognizer.cancelsTouchesInView = false
-			addGestureRecognizer(pointerHoverRecognizer)
-			self.pointerHoverRecognizer = pointerHoverRecognizer
+			let pointerInteraction = UIPointerInteraction(delegate: self)
+			addInteraction(pointerInteraction)
+			self.pointerInteraction = pointerInteraction
 		}
 	}
 
@@ -107,12 +102,16 @@ final class TerminalView: UIView, UIKeyInput {
 				guard let userdata, let ptr else { return }
 				let view = Unmanaged<TerminalView>.fromOpaque(userdata).takeUnretainedValue()
 				let data = Data(bytes: ptr, count: len)
-				view.onWrite?(data)
+				DispatchQueue.main.async {
+					view.onWrite?(data)
+				}
 			}
 			cfg.receive_resize = { userdata, cols, rows, _, _ in
 				guard let userdata else { return }
 				let view = Unmanaged<TerminalView>.fromOpaque(userdata).takeUnretainedValue()
-				view.onResize?(cols, rows)
+				DispatchQueue.main.async {
+					view.onResize?(cols, rows)
+				}
 			}
 
 			let scale = resolvedScale()
@@ -305,22 +304,21 @@ final class TerminalView: UIView, UIKeyInput {
 			surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
 	}
 
-	@objc private func handlePointerHover(_ recognizer: UIHoverGestureRecognizer) {
-		switch recognizer.state {
-		case .began, .changed:
-			sendMousePosition(recognizer.location(in: self))
-		case .ended, .cancelled:
-			lastMouseLocation = nil
-		default:
-			break
-		}
-	}
-
 	private func sendMousePosition(_ point: CGPoint) {
 		guard let surface else { return }
 		guard lastMouseLocation != point else { return }
 		lastMouseLocation = point
 		ghostty_surface_mouse_pos(surface, point.x, point.y, GHOSTTY_MODS_NONE)
+	}
+
+	@available(iOS 13.4, *)
+	func pointerInteraction(
+		_ interaction: UIPointerInteraction,
+		regionFor request: UIPointerRegionRequest,
+		defaultRegion: UIPointerRegion
+	) -> UIPointerRegion? {
+		sendMousePosition(request.location)
+		return nil
 	}
 
 	@objc private func handleScroll(_ recognizer: UIPanGestureRecognizer) {

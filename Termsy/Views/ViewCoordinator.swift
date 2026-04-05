@@ -277,12 +277,12 @@ class TerminalTab: Identifiable {
 		isConnected = false
 		needsPassword = false
 		isRestoring = false
-		terminalView.processExited()
 
 		switch reason {
 		case .localDisconnect:
 			break
 		case .cleanExit:
+			terminalView.processExited()
 			onRequestClose?()
 		case let .error(message):
 			connectionError = message
