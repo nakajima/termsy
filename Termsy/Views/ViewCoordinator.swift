@@ -144,9 +144,21 @@ class TerminalTab: Identifiable {
 	}
 
 	private func startTmuxIfNeeded() {
-		guard let name = session.tmuxSessionName, !name.isEmpty else { return }
-		let command = "tmux new-session -A -s \(name)\n"
-		sshSession.connection.send(Data(command.utf8))
+		guard let rawName = session.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+		      !rawName.isEmpty else { return }
+
+		let escapedName = shellQuoted(rawName)
+		let command = Data("tmux new-session -A -s \(escapedName)\r".utf8)
+
+		Task { @MainActor [weak self] in
+			try? await Task.sleep(nanoseconds: 150_000_000)
+			guard let self, self.isConnected else { return }
+			self.sshSession.connection.send(command)
+		}
+	}
+
+	private func shellQuoted(_ value: String) -> String {
+		"'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
 	}
 
 	func connectWithPassword(_ password: String) async {

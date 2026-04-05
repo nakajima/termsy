@@ -19,8 +19,10 @@ final class TerminalView: UIView, UIKeyInput {
 	private var keyRepeatTimer: DispatchSourceTimer?
 	private var repeatingHardwareKey: UIKey?
 	private var repeatingKeyCode: UInt16?
+	private var lastMouseLocation: CGPoint?
 	private weak var touchScrollRecognizer: UIPanGestureRecognizer?
 	private weak var indirectScrollRecognizer: UIPanGestureRecognizer?
+	private weak var pointerHoverRecognizer: UIHoverGestureRecognizer?
 
 	/// Called when the terminal produces bytes (user input, query responses).
 	var onWrite: ((Data) -> Void)?
@@ -67,6 +69,15 @@ final class TerminalView: UIView, UIKeyInput {
 			indirectScrollRecognizer.delaysTouchesEnded = false
 			addGestureRecognizer(indirectScrollRecognizer)
 			self.indirectScrollRecognizer = indirectScrollRecognizer
+
+			let pointerHoverRecognizer = UIHoverGestureRecognizer(
+				target: self, action: #selector(handlePointerHover(_:)))
+			pointerHoverRecognizer.allowedTouchTypes = [
+				NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
+			]
+			pointerHoverRecognizer.cancelsTouchesInView = false
+			addGestureRecognizer(pointerHoverRecognizer)
+			self.pointerHoverRecognizer = pointerHoverRecognizer
 		}
 	}
 
@@ -114,6 +125,7 @@ final class TerminalView: UIView, UIKeyInput {
 	func stop() {
 		stopDisplayLink()
 		stopKeyRepeat()
+		lastMouseLocation = nil
 		if let s = surface {
 			ghostty_surface_set_focus(s, false)
 			ghostty_surface_free(s)
@@ -249,18 +261,19 @@ final class TerminalView: UIView, UIKeyInput {
 			return
 		}
 		let pos = touch.location(in: self)
-		ghostty_surface_mouse_pos(surface, pos.x, pos.y, GHOSTTY_MODS_NONE)
+		sendMousePosition(pos)
 		ghostty_surface_mouse_button(
 			surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
 	}
 
 	override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-		guard let surface, let touch = touches.first else {
+		guard touches.first != nil else {
 			super.touchesMoved(touches, with: event)
 			return
 		}
-		let pos = touch.location(in: self)
-		ghostty_surface_mouse_pos(surface, pos.x, pos.y, GHOSTTY_MODS_NONE)
+		if let touch = touches.first {
+			sendMousePosition(touch.location(in: self))
+		}
 	}
 
 	override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -268,8 +281,7 @@ final class TerminalView: UIView, UIKeyInput {
 			super.touchesEnded(touches, with: event)
 			return
 		}
-		let pos = touch.location(in: self)
-		ghostty_surface_mouse_pos(surface, pos.x, pos.y, GHOSTTY_MODS_NONE)
+		sendMousePosition(touch.location(in: self))
 		ghostty_surface_mouse_button(
 			surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
 	}
@@ -283,6 +295,24 @@ final class TerminalView: UIView, UIKeyInput {
 			surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
 	}
 
+	@objc private func handlePointerHover(_ recognizer: UIHoverGestureRecognizer) {
+		switch recognizer.state {
+		case .began, .changed:
+			sendMousePosition(recognizer.location(in: self))
+		case .ended, .cancelled:
+			lastMouseLocation = nil
+		default:
+			break
+		}
+	}
+
+	private func sendMousePosition(_ point: CGPoint) {
+		guard let surface else { return }
+		guard lastMouseLocation != point else { return }
+		lastMouseLocation = point
+		ghostty_surface_mouse_pos(surface, point.x, point.y, GHOSTTY_MODS_NONE)
+	}
+
 	@objc private func handleScroll(_ recognizer: UIPanGestureRecognizer) {
 		guard let surface else { return }
 		let delta = recognizer.translation(in: self)
@@ -290,8 +320,7 @@ final class TerminalView: UIView, UIKeyInput {
 		guard delta != .zero else { return }
 		let inputKind: TerminalScrollSettings.InputKind =
 			recognizer === indirectScrollRecognizer ? .indirectPointer : .touch
-		let location = recognizer.location(in: self)
-		ghostty_surface_mouse_pos(surface, location.x, location.y, GHOSTTY_MODS_NONE)
+		sendMousePosition(recognizer.location(in: self))
 		let adjustedDelta = TerminalScrollSettings.adjustedDelta(from: delta, inputKind: inputKind)
 		let mods = TerminalScrollSettings.scrollMods(for: inputKind)
 		ghostty_surface_mouse_scroll(surface, adjustedDelta.x, adjustedDelta.y, mods)
