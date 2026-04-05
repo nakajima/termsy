@@ -116,6 +116,7 @@ final class TerminalHostController: UIViewController {
 
 	private func connectIfNeeded() {
 		guard !terminalTab.isConnected, terminalTab.connectionError == nil, !terminalTab.needsPassword else { return }
+		connectTask?.cancel()
 		connectTask = Task { [weak self] in
 			guard let self else { return }
 			await self.terminalTab.connect()
@@ -156,23 +157,44 @@ final class TerminalHostController: UIViewController {
 	}
 
 	@objc private func appWillResignActive() {
+		terminalTab.noteAppWillResignActive()
 		terminalTab.setDisplayActive(false)
 	}
 
 	@objc private func appDidBecomeActive() {
 		terminalTab.setDisplayActive(true)
-		guard terminalTab.isConnected else { return }
+		if terminalTab.consumeReconnectOnActivation() {
+			reconnectAfterBackgroundLoss()
+			return
+		}
+		guard terminalTab.isConnected else {
+			terminalTab.clearAppInactiveState()
+			return
+		}
 		guard terminalTab.sshSession.connection.isActive else {
-			print("[SSH] connection lost while backgrounded, reconnecting...")
-			terminalTab.isConnected = false
-			terminalTab.connectionError = nil
-			terminalTab.resetTerminalView()
-			terminalView = nil
-			setupTerminal()
-			connectIfNeeded()
+			reconnectAfterBackgroundLoss()
 			return
 		}
 		syncTerminalSizeToSession()
+
+		Task { @MainActor [weak self] in
+			try? await Task.sleep(nanoseconds: 750_000_000)
+			guard let self else { return }
+			if self.terminalTab.consumeReconnectOnActivation() {
+				self.reconnectAfterBackgroundLoss()
+			} else if self.terminalTab.isConnected, self.terminalTab.sshSession.connection.isActive {
+				self.terminalTab.clearAppInactiveState()
+			}
+		}
+	}
+
+	private func reconnectAfterBackgroundLoss() {
+		print("[SSH] reconnecting after app switch/background...")
+		connectTask?.cancel()
+		terminalTab.prepareForReconnectAfterBackgroundLoss()
+		terminalView = nil
+		setupTerminal()
+		connectIfNeeded()
 	}
 
 	deinit {

@@ -342,7 +342,7 @@ private final nonisolated class SSHChannelLifecycleHandler: ChannelInboundHandle
 		} else if let exitStatus {
 			reason = exitStatus == 0 ? .cleanExit : .error("Shell exited with status \(exitStatus)")
 		} else if let caughtError {
-			reason = .error(caughtError.localizedDescription)
+			reason = .error(String(describing: caughtError))
 		} else {
 			reason = .error("Connection closed unexpectedly")
 		}

@@ -12,7 +12,7 @@ import GhosttyKit
 import UIKit
 
 @MainActor
-final class TerminalView: UIView, UIKeyInput, UIPointerInteractionDelegate {
+final class TerminalView: UIView, UIKeyInput {
 	private var surface: ghostty_surface_t?
 	private var displayLink: CADisplayLink?
 	private var hardwareKeyHandled = false
@@ -20,9 +20,9 @@ final class TerminalView: UIView, UIKeyInput, UIPointerInteractionDelegate {
 	private var repeatingHardwareKey: UIKey?
 	private var repeatingKeyCode: UInt16?
 	private var lastMouseLocation: CGPoint?
+	private var activePointerButton: ghostty_input_mouse_button_e?
 	private weak var touchScrollRecognizer: UIPanGestureRecognizer?
 	private weak var indirectScrollRecognizer: UIPanGestureRecognizer?
-	private weak var pointerInteraction: UIPointerInteraction?
 
 	/// Called when the terminal produces bytes (user input, query responses).
 	var onWrite: ((Data) -> Void)?
@@ -64,18 +64,12 @@ final class TerminalView: UIView, UIKeyInput, UIPointerInteractionDelegate {
 			let indirectScrollRecognizer = UIPanGestureRecognizer(
 				target: self, action: #selector(handleScroll(_:)))
 			indirectScrollRecognizer.allowedScrollTypesMask = [.continuous, .discrete]
-			indirectScrollRecognizer.allowedTouchTypes = [
-				NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
-			]
 			indirectScrollRecognizer.cancelsTouchesInView = false
 			indirectScrollRecognizer.delaysTouchesBegan = false
 			indirectScrollRecognizer.delaysTouchesEnded = false
+			indirectScrollRecognizer.requiresExclusiveTouchType = false
 			addGestureRecognizer(indirectScrollRecognizer)
 			self.indirectScrollRecognizer = indirectScrollRecognizer
-
-			let pointerInteraction = UIPointerInteraction(delegate: self)
-			addInteraction(pointerInteraction)
-			self.pointerInteraction = pointerInteraction
 		}
 	}
 
@@ -132,6 +126,7 @@ final class TerminalView: UIView, UIKeyInput, UIPointerInteractionDelegate {
 		stopDisplayLink()
 		stopKeyRepeat()
 		lastMouseLocation = nil
+		activePointerButton = nil
 		if let s = surface {
 			ghostty_surface_set_focus(s, false)
 			ghostty_surface_free(s)
@@ -269,6 +264,16 @@ final class TerminalView: UIView, UIKeyInput, UIPointerInteractionDelegate {
 			super.touchesBegan(touches, with: event)
 			return
 		}
+
+		if touch.type == .indirectPointer {
+			let pos = touch.location(in: self)
+			sendMousePosition(pos)
+			let button = pointerButton(from: event)
+			activePointerButton = button
+			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, button, GHOSTTY_MODS_NONE)
+			return
+		}
+
 		let pos = touch.location(in: self)
 		sendMousePosition(pos)
 		ghostty_surface_mouse_button(
@@ -276,13 +281,11 @@ final class TerminalView: UIView, UIKeyInput, UIPointerInteractionDelegate {
 	}
 
 	override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-		guard touches.first != nil else {
+		guard let touch = touches.first else {
 			super.touchesMoved(touches, with: event)
 			return
 		}
-		if let touch = touches.first {
-			sendMousePosition(touch.location(in: self))
-		}
+		sendMousePosition(touch.location(in: self))
 	}
 
 	override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -291,6 +294,14 @@ final class TerminalView: UIView, UIKeyInput, UIPointerInteractionDelegate {
 			return
 		}
 		sendMousePosition(touch.location(in: self))
+
+		if touch.type == .indirectPointer {
+			let button = activePointerButton ?? pointerButton(from: event)
+			activePointerButton = nil
+			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, button, GHOSTTY_MODS_NONE)
+			return
+		}
+
 		ghostty_surface_mouse_button(
 			surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
 	}
@@ -300,8 +311,9 @@ final class TerminalView: UIView, UIKeyInput, UIPointerInteractionDelegate {
 			super.touchesCancelled(touches, with: event)
 			return
 		}
-		ghostty_surface_mouse_button(
-			surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+		let button = activePointerButton ?? GHOSTTY_MOUSE_LEFT
+		activePointerButton = nil
+		ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, button, GHOSTTY_MODS_NONE)
 	}
 
 	private func sendMousePosition(_ point: CGPoint) {
@@ -311,18 +323,20 @@ final class TerminalView: UIView, UIKeyInput, UIPointerInteractionDelegate {
 		ghostty_surface_mouse_pos(surface, point.x, point.y, GHOSTTY_MODS_NONE)
 	}
 
-	@available(iOS 13.4, *)
-	func pointerInteraction(
-		_ interaction: UIPointerInteraction,
-		regionFor request: UIPointerRegionRequest,
-		defaultRegion: UIPointerRegion
-	) -> UIPointerRegion? {
-		sendMousePosition(request.location)
-		return nil
+	private func pointerButton(from event: UIEvent?) -> ghostty_input_mouse_button_e {
+		guard let event else { return GHOSTTY_MOUSE_LEFT }
+		if event.buttonMask.contains(.secondary) {
+			return GHOSTTY_MOUSE_RIGHT
+		}
+		if event.buttonMask.contains(.primary) {
+			return GHOSTTY_MOUSE_LEFT
+		}
+		return GHOSTTY_MOUSE_LEFT
 	}
 
 	@objc private func handleScroll(_ recognizer: UIPanGestureRecognizer) {
 		guard let surface else { return }
+		guard activePointerButton == nil else { return }
 		let delta = recognizer.translation(in: self)
 		recognizer.setTranslation(.zero, in: self)
 		guard delta != .zero else { return }

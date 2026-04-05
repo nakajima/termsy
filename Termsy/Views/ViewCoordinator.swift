@@ -133,6 +133,9 @@ class TerminalTab: Identifiable {
 	var onRequestSelectTab: ((Int) -> Void)?
 	var onRequestMoveTabSelection: ((Int) -> Void)?
 
+	private var wasConnectedWhenAppResignedActive = false
+	private var shouldReconnectOnActivation = false
+
 	let id = UUID()
 
 	init(session: Session) {
@@ -235,6 +238,29 @@ class TerminalTab: Identifiable {
 		terminalView.setDisplayActive(isActive)
 	}
 
+	func noteAppWillResignActive() {
+		wasConnectedWhenAppResignedActive = isConnected
+	}
+
+	func consumeReconnectOnActivation() -> Bool {
+		let shouldReconnect = shouldReconnectOnActivation
+		shouldReconnectOnActivation = false
+		return shouldReconnect
+	}
+
+	func clearAppInactiveState() {
+		wasConnectedWhenAppResignedActive = false
+		shouldReconnectOnActivation = false
+	}
+
+	func prepareForReconnectAfterBackgroundLoss() {
+		connectionError = nil
+		needsPassword = false
+		isRestoring = false
+		disconnect()
+		resetTerminalView()
+	}
+
 	private func configureTerminalView() {
 		terminalView.onCloseTabRequest = { [weak self] in
 			self?.requestClose()
@@ -282,10 +308,17 @@ class TerminalTab: Identifiable {
 		case .localDisconnect:
 			break
 		case .cleanExit:
+			clearAppInactiveState()
 			terminalView.processExited()
 			onRequestClose?()
 		case let .error(message):
-			connectionError = message
+			if wasConnectedWhenAppResignedActive {
+				print("[SSH] connection closed while app inactive; will reconnect on activation: \(message)")
+				shouldReconnectOnActivation = true
+				connectionError = nil
+			} else {
+				connectionError = message
+			}
 		}
 	}
 }
