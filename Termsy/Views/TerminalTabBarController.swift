@@ -135,13 +135,20 @@ final class TerminalHostController: UIViewController {
 		})
 		.environment(\.appTheme, theme)
 
+		let overlayNeedsInteraction = !terminalTab.isConnected
+			|| terminalTab.connectionError != nil
+			|| terminalTab.isRestoring
+			|| terminalTab.needsPassword
+
 		if let existing = overlayHostController {
 			existing.rootView = AnyView(overlayView)
+			existing.view.isUserInteractionEnabled = overlayNeedsInteraction
 		} else {
 			let host = UIHostingController(rootView: AnyView(overlayView))
 			host.view.backgroundColor = .clear
 			host.view.frame = view.bounds
 			host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+			host.view.isUserInteractionEnabled = overlayNeedsInteraction
 			addChild(host)
 			view.addSubview(host.view)
 			host.didMove(toParent: self)

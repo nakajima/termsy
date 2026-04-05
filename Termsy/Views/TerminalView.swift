@@ -63,6 +63,7 @@ final class TerminalView: UIView, UIKeyInput {
 		if #available(iOS 13.4, *) {
 			let indirectScrollRecognizer = UIPanGestureRecognizer(
 				target: self, action: #selector(handleScroll(_:)))
+			indirectScrollRecognizer.allowedTouchTypes = []
 			indirectScrollRecognizer.allowedScrollTypesMask = [.continuous, .discrete]
 			indirectScrollRecognizer.cancelsTouchesInView = false
 			indirectScrollRecognizer.delaysTouchesBegan = false
