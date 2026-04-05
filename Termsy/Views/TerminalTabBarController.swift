@@ -52,6 +52,13 @@ final class TerminalHostController: UIViewController {
 		applyTheme(theme)
 		setupTerminal()
 		connectIfNeeded()
+
+		NotificationCenter.default.addObserver(
+			self,
+			selector: #selector(appDidBecomeActive),
+			name: UIApplication.didBecomeActiveNotification,
+			object: nil
+		)
 	}
 
 	override func viewDidAppear(_ animated: Bool) {
@@ -88,7 +95,11 @@ final class TerminalHostController: UIViewController {
 			self?.terminalTab.sshSession.connection.send(data)
 		}
 		tv.onResize = { [weak self] cols, rows in
-			self?.terminalTab.sshSession.connection.resize(cols: Int(cols), rows: Int(rows))
+			guard let self else { return }
+			let c = Int(cols), r = Int(rows)
+			self.terminalTab.sshSession.lastCols = c
+			self.terminalTab.sshSession.lastRows = r
+			self.terminalTab.sshSession.connection.resize(cols: c, rows: r)
 		}
 		view.addSubview(tv)
 		terminalTab.sshSession.terminalView = tv
@@ -134,6 +145,16 @@ final class TerminalHostController: UIViewController {
 			host.didMove(toParent: self)
 			overlayHostController = host
 		}
+	}
+
+	@objc private func appDidBecomeActive() {
+		guard terminalTab.isConnected, !terminalTab.sshSession.connection.isActive else { return }
+		print("[SSH] connection lost while backgrounded, reconnecting...")
+		terminalTab.isConnected = false
+		terminalTab.connectionError = nil
+		teardownTerminal()
+		setupTerminal()
+		connectIfNeeded()
 	}
 
 	deinit {

@@ -32,6 +32,10 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	private let onData: @Sendable (Data) -> Void
 	private let onClose: @Sendable () -> Void
 
+	var isActive: Bool {
+		channel?.isActive ?? false
+	}
+
 	init(
 		onData: @escaping @Sendable (Data) -> Void,
 		onClose: @escaping @Sendable () -> Void
