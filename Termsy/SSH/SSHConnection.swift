@@ -24,13 +24,20 @@ enum SSHConnectionError: Error, LocalizedError {
 }
 
 final nonisolated class SSHConnection: @unchecked Sendable {
+	enum CloseReason: Sendable {
+		case localDisconnect
+		case cleanExit
+		case error(String)
+	}
+
 	private let group = NIOTSEventLoopGroup()
 	private var channel: Channel?
 	private var sshChildChannel: Channel?
 	private var authDelegate: PasswordOrNoneAuthDelegate?
+	private var isDisconnecting = false
 
 	private let onData: @Sendable (Data) -> Void
-	private let onClose: @Sendable () -> Void
+	private let onClose: @Sendable (CloseReason) -> Void
 
 	var isActive: Bool {
 		channel?.isActive ?? false
@@ -38,7 +45,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 	init(
 		onData: @escaping @Sendable (Data) -> Void,
-		onClose: @escaping @Sendable () -> Void
+		onClose: @escaping @Sendable (CloseReason) -> Void
 	) {
 		self.onData = onData
 		self.onClose = onClose
@@ -46,6 +53,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 	func connect(host: String, port: Int, username: String, password: String?) async throws {
 		print("[SSH] connecting to \(host):\(port) as \(username)")
+		isDisconnecting = false
 
 		let authDelegate = PasswordOrNoneAuthDelegate(
 			username: username,
@@ -107,7 +115,10 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 				}
 				return childChannel.pipeline.addHandlers([
 					SSHChannelDataHandler(onData: onData),
-					SSHChannelCloseHandler(onClose: onClose),
+					SSHChannelLifecycleHandler(
+						isDisconnecting: { [weak self] in self?.isDisconnecting ?? false },
+						onClose: onClose
+					),
 				])
 			}
 			return promise.futureResult
@@ -159,6 +170,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	}
 
 	func disconnect() {
+		isDisconnecting = true
 		sshChildChannel?.close(mode: .all, promise: nil)
 		channel?.close(mode: .all, promise: nil)
 	}
@@ -255,17 +267,59 @@ private final nonisolated class SSHChannelDataHandler: ChannelInboundHandler {
 	}
 }
 
-private final nonisolated class SSHChannelCloseHandler: ChannelInboundHandler {
+private final nonisolated class SSHChannelLifecycleHandler: ChannelInboundHandler {
 	typealias InboundIn = SSHChannelData
 
-	let onClose: @Sendable () -> Void
+	let isDisconnecting: @Sendable () -> Bool
+	let onClose: @Sendable (SSHConnection.CloseReason) -> Void
 
-	init(onClose: @escaping @Sendable () -> Void) {
+	private var exitStatus: Int?
+	private var exitSignal: SSHChannelRequestEvent.ExitSignal?
+	private var caughtError: Error?
+
+	init(
+		isDisconnecting: @escaping @Sendable () -> Bool,
+		onClose: @escaping @Sendable (SSHConnection.CloseReason) -> Void
+	) {
+		self.isDisconnecting = isDisconnecting
 		self.onClose = onClose
 	}
 
+	func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+		switch event {
+		case let event as SSHChannelRequestEvent.ExitStatus:
+			exitStatus = event.exitStatus
+		case let event as SSHChannelRequestEvent.ExitSignal:
+			exitSignal = event
+		default:
+			break
+		}
+		context.fireUserInboundEventTriggered(event)
+	}
+
+	func errorCaught(context: ChannelHandlerContext, error: any Error) {
+		caughtError = error
+		context.fireErrorCaught(error)
+	}
+
 	func channelInactive(context: ChannelHandlerContext) {
-		onClose()
+		let reason: SSHConnection.CloseReason
+		if isDisconnecting() {
+			reason = .localDisconnect
+		} else if let exitSignal {
+			let message = exitSignal.errorMessage.isEmpty
+				? "Shell terminated by signal \(exitSignal.signalName)"
+				: "Shell terminated by signal \(exitSignal.signalName): \(exitSignal.errorMessage)"
+			reason = .error(message)
+		} else if let exitStatus {
+			reason = exitStatus == 0 ? .cleanExit : .error("Shell exited with status \(exitStatus)")
+		} else if let caughtError {
+			reason = .error(caughtError.localizedDescription)
+		} else {
+			reason = .error("Connection closed unexpectedly")
+		}
+
+		onClose(reason)
 		context.fireChannelInactive()
 	}
 }

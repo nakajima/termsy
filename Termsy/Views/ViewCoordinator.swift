@@ -27,6 +27,13 @@ class ViewCoordinator {
 
 	func openTab(for session: Session) {
 		let tab = TerminalTab(session: session)
+		let tabID = tab.id
+		tab.onRequestClose = { [weak self] in
+			self?.closeTab(tabID)
+		}
+		tab.onRequestNewTab = { [weak self] in
+			self?.isShowingSessionPicker = true
+		}
 		tabs.append(tab)
 		selectTab(tab.id)
 	}
@@ -50,7 +57,7 @@ class ViewCoordinator {
 	func closeTab(_ id: UUID?) {
 		guard let id, let index = tabs.firstIndex(where: { $0.id == id }) else { return }
 		let tab = tabs[index]
-		tab.sshSession.disconnect()
+		tab.disconnect()
 		tabs.remove(at: index)
 
 		if selectedTabID == id {
@@ -66,7 +73,7 @@ class ViewCoordinator {
 	func closeOtherTabs(_ id: UUID?) {
 		let toClose = tabs.filter { $0.id != id }
 		for tab in toClose {
-			tab.sshSession.disconnect()
+			tab.disconnect()
 		}
 		tabs.removeAll { $0.id != id }
 		if let id { selectTab(id) }
@@ -95,15 +102,21 @@ class TerminalTab: Identifiable {
 	var isConnected = false
 	var connectionError: String?
 	var needsPassword = false
+	var onRequestClose: (() -> Void)?
+	var onRequestNewTab: (() -> Void)?
 
 	let id = UUID()
 
 	init(session: Session) {
 		self.session = session
 		self.sshSession = SSHTerminalSession()
+		self.sshSession.onClose = { [weak self] reason in
+			self?.handleSessionClose(reason)
+		}
 	}
 
 	func connect() async {
+		connectionError = nil
 		// Try none auth first, then fall back to keychain password
 		let keychainPassword = Keychain.password(for: session)
 		do {
@@ -133,7 +146,7 @@ class TerminalTab: Identifiable {
 	func connectWithPassword(_ password: String) async {
 		needsPassword = false
 		connectionError = nil
-		sshSession.disconnect()
+		disconnect()
 		do {
 			try await sshSession.connect(
 				host: session.hostname,
@@ -147,6 +160,33 @@ class TerminalTab: Identifiable {
 		} catch {
 			print("[SSH] connection error: \(error)")
 			connectionError = "\(error)"
+		}
+	}
+
+	func disconnect() {
+		isConnected = false
+		sshSession.disconnect()
+	}
+
+	func requestClose() {
+		onRequestClose?()
+	}
+
+	func requestNewTab() {
+		onRequestNewTab?()
+	}
+
+	private func handleSessionClose(_ reason: SSHTerminalSession.CloseReason) {
+		isConnected = false
+		needsPassword = false
+
+		switch reason {
+		case .localDisconnect:
+			break
+		case .cleanExit:
+			onRequestClose?()
+		case let .error(message):
+			connectionError = message
 		}
 	}
 }

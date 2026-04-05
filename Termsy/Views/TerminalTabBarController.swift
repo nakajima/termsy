@@ -91,6 +91,12 @@ final class TerminalHostController: UIViewController {
 		let tv = TerminalView(frame: view.bounds)
 		tv.applyTheme(theme)
 		tv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+		tv.onCloseTabRequest = { [weak self] in
+			self?.terminalTab.requestClose()
+		}
+		tv.onNewTabRequest = { [weak self] in
+			self?.terminalTab.requestNewTab()
+		}
 		tv.onWrite = { [weak self] data in
 			self?.terminalTab.sshSession.connection.send(data)
 		}

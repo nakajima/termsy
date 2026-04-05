@@ -11,6 +11,12 @@ import Foundation
 
 @MainActor
 final class SSHTerminalSession {
+	enum CloseReason {
+		case localDisconnect
+		case cleanExit
+		case error(String)
+	}
+
 	let connection: SSHConnection
 
 	/// Set by the terminal representable when the view is created.
@@ -26,6 +32,8 @@ final class SSHTerminalSession {
 	/// Whether we're currently replaying buffered data.
 	private(set) var isReplaying = false
 
+	var onClose: ((CloseReason) -> Void)?
+
 	init() {
 		nonisolated(unsafe) var sessionRef: SSHTerminalSession?
 
@@ -36,10 +44,10 @@ final class SSHTerminalSession {
 					ref?.handleIncomingData(data)
 				}
 			},
-			onClose: {
+			onClose: { reason in
 				let ref = sessionRef
 				DispatchQueue.main.async {
-					ref?.terminalView?.processExited()
+					ref?.handleConnectionClose(reason)
 				}
 			}
 		)
@@ -117,6 +125,21 @@ final class SSHTerminalSession {
 	}
 
 	// MARK: - Private
+
+	private func handleConnectionClose(_ reason: SSHConnection.CloseReason) {
+		switch reason {
+		case .localDisconnect:
+			onClose?(.localDisconnect)
+		case .cleanExit:
+			terminalView?.processExited()
+			cleanupBuffer()
+			onClose?(.cleanExit)
+		case let .error(message):
+			terminalView?.processExited()
+			cleanupBuffer()
+			onClose?(.error(message))
+		}
+	}
 
 	private func handleIncomingData(_ data: Data) {
 		if isForeground {

@@ -23,6 +23,12 @@ final class TerminalView: UIView, UIKeyInput {
 	/// Called when the terminal grid resizes.
 	var onResize: ((UInt16, UInt16) -> Void)?
 
+	/// Called when the user requests closing the current tab.
+	var onCloseTabRequest: (() -> Void)?
+
+	/// Called when the user requests opening a new tab.
+	var onNewTabRequest: (() -> Void)?
+
 	// MARK: - Lifecycle
 
 	override init(frame: CGRect) {
@@ -285,6 +291,16 @@ final class TerminalView: UIView, UIKeyInput {
 	override func pressesBegan(_ presses: Set<UIPress>, with _: UIPressesEvent?) {
 		for press in presses {
 			guard let key = press.key, let surface else { continue }
+			if key.modifierFlags.contains(.command) {
+				if key.charactersIgnoringModifiers.compare("w", options: .caseInsensitive) == .orderedSame {
+					onCloseTabRequest?()
+					continue
+				}
+				if key.charactersIgnoringModifiers.compare("t", options: .caseInsensitive) == .orderedSame {
+					onNewTabRequest?()
+					continue
+				}
+			}
 			// Suppress UIKit's insertText for all keys we handle here.
 			// Enter, backspace, etc. would otherwise double-send.
 			hardwareKeyHandled = true
@@ -295,6 +311,12 @@ final class TerminalView: UIView, UIKeyInput {
 	override func pressesEnded(_ presses: Set<UIPress>, with _: UIPressesEvent?) {
 		for press in presses {
 			guard let key = press.key, let surface else { continue }
+			if key.modifierFlags.contains(.command),
+			   ["w", "t"].contains(where: {
+				key.charactersIgnoringModifiers.compare($0, options: .caseInsensitive) == .orderedSame
+			}) {
+				continue
+			}
 			handleKey(key, action: GHOSTTY_ACTION_RELEASE, surface: surface)
 		}
 		hardwareKeyHandled = false
