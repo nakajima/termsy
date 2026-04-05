@@ -82,8 +82,8 @@ final class GhosttyApp {
 			UIPasteboard.general.string = String(cString: data)
 		}
 		rt.read_clipboard_cb = { userdata, _, opaquePtr in
-			guard let userdata, let opaquePtr else { return false }
-			guard let surfacePtr = ghostty_surface_userdata(
+			guard let userdata else { return false }
+			guard let _ = ghostty_surface_userdata(
 				Unmanaged<GhosttyApp>.fromOpaque(userdata).takeUnretainedValue().app!
 			) else { return false }
 			// Simplified: not implementing full clipboard read for now.

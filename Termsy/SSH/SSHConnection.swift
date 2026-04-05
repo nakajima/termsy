@@ -6,7 +6,7 @@
 import Foundation
 import NIOCore
 import NIOFoundationCompat
-import NIOSSH
+@preconcurrency import NIOSSH
 import NIOTransportServices
 
 struct TerminalWindowSize: Sendable, Equatable {
@@ -15,7 +15,7 @@ struct TerminalWindowSize: Sendable, Equatable {
 	var pixelWidth: Int
 	var pixelHeight: Int
 
-	nonisolated(unsafe) static let `default` = Self(columns: 80, rows: 24, pixelWidth: 0, pixelHeight: 0)
+	static let `default` = Self(columns: 80, rows: 24, pixelWidth: 0, pixelHeight: 0)
 }
 
 enum SSHConnectionError: Error, LocalizedError {

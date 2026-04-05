@@ -78,16 +78,6 @@ struct ContentView: View {
 				coordinator.openTab(for: session)
 			}
 		}
-		// Cmd+1–9 keyboard shortcuts
-		.background {
-			ForEach(Array(coordinator.tabs.enumerated()), id: \.element.id) { index, tab in
-				if index < 9 {
-					Button("") { coordinator.selectTab(tab.id) }
-						.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
-						.hidden()
-				}
-			}
-		}
 	}
 }
 
