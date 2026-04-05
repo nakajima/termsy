@@ -12,14 +12,16 @@ struct WhatsNewContent: Equatable {
 
 	static let fallback = Self(
 		title: "What's New",
-		summary: "A quick summary of the latest improvements in Termsy.",
-		changes: [
-			"Bug fixes and improvements."
-		]
+		summary: nil,
+		changes: []
 	)
 
-	var previewChange: String {
-		changes.first ?? Self.fallback.changes[0]
+	var hasChanges: Bool {
+		!changes.isEmpty
+	}
+
+	var previewChange: String? {
+		changes.first
 	}
 }
 

@@ -112,7 +112,7 @@ for raw_message in messages_path.read_text().splitlines():
         break
 
 if not bullets:
-    bullets = ["Bug fixes and improvements."]
+    bullets = []
 
 bullet_lines = "\n".join(f"\t\t\t{swift_string(bullet)}," for bullet in bullets)
 if bullet_lines.endswith(","):

@@ -219,16 +219,6 @@ struct TerminalOverlay: View {
 
 	@State private var password = ""
 
-	private var errorDescription: String {
-		guard let error = tab.connectionError else { return "" }
-		if error.localizedCaseInsensitiveContains("tcpShutdown")
-			|| error.localizedCaseInsensitiveContains("tcp shutdown")
-		{
-			return "The SSH connection was dropped while the app was inactive."
-		}
-		return error
-	}
-
 	var body: some View {
 		ZStack {
 			if !tab.isConnected, tab.connectionError == nil, !tab.needsPassword {
@@ -245,7 +235,7 @@ struct TerminalOverlay: View {
 					.foregroundStyle(theme.primaryText)
 			}
 
-			if tab.connectionError != nil {
+			if let error = tab.connectionError {
 				VStack(spacing: 12) {
 					Image(systemName: "xmark.circle")
 						.font(.largeTitle)
@@ -253,7 +243,7 @@ struct TerminalOverlay: View {
 					Text("Connection Failed")
 						.font(.headline)
 						.foregroundStyle(theme.primaryText)
-					Text(errorDescription)
+					Text(error)
 						.font(.caption)
 						.foregroundStyle(theme.secondaryText)
 						.multilineTextAlignment(.center)

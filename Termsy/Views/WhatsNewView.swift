@@ -45,19 +45,21 @@ struct WhatsNewView: View {
 				.listRowBackground(theme.cardBackground)
 			}
 
-			Section("Changes") {
-				ForEach(Array(content.changes.enumerated()), id: \.offset) { _, change in
-					HStack(alignment: .top, spacing: 12) {
-						Image(systemName: "sparkles")
-							.foregroundStyle(theme.accent)
-							.padding(.top, 2)
+			if content.hasChanges {
+				Section("Changes") {
+					ForEach(Array(content.changes.enumerated()), id: \.offset) { _, change in
+						HStack(alignment: .top, spacing: 12) {
+							Image(systemName: "sparkles")
+								.foregroundStyle(theme.accent)
+								.padding(.top, 2)
 
-						Text(change)
-							.foregroundStyle(theme.primaryText)
-							.fixedSize(horizontal: false, vertical: true)
+							Text(change)
+								.foregroundStyle(theme.primaryText)
+								.fixedSize(horizontal: false, vertical: true)
+						}
+						.padding(.vertical, 4)
+						.listRowBackground(theme.cardBackground)
 					}
-					.padding(.vertical, 4)
-					.listRowBackground(theme.cardBackground)
 				}
 			}
 		}
