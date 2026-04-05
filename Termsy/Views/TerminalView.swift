@@ -54,6 +54,9 @@ final class TerminalView: UIView, UIKeyInput {
 			target: self, action: #selector(handleScroll(_:)))
 		touchScrollRecognizer.minimumNumberOfTouches = 2
 		touchScrollRecognizer.maximumNumberOfTouches = 2
+		touchScrollRecognizer.allowedTouchTypes = [
+			NSNumber(value: UITouch.TouchType.direct.rawValue)
+		]
 		touchScrollRecognizer.cancelsTouchesInView = false
 		touchScrollRecognizer.delaysTouchesBegan = false
 		touchScrollRecognizer.delaysTouchesEnded = false
@@ -261,8 +264,8 @@ final class TerminalView: UIView, UIKeyInput {
 	// MARK: - Touch / Mouse
 
 	override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+		super.touchesBegan(touches, with: event)
 		guard let surface, let touch = touches.first else {
-			super.touchesBegan(touches, with: event)
 			return
 		}
 
@@ -282,16 +285,16 @@ final class TerminalView: UIView, UIKeyInput {
 	}
 
 	override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+		super.touchesMoved(touches, with: event)
 		guard let touch = touches.first else {
-			super.touchesMoved(touches, with: event)
 			return
 		}
 		sendMousePosition(touch.location(in: self))
 	}
 
 	override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+		super.touchesEnded(touches, with: event)
 		guard let surface, let touch = touches.first else {
-			super.touchesEnded(touches, with: event)
 			return
 		}
 		sendMousePosition(touch.location(in: self))
@@ -308,8 +311,8 @@ final class TerminalView: UIView, UIKeyInput {
 	}
 
 	override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+		super.touchesCancelled(touches, with: event)
 		guard let surface else {
-			super.touchesCancelled(touches, with: event)
 			return
 		}
 		let button = activePointerButton ?? GHOSTTY_MOUSE_LEFT
