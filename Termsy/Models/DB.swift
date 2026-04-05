@@ -25,7 +25,7 @@ struct DB {
 		migrator.registerMigration("CreateSession") { db in
 			try db.create(table: "session") { t in
 				t.autoIncrementedPrimaryKey("id")
-				t.column("hostname", .text).notNull().unique(onConflict: .replace)
+				t.column("hostname", .text).notNull()
 				t.column("username", .text).notNull()
 				t.column("port", .integer).defaults(to: 22).notNull()
 				t.column("autoconnect", .boolean).notNull().defaults(to: true)

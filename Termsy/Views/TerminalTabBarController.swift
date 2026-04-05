@@ -55,6 +55,12 @@ final class TerminalHostController: UIViewController {
 
 		NotificationCenter.default.addObserver(
 			self,
+			selector: #selector(appWillResignActive),
+			name: UIApplication.willResignActiveNotification,
+			object: nil
+		)
+		NotificationCenter.default.addObserver(
+			self,
 			selector: #selector(appDidBecomeActive),
 			name: UIApplication.didBecomeActiveNotification,
 			object: nil
@@ -66,8 +72,9 @@ final class TerminalHostController: UIViewController {
 		if terminalView == nil {
 			setupTerminal()
 		}
-		terminalView?.becomeFirstResponder()
-		restoreTranscriptIfNeeded()
+		terminalTab.setDisplayActive(true)
+		_ = terminalView?.becomeFirstResponder()
+		_ = terminalView?.syncSizeAndReadBack()
 	}
 
 	override func viewDidLayoutSubviews() {
@@ -78,43 +85,33 @@ final class TerminalHostController: UIViewController {
 	func applyTheme(_ theme: AppTheme) {
 		self.theme = theme
 		view.backgroundColor = theme.backgroundUIColor
-		terminalView?.applyTheme(theme)
+		terminalTab.applyTheme(theme)
 		updateOverlay()
 	}
 
 	func setupTerminal() {
 		guard terminalView == nil else { return }
 
-		let tv = TerminalView(frame: view.bounds)
-		tv.applyTheme(theme)
+		let tv = terminalTab.terminalView
+		tv.frame = view.bounds
 		tv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-		tv.onCloseTabRequest = { [weak self] in
-			self?.terminalTab.requestClose()
+		tv.applyTheme(theme)
+		tv.removeFromSuperview()
+		if let overlayView = overlayHostController?.view {
+			view.insertSubview(tv, belowSubview: overlayView)
+		} else {
+			view.addSubview(tv)
 		}
-		tv.onNewTabRequest = { [weak self] in
-			self?.terminalTab.requestNewTab()
-		}
-		tv.onSelectTabRequest = { [weak self] index in
-			self?.terminalTab.requestSelectTab(index)
-		}
-		tv.onWrite = { [weak self] data in
-			self?.terminalTab.sshSession.connection.send(data)
-		}
-		tv.onResize = { [weak self] _, _ in
-			self?.syncTerminalSizeToSession()
-		}
-		view.addSubview(tv)
-		terminalTab.sshSession.terminalView = tv
 		terminalView = tv
+		terminalTab.setDisplayActive(true)
 		syncTerminalSizeToSession()
 		updateOverlay()
 	}
 
 	func teardownTerminal() {
-		terminalView?.stop()
+		terminalTab.setDisplayActive(false)
 		terminalView?.removeFromSuperview()
 		terminalView = nil
-		terminalTab.sshSession.terminalView = nil
 	}
 
 	private func connectIfNeeded() {
@@ -151,16 +148,6 @@ final class TerminalHostController: UIViewController {
 		}
 	}
 
-	private func restoreTranscriptIfNeeded() {
-		guard terminalTab.isConnected, terminalTab.connectionError == nil else { return }
-		Task { [weak self] in
-			guard let self else { return }
-			self.terminalTab.isRestoring = true
-			defer { self.terminalTab.isRestoring = false }
-			await self.terminalTab.sshSession.replayIfNeeded()
-		}
-	}
-
 	private func syncTerminalSizeToSession() {
 		guard let terminalView else { return }
 		terminalView.frame = view.bounds
@@ -168,14 +155,24 @@ final class TerminalHostController: UIViewController {
 		terminalTab.sshSession.updateTerminalSize(size)
 	}
 
+	@objc private func appWillResignActive() {
+		terminalTab.setDisplayActive(false)
+	}
+
 	@objc private func appDidBecomeActive() {
-		guard terminalTab.isConnected, !terminalTab.sshSession.connection.isActive else { return }
-		print("[SSH] connection lost while backgrounded, reconnecting...")
-		terminalTab.isConnected = false
-		terminalTab.connectionError = nil
-		teardownTerminal()
-		setupTerminal()
-		connectIfNeeded()
+		terminalTab.setDisplayActive(true)
+		guard terminalTab.isConnected else { return }
+		guard terminalTab.sshSession.connection.isActive else {
+			print("[SSH] connection lost while backgrounded, reconnecting...")
+			terminalTab.isConnected = false
+			terminalTab.connectionError = nil
+			terminalTab.resetTerminalView()
+			terminalView = nil
+			setupTerminal()
+			connectIfNeeded()
+			return
+		}
+		syncTerminalSizeToSession()
 	}
 
 	deinit {

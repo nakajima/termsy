@@ -39,6 +39,9 @@ final class TerminalView: UIView, UIKeyInput {
 	/// Called when the user requests selecting a tab by 1-based index.
 	var onSelectTabRequest: ((Int) -> Void)?
 
+	/// Called when the user requests moving the current tab selection by a relative offset.
+	var onMoveTabSelectionRequest: ((Int) -> Void)?
+
 	// MARK: - Lifecycle
 
 	override init(frame: CGRect) {
@@ -89,37 +92,41 @@ final class TerminalView: UIView, UIKeyInput {
 	}
 
 	func start() {
-		guard surface == nil, let app = GhosttyApp.shared.app else { return }
+		if surface == nil {
+			guard let app = GhosttyApp.shared.app else { return }
 
-		var cfg = ghostty_surface_config_new()
-		cfg.platform_tag = GHOSTTY_PLATFORM_IOS
-		cfg.platform = ghostty_platform_u(
-			ios: ghostty_platform_ios_s(uiview: Unmanaged.passUnretained(self).toOpaque())
-		)
-		cfg.backend = GHOSTTY_SURFACE_IO_BACKEND_HOST_MANAGED
-		cfg.userdata = Unmanaged.passUnretained(self).toOpaque()
-		cfg.receive_userdata = Unmanaged.passUnretained(self).toOpaque()
-		cfg.receive_buffer = { userdata, ptr, len in
-			guard let userdata, let ptr else { return }
-			let view = Unmanaged<TerminalView>.fromOpaque(userdata).takeUnretainedValue()
-			let data = Data(bytes: ptr, count: len)
-			view.onWrite?(data)
+			var cfg = ghostty_surface_config_new()
+			cfg.platform_tag = GHOSTTY_PLATFORM_IOS
+			cfg.platform = ghostty_platform_u(
+				ios: ghostty_platform_ios_s(uiview: Unmanaged.passUnretained(self).toOpaque())
+			)
+			cfg.backend = GHOSTTY_SURFACE_IO_BACKEND_HOST_MANAGED
+			cfg.userdata = Unmanaged.passUnretained(self).toOpaque()
+			cfg.receive_userdata = Unmanaged.passUnretained(self).toOpaque()
+			cfg.receive_buffer = { userdata, ptr, len in
+				guard let userdata, let ptr else { return }
+				let view = Unmanaged<TerminalView>.fromOpaque(userdata).takeUnretainedValue()
+				let data = Data(bytes: ptr, count: len)
+				view.onWrite?(data)
+			}
+			cfg.receive_resize = { userdata, cols, rows, _, _ in
+				guard let userdata else { return }
+				let view = Unmanaged<TerminalView>.fromOpaque(userdata).takeUnretainedValue()
+				view.onResize?(cols, rows)
+			}
+
+			let scale = resolvedScale()
+			cfg.scale_factor = Double(scale)
+			cfg.font_size = 14
+
+			surface = ghostty_surface_new(app, &cfg)
 		}
-		cfg.receive_resize = { userdata, cols, rows, _, _ in
-			guard let userdata else { return }
-			let view = Unmanaged<TerminalView>.fromOpaque(userdata).takeUnretainedValue()
-			view.onResize?(cols, rows)
-		}
 
-		let scale = resolvedScale()
-		cfg.scale_factor = Double(scale)
-		cfg.font_size = 14
-
-		surface = ghostty_surface_new(app, &cfg)
-		guard surface != nil else { return }
-
+		guard let surface else { return }
 		ghostty_surface_set_focus(surface, true)
 		startDisplayLink()
+		ghostty_surface_refresh(surface)
+		ghostty_surface_draw(surface)
 	}
 
 	func stop() {
@@ -172,6 +179,9 @@ final class TerminalView: UIView, UIKeyInput {
 				self.becomeFirstResponder()
 			}
 		} else {
+			if let surface {
+				ghostty_surface_set_focus(surface, false)
+			}
 			stopDisplayLink()
 			stopKeyRepeat()
 		}
@@ -185,7 +195,7 @@ final class TerminalView: UIView, UIKeyInput {
 	}
 
 	private func resolvedScale() -> CGFloat {
-		window?.screen.nativeScale ?? UIScreen.main.nativeScale
+		window?.windowScene?.screen.nativeScale ?? window?.screen.nativeScale ?? 1
 	}
 
 	private func updateDisplayScale() {
@@ -376,6 +386,10 @@ final class TerminalView: UIView, UIKeyInput {
 					onNewTabRequest?()
 					continue
 				}
+				if let tabSelectionOffset = tabSelectionOffset(for: key) {
+					onMoveTabSelectionRequest?(tabSelectionOffset)
+					continue
+				}
 				if let digit = Int(key.charactersIgnoringModifiers), (1 ... 9).contains(digit) {
 					onSelectTabRequest?(digit)
 					continue
@@ -404,6 +418,9 @@ final class TerminalView: UIView, UIKeyInput {
 				}) {
 					continue
 				}
+				if tabSelectionOffset(for: key) != nil {
+					continue
+				}
 				if let digit = Int(key.charactersIgnoringModifiers), (1 ... 9).contains(digit) {
 					continue
 				}
@@ -421,6 +438,18 @@ final class TerminalView: UIView, UIKeyInput {
 			}
 		}
 		hardwareKeyHandled = false
+	}
+
+	private func tabSelectionOffset(for key: UIKey) -> Int? {
+		guard key.modifierFlags.contains(.command), key.modifierFlags.contains(.shift) else { return nil }
+		switch key.charactersIgnoringModifiers {
+		case "[":
+			return -1
+		case "]":
+			return 1
+		default:
+			return nil
+		}
 	}
 
 	private func shouldRepeatHardwareKey(_ key: UIKey) -> Bool {

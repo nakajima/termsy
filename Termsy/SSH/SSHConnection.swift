@@ -15,7 +15,7 @@ struct TerminalWindowSize: Sendable, Equatable {
 	var pixelWidth: Int
 	var pixelHeight: Int
 
-	static let `default` = Self(columns: 80, rows: 24, pixelWidth: 0, pixelHeight: 0)
+	nonisolated(unsafe) static let `default` = Self(columns: 80, rows: 24, pixelWidth: 0, pixelHeight: 0)
 }
 
 enum SSHConnectionError: Error, LocalizedError {

@@ -55,10 +55,15 @@ enum TerminalScrollSettings {
 		)
 	}
 
+	static func scrollRows(for adjustedDeltaY: CGFloat, cellHeight: CGFloat) -> Int {
+		guard cellHeight > 0 else { return 0 }
+		return Int(adjustedDeltaY / cellHeight)
+	}
+
 	static func scrollMods(for inputKind: InputKind) -> ghostty_input_scroll_mods_t {
 		switch inputKind {
 		case .touch, .indirectPointer:
-			1 // precision scrolling
+			1  // precision scrolling
 		}
 	}
 }
