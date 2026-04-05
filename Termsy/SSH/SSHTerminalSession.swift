@@ -54,15 +54,17 @@ final class SSHTerminalSession {
 		sessionRef = self
 	}
 
-	/// Last known grid size from the Ghostty surface.
-	var lastCols: Int = 80
-	var lastRows: Int = 24
+	private(set) var terminalSize = TerminalWindowSize.default
+
+	func updateTerminalSize(_ size: TerminalWindowSize) {
+		guard size.columns > 0, size.rows > 0 else { return }
+		terminalSize = size
+		connection.resize(size)
+	}
 
 	func connect(host: String, port: Int, username: String, password: String?) async throws {
 		try await connection.connect(host: host, port: port, username: username, password: password)
-		try await connection.startShell(cols: lastCols, rows: lastRows)
-		// Re-send resize in case the surface reported a different size before the shell existed
-		connection.resize(cols: lastCols, rows: lastRows)
+		try await connection.startShell(size: terminalSize)
 	}
 
 	func disconnect() {

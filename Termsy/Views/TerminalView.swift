@@ -16,6 +16,8 @@ final class TerminalView: UIView, UIKeyInput {
 	private var surface: ghostty_surface_t?
 	private var displayLink: CADisplayLink?
 	private var hardwareKeyHandled = false
+	private weak var touchScrollRecognizer: UIPanGestureRecognizer?
+	private weak var indirectScrollRecognizer: UIPanGestureRecognizer?
 
 	/// Called when the terminal produces bytes (user input, query responses).
 	var onWrite: ((Data) -> Void)?
@@ -28,6 +30,9 @@ final class TerminalView: UIView, UIKeyInput {
 
 	/// Called when the user requests opening a new tab.
 	var onNewTabRequest: (() -> Void)?
+
+	/// Called when the user requests selecting a tab by 1-based index.
+	var onSelectTabRequest: ((Int) -> Void)?
 
 	// MARK: - Lifecycle
 
@@ -42,6 +47,7 @@ final class TerminalView: UIView, UIKeyInput {
 		touchScrollRecognizer.minimumNumberOfTouches = 2
 		touchScrollRecognizer.maximumNumberOfTouches = 2
 		addGestureRecognizer(touchScrollRecognizer)
+		self.touchScrollRecognizer = touchScrollRecognizer
 
 		if #available(iOS 13.4, *) {
 			let indirectScrollRecognizer = UIPanGestureRecognizer(
@@ -51,6 +57,7 @@ final class TerminalView: UIView, UIKeyInput {
 				NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
 			]
 			addGestureRecognizer(indirectScrollRecognizer)
+			self.indirectScrollRecognizer = indirectScrollRecognizer
 		}
 	}
 
@@ -137,6 +144,7 @@ final class TerminalView: UIView, UIKeyInput {
 
 	override func layoutSubviews() {
 		super.layoutSubviews()
+		updateDisplayScale()
 		updateSublayerFrames()
 		syncSize()
 	}
@@ -162,9 +170,20 @@ final class TerminalView: UIView, UIKeyInput {
 		}
 	}
 
-	/// Call from the parent when the view's bounds change externally.
-	func forceSyncSize() {
+	func syncSizeAndReadBack() -> TerminalWindowSize? {
 		syncSize()
+		return currentTerminalSize()
+	}
+
+	func currentTerminalSize() -> TerminalWindowSize? {
+		guard let surface else { return nil }
+		let size = ghostty_surface_size(surface)
+		return TerminalWindowSize(
+			columns: Int(size.columns),
+			rows: Int(size.rows),
+			pixelWidth: Int(size.width_px),
+			pixelHeight: Int(size.height_px)
+		)
 	}
 
 	private func syncSize() {
@@ -246,8 +265,13 @@ final class TerminalView: UIView, UIKeyInput {
 		let delta = recognizer.translation(in: self)
 		recognizer.setTranslation(.zero, in: self)
 		guard delta != .zero else { return }
-		let adjustedDelta = TerminalScrollSettings.adjustedDelta(from: delta)
-		ghostty_surface_mouse_scroll(surface, adjustedDelta.x, adjustedDelta.y, 0)
+		let inputKind: TerminalScrollSettings.InputKind =
+			recognizer === indirectScrollRecognizer ? .indirectPointer : .touch
+		let location = recognizer.location(in: self)
+		ghostty_surface_mouse_pos(surface, location.x, location.y, GHOSTTY_MODS_NONE)
+		let adjustedDelta = TerminalScrollSettings.adjustedDelta(from: delta, inputKind: inputKind)
+		let mods = TerminalScrollSettings.scrollMods(for: inputKind)
+		ghostty_surface_mouse_scroll(surface, adjustedDelta.x, adjustedDelta.y, mods)
 	}
 
 	// MARK: - First Responder
@@ -300,6 +324,10 @@ final class TerminalView: UIView, UIKeyInput {
 					onNewTabRequest?()
 					continue
 				}
+				if let digit = Int(key.charactersIgnoringModifiers), (1 ... 9).contains(digit) {
+					onSelectTabRequest?(digit)
+					continue
+				}
 			}
 			// Suppress UIKit's insertText for all keys we handle here.
 			// Enter, backspace, etc. would otherwise double-send.
@@ -311,11 +339,15 @@ final class TerminalView: UIView, UIKeyInput {
 	override func pressesEnded(_ presses: Set<UIPress>, with _: UIPressesEvent?) {
 		for press in presses {
 			guard let key = press.key, let surface else { continue }
-			if key.modifierFlags.contains(.command),
-			   ["w", "t"].contains(where: {
-				key.charactersIgnoringModifiers.compare($0, options: .caseInsensitive) == .orderedSame
-			}) {
-				continue
+			if key.modifierFlags.contains(.command) {
+				if ["w", "t"].contains(where: {
+					key.charactersIgnoringModifiers.compare($0, options: .caseInsensitive) == .orderedSame
+				}) {
+					continue
+				}
+				if let digit = Int(key.charactersIgnoringModifiers), (1 ... 9).contains(digit) {
+					continue
+				}
 			}
 			handleKey(key, action: GHOSTTY_ACTION_RELEASE, surface: surface)
 		}

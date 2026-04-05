@@ -9,6 +9,15 @@ import NIOFoundationCompat
 import NIOSSH
 import NIOTransportServices
 
+struct TerminalWindowSize: Sendable, Equatable {
+	var columns: Int
+	var rows: Int
+	var pixelWidth: Int
+	var pixelHeight: Int
+
+	nonisolated(unsafe) static let `default` = Self(columns: 80, rows: 24, pixelWidth: 0, pixelHeight: 0)
+}
+
 enum SSHConnectionError: Error, LocalizedError {
 	case notConnected
 	case invalidChannelType
@@ -35,6 +44,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	private var sshChildChannel: Channel?
 	private var authDelegate: PasswordOrNoneAuthDelegate?
 	private var isDisconnecting = false
+	private var pendingTerminalSize = TerminalWindowSize.default
 
 	private let onData: @Sendable (Data) -> Void
 	private let onClose: @Sendable (CloseReason) -> Void
@@ -83,8 +93,9 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		print("[SSH] connected!")
 	}
 
-	func startShell(cols: Int, rows: Int) async throws {
-		print("[SSH] startShell \(cols)x\(rows)")
+	func startShell(size: TerminalWindowSize) async throws {
+		pendingTerminalSize = size
+		print("[SSH] startShell \(size.columns)x\(size.rows) px=\(size.pixelWidth)x\(size.pixelHeight)")
 		guard let channel else { throw SSHConnectionError.notConnected }
 
 		let onData = self.onData
@@ -131,10 +142,10 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		let ptyReq = SSHChannelRequestEvent.PseudoTerminalRequest(
 			wantReply: true,
 			term: "xterm-256color",
-			terminalCharacterWidth: cols,
-			terminalRowHeight: rows,
-			terminalPixelWidth: 0,
-			terminalPixelHeight: 0,
+			terminalCharacterWidth: size.columns,
+			terminalRowHeight: size.rows,
+			terminalPixelWidth: size.pixelWidth,
+			terminalPixelHeight: size.pixelHeight,
 			terminalModes: .init([:])
 		)
 		try await childChannel.triggerUserOutboundEvent(ptyReq).get()
@@ -144,6 +155,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		let shellReq = SSHChannelRequestEvent.ShellRequest(wantReply: true)
 		try await childChannel.triggerUserOutboundEvent(shellReq).get()
 		print("[SSH] shell started")
+		resize(pendingTerminalSize)
 	}
 
 	func send(_ data: Data) {
@@ -156,14 +168,15 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		}
 	}
 
-	func resize(cols: Int, rows: Int) {
+	func resize(_ size: TerminalWindowSize) {
+		pendingTerminalSize = size
 		guard let sshChildChannel else { return }
 		sshChildChannel.eventLoop.execute {
 			let req = SSHChannelRequestEvent.WindowChangeRequest(
-				terminalCharacterWidth: cols,
-				terminalRowHeight: rows,
-				terminalPixelWidth: 0,
-				terminalPixelHeight: 0
+				terminalCharacterWidth: size.columns,
+				terminalRowHeight: size.rows,
+				terminalPixelWidth: size.pixelWidth,
+				terminalPixelHeight: size.pixelHeight
 			)
 			sshChildChannel.triggerUserOutboundEvent(req, promise: nil)
 		}

@@ -10,12 +10,17 @@ struct SettingsView: View {
 	@AppStorage("cursorStyle") private var cursorStyle = "block"
 	@AppStorage("cursorBlink") private var cursorBlink = true
 	@AppStorage(TerminalScrollSettings.reverseVerticalScrollKey) private var reverseVerticalScroll = TerminalScrollSettings.defaultReverseVerticalScroll
-	@AppStorage(TerminalScrollSettings.sensitivityKey) private var scrollSensitivity = TerminalScrollSettings.defaultSensitivity
+	@AppStorage(TerminalScrollSettings.touchSensitivityKey) private var touchScrollSensitivity = TerminalScrollSettings.defaultTouchSensitivity
+	@AppStorage(TerminalScrollSettings.indirectSensitivityKey) private var indirectScrollSensitivity = TerminalScrollSettings.defaultIndirectSensitivity
 	@Environment(\.appTheme) private var theme
 	@Environment(\.dismiss) private var dismiss
 
-	private var sensitivityLabel: String {
-		"\(scrollSensitivity.formatted(.number.precision(.fractionLength(2))))×"
+	private var touchSensitivityLabel: String {
+		"\(touchScrollSensitivity.formatted(.number.precision(.fractionLength(2))))×"
+	}
+
+	private var indirectSensitivityLabel: String {
+		"\(indirectScrollSensitivity.formatted(.number.precision(.fractionLength(2))))×"
 	}
 
 	var body: some View {
@@ -45,29 +50,35 @@ struct SettingsView: View {
 
 					VStack(alignment: .leading, spacing: 8) {
 						HStack {
-							Text("Sensitivity")
+							Text("Touch Sensitivity")
 							Spacer()
-							Text(sensitivityLabel)
+							Text(touchSensitivityLabel)
 								.foregroundStyle(theme.secondaryText)
 								.monospacedDigit()
 						}
 
-						Slider(value: $scrollSensitivity, in: TerminalScrollSettings.minSensitivity...TerminalScrollSettings.maxSensitivity, step: 0.25)
+						Slider(value: $touchScrollSensitivity, in: TerminalScrollSettings.minTouchSensitivity...TerminalScrollSettings.maxTouchSensitivity, step: 0.25)
 							.tint(theme.accent)
+					}
+					.listRowBackground(theme.cardBackground)
 
+					VStack(alignment: .leading, spacing: 8) {
 						HStack {
-							Text("Slower")
+							Text("Trackpad / Mouse Sensitivity")
 							Spacer()
-							Text("Faster")
+							Text(indirectSensitivityLabel)
+								.foregroundStyle(theme.secondaryText)
+								.monospacedDigit()
 						}
-						.font(.caption)
-						.foregroundStyle(theme.secondaryText)
+
+						Slider(value: $indirectScrollSensitivity, in: TerminalScrollSettings.minIndirectSensitivity...TerminalScrollSettings.maxIndirectSensitivity, step: 0.01)
+							.tint(theme.accent)
 					}
 					.listRowBackground(theme.cardBackground)
 				} header: {
 					Text("Scrolling")
 				} footer: {
-					Text("Direction and sensitivity apply to two-finger touch, trackpad, and mouse-wheel scrolling.")
+					Text("Touch and trackpad/mouse scrolling are tuned separately. Trackpad and mouse wheel use precise scrolling and target the pointer location.")
 				}
 
 				Section("Theme") {

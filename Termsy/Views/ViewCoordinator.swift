@@ -34,6 +34,10 @@ class ViewCoordinator {
 		tab.onRequestNewTab = { [weak self] in
 			self?.isShowingSessionPicker = true
 		}
+		tab.onRequestSelectTab = { [weak self] index in
+			guard let self, index >= 1, index <= self.tabs.count else { return }
+			self.selectTab(self.tabs[index - 1].id)
+		}
 		tabs.append(tab)
 		selectTab(tab.id)
 	}
@@ -104,6 +108,7 @@ class TerminalTab: Identifiable {
 	var needsPassword = false
 	var onRequestClose: (() -> Void)?
 	var onRequestNewTab: (() -> Void)?
+	var onRequestSelectTab: ((Int) -> Void)?
 
 	let id = UUID()
 
@@ -174,6 +179,10 @@ class TerminalTab: Identifiable {
 
 	func requestNewTab() {
 		onRequestNewTab?()
+	}
+
+	func requestSelectTab(_ index: Int) {
+		onRequestSelectTab?(index)
 	}
 
 	private func handleSessionClose(_ reason: SSHTerminalSession.CloseReason) {

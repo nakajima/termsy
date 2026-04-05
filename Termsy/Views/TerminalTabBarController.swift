@@ -74,8 +74,7 @@ final class TerminalHostController: UIViewController {
 
 	override func viewDidLayoutSubviews() {
 		super.viewDidLayoutSubviews()
-		terminalView?.frame = view.bounds
-		terminalView?.forceSyncSize()
+		syncTerminalSizeToSession()
 	}
 
 	func applyTheme(_ theme: AppTheme) {
@@ -97,19 +96,19 @@ final class TerminalHostController: UIViewController {
 		tv.onNewTabRequest = { [weak self] in
 			self?.terminalTab.requestNewTab()
 		}
+		tv.onSelectTabRequest = { [weak self] index in
+			self?.terminalTab.requestSelectTab(index)
+		}
 		tv.onWrite = { [weak self] data in
 			self?.terminalTab.sshSession.connection.send(data)
 		}
-		tv.onResize = { [weak self] cols, rows in
-			guard let self else { return }
-			let c = Int(cols), r = Int(rows)
-			self.terminalTab.sshSession.lastCols = c
-			self.terminalTab.sshSession.lastRows = r
-			self.terminalTab.sshSession.connection.resize(cols: c, rows: r)
+		tv.onResize = { [weak self] _, _ in
+			self?.syncTerminalSizeToSession()
 		}
 		view.addSubview(tv)
 		terminalTab.sshSession.terminalView = tv
 		terminalView = tv
+		syncTerminalSizeToSession()
 		updateOverlay()
 	}
 
@@ -125,6 +124,7 @@ final class TerminalHostController: UIViewController {
 		connectTask = Task { [weak self] in
 			guard let self else { return }
 			await self.terminalTab.connect()
+			self.syncTerminalSizeToSession()
 			self.updateOverlay()
 		}
 	}
@@ -151,6 +151,13 @@ final class TerminalHostController: UIViewController {
 			host.didMove(toParent: self)
 			overlayHostController = host
 		}
+	}
+
+	private func syncTerminalSizeToSession() {
+		guard let terminalView else { return }
+		terminalView.frame = view.bounds
+		guard let size = terminalView.syncSizeAndReadBack() else { return }
+		terminalTab.sshSession.updateTerminalSize(size)
 	}
 
 	@objc private func appDidBecomeActive() {
