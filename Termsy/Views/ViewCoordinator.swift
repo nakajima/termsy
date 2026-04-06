@@ -12,13 +12,21 @@ import SwiftUI
 @Observable @MainActor
 class ViewCoordinator {
 	var path = NavigationPath()
-	var isShowingConnectView = false
-	var isShowingSessionPicker = false
-	var isShowingSettings = false
+	var isShowingConnectView = false {
+		didSet { refreshDisplayActivity() }
+	}
+	var isShowingSessionPicker = false {
+		didSet { refreshDisplayActivity() }
+	}
+	var isShowingSettings = false {
+		didSet { refreshDisplayActivity() }
+	}
 
 	var isPresentingAuxiliaryUI: Bool {
 		isShowingConnectView || isShowingSessionPicker || isShowingSettings
 	}
+
+	private var appIsActive = true
 
 	/// All open terminal tabs.
 	var tabs: [TerminalTab] = []
@@ -90,17 +98,19 @@ class ViewCoordinator {
 	}
 
 	func appWillResignActive() {
+		appIsActive = false
 		for tab in tabs {
 			tab.noteAppWillResignActive()
-			tab.setDisplayActive(false)
 		}
+		refreshDisplayActivity()
 	}
 
 	func appDidBecomeActive() {
+		appIsActive = true
 		for tab in tabs {
 			tab.noteAppDidBecomeActive()
-			tab.setDisplayActive(tab.id == selectedTabID)
 		}
+		refreshDisplayActivity()
 
 		guard let selectedTab else { return }
 		if selectedTab.consumeReconnectOnActivation() {
@@ -116,18 +126,16 @@ class ViewCoordinator {
 		let previousID = selectedTabID
 		selectedTabID = id
 
-		// Background the previous tab
 		if let previousID, previousID != id,
 		   let prevTab = tabs.first(where: { $0.id == previousID }) {
 			prevTab.sshSession.enterBackground()
-			prevTab.setDisplayActive(false)
 		}
 
-		// Foreground the new tab
 		if let id, let tab = tabs.first(where: { $0.id == id }) {
 			tab.sshSession.enterForeground()
-			tab.setDisplayActive(true)
 		}
+
+		refreshDisplayActivity()
 	}
 
 	func selectTabNumber(_ number: Int) {
@@ -187,6 +195,13 @@ class ViewCoordinator {
 			}
 		}
 		tabs = reordered
+	}
+
+	private func refreshDisplayActivity() {
+		let activeTabID = appIsActive && !isPresentingAuxiliaryUI ? selectedTabID : nil
+		for tab in tabs {
+			tab.setDisplayActive(tab.id == activeTabID)
+		}
 	}
 }
 

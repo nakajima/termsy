@@ -185,18 +185,24 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	}
 
 	func setDisplayActive(_ isActive: Bool) {
+		isUserInteractionEnabled = isActive
+		if isActive {
+			becomeFirstResponder()
+		} else {
+			resignFirstResponder()
+			stopMomentumScrolling()
+			snapSmoothScrollPresentationToTerminal()
+			stopDisplayLink()
+			stopKeyRepeat()
+			activeHardwareKeyCodes.removeAll()
+		}
+
 		guard let surface else { return }
 		ghostty_surface_set_focus(surface, isActive)
 		if isActive {
 			startDisplayLink()
 			ghostty_surface_refresh(surface)
 			ghostty_surface_draw(surface)
-		} else {
-			stopMomentumScrolling()
-			snapSmoothScrollPresentationToTerminal()
-			stopDisplayLink()
-			stopKeyRepeat()
-			activeHardwareKeyCodes.removeAll()
 		}
 	}
 

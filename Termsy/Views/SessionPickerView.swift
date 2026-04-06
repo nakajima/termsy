@@ -2,7 +2,7 @@
 //  SessionPickerView.swift
 //  Termsy
 //
-//  Shown in an inspector when tapping + in the tab bar.
+//  Shown in a trailing panel when tapping + in the tab bar.
 //  Lists saved sessions to quickly open, plus a "New Session" option.
 //
 

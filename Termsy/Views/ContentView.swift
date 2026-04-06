@@ -53,6 +53,13 @@ struct ContentView: View {
 					.environment(coordinator)
 			}
 		}
+		.overlay {
+			if !coordinator.tabs.isEmpty, coordinator.isShowingSessionPicker {
+				SessionPickerPanelOverlay()
+					.transition(.move(edge: .trailing).combined(with: .opacity))
+			}
+		}
+		.animation(.easeInOut(duration: 0.2), value: coordinator.isShowingSessionPicker)
 		.environment(coordinator)
 		.sheet(isPresented: $coordinator.isShowingConnectView) {
 			NavigationStack {
@@ -63,10 +70,6 @@ struct ContentView: View {
 				.toolbarBackground(.visible, for: .navigationBar)
 				.toolbarColorScheme(theme.colorScheme, for: .navigationBar)
 			}
-		}
-		.inspector(isPresented: $coordinator.isShowingSessionPicker) {
-			SessionPickerView()
-				.inspectorColumnWidth(min: 280, ideal: 320, max: 400)
 		}
 		.sheet(isPresented: $coordinator.isShowingSettings) {
 			SettingsView()
@@ -125,6 +128,33 @@ private struct TerminalContainer: View {
 		} catch {
 			print("[DB] failed to persist lastConnectedAt for \(session.username)@\(session.hostname): \(error)")
 		}
+	}
+}
+
+private struct SessionPickerPanelOverlay: View {
+	@Environment(ViewCoordinator.self) private var coordinator
+	@Environment(\.appTheme) private var theme
+
+	var body: some View {
+		GeometryReader { proxy in
+			let panelWidth = min(max(proxy.size.width * 0.33, 280), 400)
+
+			ZStack(alignment: .trailing) {
+				Color.clear
+					.ignoresSafeArea()
+					.contentShape(Rectangle())
+					.onTapGesture {
+						coordinator.isShowingSessionPicker = false
+					}
+
+				SessionPickerView()
+					.frame(width: panelWidth)
+					.frame(maxHeight: .infinity)
+					.background(theme.background)
+					.shadow(color: .black.opacity(0.2), radius: 16, x: -4, y: 0)
+			}
+		}
+		.ignoresSafeArea()
 	}
 }
 
