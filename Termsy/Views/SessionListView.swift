@@ -13,9 +13,7 @@ struct SessionsRequest: ValueObservationQueryable {
 	static var defaultValue: [Session] { [] }
 
 	func fetch(_ db: Database) throws -> [Session] {
-		try Session
-			.order(Column("lastConnectedAt").desc, Column("createdAt").desc)
-			.fetchAll(db)
+		try Session.activeOrdered().fetchAll(db)
 	}
 }
 
@@ -75,11 +73,13 @@ struct SessionListView: View {
 
 		do {
 			try dbContext.writer.write { db in
-				for session in sessionsToDelete {
-					try session.delete(db)
+				for var session in sessionsToDelete {
+					session.markDeleted()
+					try session.update(db)
 				}
 			}
 			sessionsToDelete.forEach(Keychain.removePassword)
+			SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "delete session")
 		} catch {
 			print("[DB] failed to delete sessions: \(error)")
 		}

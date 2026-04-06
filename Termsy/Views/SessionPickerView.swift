@@ -22,7 +22,7 @@ struct SessionPickerView: View {
 				if !sessions.isEmpty {
 					Section("Saved Sessions") {
 						ForEach(sessions) { session in
-							let isOpen = coordinator.tabs.contains { $0.session.id == session.id }
+							let isOpen = coordinator.tabs.contains { $0.session.uuid == session.uuid }
 
 							Button {
 								coordinator.openTab(for: session)
@@ -91,11 +91,13 @@ struct SessionPickerView: View {
 
 		do {
 			try dbContext.writer.write { db in
-				for session in sessionsToDelete {
-					try session.delete(db)
+				for var session in sessionsToDelete {
+					session.markDeleted()
+					try session.update(db)
 				}
 			}
 			sessionsToDelete.forEach(Keychain.removePassword)
+			SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "delete session")
 		} catch {
 			print("[DB] failed to delete sessions: \(error)")
 		}

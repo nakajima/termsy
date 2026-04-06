@@ -4,11 +4,13 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
 	@AppStorage("terminalTheme") private var selectedTheme = TerminalTheme.mocha.rawValue
 	@AppStorage("cursorStyle") private var cursorStyle = "block"
 	@AppStorage("cursorBlink") private var cursorBlink = true
+	@AppStorage(TerminalFontSettings.familyKey) private var terminalFontFamily = ""
 	@AppStorage(TerminalScrollSettings.reverseVerticalScrollKey) private var reverseVerticalScroll = TerminalScrollSettings.defaultReverseVerticalScroll
 	@AppStorage(TerminalScrollSettings.touchSensitivityKey) private var touchScrollSensitivity = TerminalScrollSettings.defaultTouchSensitivity
 	@AppStorage(TerminalScrollSettings.indirectSensitivityKey) private var indirectScrollSensitivity = TerminalScrollSettings.defaultIndirectSensitivity
@@ -16,6 +18,7 @@ struct SettingsView: View {
 	@AppStorage(TerminalScrollSettings.smoothVisualScrollingEnabledKey) private var smoothVisualScrollingEnabled = TerminalScrollSettings.defaultSmoothVisualScrollingEnabled
 	@Environment(\.appTheme) private var theme
 	@Environment(\.dismiss) private var dismiss
+	@State private var isShowingFontPicker = false
 
 	private var touchSensitivityLabel: String {
 		"\(touchScrollSensitivity.formatted(.number.precision(.fractionLength(2))))×"
@@ -27,6 +30,10 @@ struct SettingsView: View {
 
 	private var whatsNewContent: WhatsNewContent {
 		WhatsNewGenerated.current
+	}
+
+	private var terminalFontDisplayName: String {
+		TerminalFontSettings.normalizedFamily(terminalFontFamily) ?? "System Default"
 	}
 
 	var body: some View {
@@ -48,6 +55,34 @@ struct SettingsView: View {
 						.onChange(of: cursorBlink) { _, _ in
 							GhosttyApp.shared.reloadConfig()
 						}
+				}
+
+				Section {
+					Button {
+						isShowingFontPicker = true
+					} label: {
+						HStack {
+							Text("Terminal Font")
+								.foregroundStyle(theme.primaryText)
+							Spacer()
+							Text(terminalFontDisplayName)
+								.foregroundStyle(theme.secondaryText)
+								.lineLimit(1)
+						}
+					}
+					.listRowBackground(theme.cardBackground)
+
+					if TerminalFontSettings.normalizedFamily(terminalFontFamily) != nil {
+						Button("Use Default") {
+							terminalFontFamily = ""
+							GhosttyApp.shared.reloadConfig()
+						}
+						.listRowBackground(theme.cardBackground)
+					}
+				} header: {
+					Text("Font")
+				} footer: {
+					Text("Uses the system font picker so installed iOS fonts can appear when available. Only monospaced fonts are shown.")
 				}
 
 				Section {
@@ -154,6 +189,11 @@ struct SettingsView: View {
 			.toolbarBackground(.visible, for: .navigationBar)
 			.toolbarColorScheme(theme.colorScheme, for: .navigationBar)
 		}
+		.sheet(isPresented: $isShowingFontPicker) {
+			TerminalFontPickerSheet(selectedFontFamily: $terminalFontFamily) {
+				isShowingFontPicker = false
+			}
+		}
 	}
 }
 
@@ -178,7 +218,50 @@ private struct ThemePreview: View {
 	}
 }
 
+private struct TerminalFontPickerSheet: UIViewControllerRepresentable {
+	@Binding var selectedFontFamily: String
+	let onDismiss: () -> Void
 
+	func makeCoordinator() -> Coordinator {
+		Coordinator(selectedFontFamily: $selectedFontFamily, onDismiss: onDismiss)
+	}
+
+	func makeUIViewController(context: Context) -> UIFontPickerViewController {
+		let configuration = UIFontPickerViewController.Configuration()
+		configuration.includeFaces = false
+		configuration.filteredTraits = .traitMonoSpace
+
+		let controller = UIFontPickerViewController(configuration: configuration)
+		controller.delegate = context.coordinator
+		return controller
+	}
+
+	func updateUIViewController(_: UIFontPickerViewController, context _: Context) {}
+
+	final class Coordinator: NSObject, UIFontPickerViewControllerDelegate {
+		private var selectedFontFamily: Binding<String>
+		private let onDismiss: () -> Void
+
+		init(selectedFontFamily: Binding<String>, onDismiss: @escaping () -> Void) {
+			self.selectedFontFamily = selectedFontFamily
+			self.onDismiss = onDismiss
+		}
+
+		func fontPickerViewControllerDidCancel(_: UIFontPickerViewController) {
+			onDismiss()
+		}
+
+		func fontPickerViewControllerDidPickFont(_ viewController: UIFontPickerViewController) {
+			if let fontFamily = TerminalFontSettings.normalizedFamily(
+				viewController.selectedFontDescriptor?.object(forKey: .family) as? String
+			) {
+				selectedFontFamily.wrappedValue = fontFamily
+				GhosttyApp.shared.reloadConfig()
+			}
+			onDismiss()
+		}
+	}
+}
 
 #Preview {
 	SettingsView()

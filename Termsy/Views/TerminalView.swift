@@ -138,7 +138,7 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 
 			let scale = resolvedScale()
 			cfg.scale_factor = Double(scale)
-			cfg.font_size = 14
+			cfg.font_size = TerminalFontSettings.defaultSize
 
 			surface = ghostty_surface_new(app, &cfg)
 		}

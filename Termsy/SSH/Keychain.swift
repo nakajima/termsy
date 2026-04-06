@@ -7,17 +7,55 @@ import Foundation
 import Security
 
 enum Keychain {
-	private static func service() -> String { "com.termsy.ssh" }
+	nonisolated private static func service() -> String { "com.termsy.ssh" }
 
-	private static func account(for session: Session) -> String {
+	nonisolated private static func account(for session: Session) -> String {
+		"session:\(session.uuid.lowercased())"
+	}
+
+	nonisolated private static func legacyAccount(for session: Session) -> String {
 		"\(session.username)@\(session.hostname):\(session.port)"
 	}
 
-	static func password(for session: Session) -> String? {
+	nonisolated static func password(for session: Session) -> String? {
+		if let password = readPassword(account: account(for: session)) {
+			return password
+		}
+
+		guard let legacyPassword = readPassword(account: legacyAccount(for: session)) else {
+			return nil
+		}
+
+		setPassword(legacyPassword, for: session)
+		removePassword(account: legacyAccount(for: session))
+		return legacyPassword
+	}
+
+	nonisolated static func setPassword(_ password: String, for session: Session) {
+		upsertPassword(password, account: account(for: session))
+	}
+
+	nonisolated static func removePassword(for session: Session) {
+		removePassword(account: account(for: session))
+		removePassword(account: legacyAccount(for: session))
+	}
+
+	nonisolated static func movePasswordIfNeeded(from source: Session, to destination: Session) {
+		if password(for: destination) != nil {
+			removePassword(for: source)
+			return
+		}
+
+		guard let password = password(for: source) else { return }
+		setPassword(password, for: destination)
+		removePassword(for: source)
+	}
+
+	nonisolated private static func readPassword(account: String) -> String? {
 		let query: [String: Any] = [
 			kSecClass as String: kSecClassGenericPassword,
 			kSecAttrService as String: service(),
-			kSecAttrAccount as String: account(for: session),
+			kSecAttrAccount as String: account,
 			kSecReturnData as String: true,
 			kSecMatchLimit as String: kSecMatchLimitOne,
 		]
@@ -28,11 +66,8 @@ enum Keychain {
 		return String(data: data, encoding: .utf8)
 	}
 
-	static func setPassword(_ password: String, for session: Session) {
-		let account = account(for: session)
+	nonisolated private static func upsertPassword(_ password: String, account: String) {
 		let data = Data(password.utf8)
-
-		// Try to update first
 		let query: [String: Any] = [
 			kSecClass as String: kSecClassGenericPassword,
 			kSecAttrService as String: service(),
@@ -50,11 +85,11 @@ enum Keychain {
 		}
 	}
 
-	static func removePassword(for session: Session) {
+	nonisolated private static func removePassword(account: String) {
 		let query: [String: Any] = [
 			kSecClass as String: kSecClassGenericPassword,
 			kSecAttrService as String: service(),
-			kSecAttrAccount as String: account(for: session),
+			kSecAttrAccount as String: account,
 		]
 		SecItemDelete(query as CFDictionary)
 	}

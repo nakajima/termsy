@@ -77,16 +77,15 @@ struct ContentView: View {
 		}
 		.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
 			coordinator.appDidBecomeActive()
+			SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "app did become active")
 		}
 		.task {
+			SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "initial load")
 			guard !didAutoconnect else { return }
 			didAutoconnect = true
 
 			let sessions = try? dbContext.reader.read { db in
-				try Session
-					.filter(Column("autoconnect") == true)
-					.order(Column("lastConnectedAt").desc, Column("createdAt").desc)
-					.fetchAll(db)
+				try Session.autoconnectingOrdered().fetchAll(db)
 			}
 
 			for session in sessions ?? [] {
@@ -116,11 +115,12 @@ private struct TerminalContainer: View {
 	}
 
 	private func markSessionConnected(_ session: Session) {
-		guard session.id != nil else { return }
 		do {
 			try dbContext.writer.write { db in
-				let updatedSession = session
-				try updatedSession.update(db)
+				try db.execute(
+					sql: "UPDATE session SET lastConnectedAt = ? WHERE uuid = ?",
+					arguments: [session.lastConnectedAt ?? Date(), session.uuid]
+				)
 			}
 		} catch {
 			print("[DB] failed to persist lastConnectedAt for \(session.username)@\(session.hostname): \(error)")

@@ -4,6 +4,7 @@
 //
 //  Created by Pat Nakajima on 4/3/26.
 //
+import Foundation
 import GRDB
 
 struct DB {
@@ -35,6 +36,32 @@ struct DB {
 			}
 
 			try db.create(indexOn: "session", columns: ["hostname", "username", "tmuxSessionName"])
+		}
+
+		migrator.registerMigration("AddSessionSyncFields") { db in
+			try db.alter(table: "session") { t in
+				t.add(column: "uuid", .text)
+				t.add(column: "updatedAt", .datetime)
+				t.add(column: "deletedAt", .datetime)
+			}
+
+			let rows = try Row.fetchAll(db, sql: "SELECT id, createdAt FROM session")
+			for row in rows {
+				let id: Int64 = row["id"]
+				let createdAt: Date = row["createdAt"]
+				try db.execute(
+					sql: "UPDATE session SET uuid = ?, updatedAt = ? WHERE id = ?",
+					arguments: [UUID().uuidString.lowercased(), createdAt, id]
+				)
+			}
+
+			try db.execute(sql: "CREATE UNIQUE INDEX IF NOT EXISTS session_uuid_idx ON session(uuid)")
+			try db.execute(sql: "CREATE INDEX IF NOT EXISTS session_deleted_at_idx ON session(deletedAt)")
+			try db.execute(sql: "CREATE INDEX IF NOT EXISTS session_updated_at_idx ON session(updatedAt)")
+		}
+
+		migrator.registerMigration("SoftDeleteExactDuplicateSessions") { db in
+			try Session.mergeExactDuplicates(in: db)
 		}
 
 		try migrator.migrate(queue)

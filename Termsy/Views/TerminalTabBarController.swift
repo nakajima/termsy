@@ -270,14 +270,19 @@ struct TerminalOverlay: View {
 }
 
 #Preview("Terminal Overlay Error") {
-	let tab = TerminalTab(session: Session(
-		id: 1,
-		hostname: "example.local",
-		username: "pat",
-		port: 22,
-		createdAt: Date()
-	))
-	tab.connectionError = "Host key verification failed"
-	return TerminalOverlay(tab: tab, onReconnect: {}, onRetryWithPassword: { _ in })
+	let tab: TerminalTab = {
+		var session = Session(
+			hostname: "example.local",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: true
+		)
+		session.id = 1
+		let tab = TerminalTab(session: session)
+		tab.connectionError = "Host key verification failed"
+		return tab
+	}()
+	TerminalOverlay(tab: tab, onReconnect: {}, onRetryWithPassword: { _ in })
 		.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 }

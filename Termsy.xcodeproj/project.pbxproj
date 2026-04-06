@@ -207,6 +207,11 @@
 				TargetAttributes = {
 					A6B5AC722F7F7BE9002ED882 = {
 						CreatedOnToolsVersion = 26.3;
+						SystemCapabilities = {
+							com.apple.iCloud = {
+								enabled = 1;
+							};
+						};
 					};
 					A6B5AC7F2F7F7BEA002ED882 = {
 						CreatedOnToolsVersion = 26.3;
@@ -438,6 +443,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Z773AM52SJ;
+				CODE_SIGN_ENTITLEMENTS = Termsy/Termsy.entitlements;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
@@ -474,6 +480,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Z773AM52SJ;
+				CODE_SIGN_ENTITLEMENTS = Termsy/Termsy.entitlements;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;

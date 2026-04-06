@@ -142,7 +142,20 @@ struct ConnectView: View {
 
 		do {
 			try dbContext.writer.write { db in
-				try session.save(db)
+				session.normalizeConnectionTarget()
+				if var existingSession = try Session.activeExactDuplicate(of: session, in: db) {
+					existingSession.hostname = session.hostname
+					existingSession.username = session.username
+					existingSession.tmuxSessionName = session.tmuxSessionName
+					existingSession.port = session.port
+					existingSession.autoconnect = session.autoconnect
+					existingSession.deletedAt = nil
+					existingSession.touch()
+					try existingSession.update(db)
+					session = existingSession
+				} else {
+					try session.save(db)
+				}
 			}
 		} catch {
 			withAnimation {
@@ -151,6 +164,7 @@ struct ConnectView: View {
 			return
 		}
 
+		SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "save session")
 		onConnect(session)
 		dismissConnectView()
 	}
