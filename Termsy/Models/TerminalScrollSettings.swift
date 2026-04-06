@@ -13,9 +13,18 @@ enum TerminalScrollSettings {
 		case indirectPointer
 	}
 
+	enum MomentumPhase: Int32 {
+		case none = 0
+		case began = 1
+		case stationary = 2
+		case changed = 3
+	}
+
 	static let reverseVerticalScrollKey = "terminalReverseVerticalScroll"
 	static let touchSensitivityKey = "terminalScrollSensitivity"
 	static let indirectSensitivityKey = "terminalIndirectScrollSensitivity"
+	static let momentumScrollingEnabledKey = "terminalMomentumScrollingEnabled"
+	static let smoothVisualScrollingEnabledKey = "terminalSmoothVisualScrollingEnabled"
 
 	static let defaultReverseVerticalScroll = false
 	static let sensitivityKey = touchSensitivityKey
@@ -28,6 +37,8 @@ enum TerminalScrollSettings {
 	static let maxTouchSensitivity: Double = 6.0
 	static let minIndirectSensitivity: Double = 0.05
 	static let maxIndirectSensitivity: Double = 4.0
+	static let defaultMomentumScrollingEnabled = true
+	static let defaultSmoothVisualScrollingEnabled = true
 
 	static var reverseVerticalScroll: Bool {
 		UserDefaults.standard.object(forKey: reverseVerticalScrollKey) as? Bool ?? defaultReverseVerticalScroll
@@ -41,6 +52,14 @@ enum TerminalScrollSettings {
 	static var indirectSensitivity: CGFloat {
 		let raw = UserDefaults.standard.object(forKey: indirectSensitivityKey) as? Double ?? defaultIndirectSensitivity
 		return CGFloat(min(max(raw, minIndirectSensitivity), maxIndirectSensitivity))
+	}
+
+	static var momentumScrollingEnabled: Bool {
+		UserDefaults.standard.object(forKey: momentumScrollingEnabledKey) as? Bool ?? defaultMomentumScrollingEnabled
+	}
+
+	static var smoothVisualScrollingEnabled: Bool {
+		UserDefaults.standard.object(forKey: smoothVisualScrollingEnabledKey) as? Bool ?? defaultSmoothVisualScrollingEnabled
 	}
 
 	static func adjustedDelta(from rawDelta: CGPoint, inputKind: InputKind) -> CGPoint {
@@ -60,10 +79,16 @@ enum TerminalScrollSettings {
 		return Int(adjustedDeltaY / cellHeight)
 	}
 
-	static func scrollMods(for inputKind: InputKind) -> ghostty_input_scroll_mods_t {
+	static func scrollMods(
+		for inputKind: InputKind,
+		momentum: MomentumPhase = .none
+	) -> ghostty_input_scroll_mods_t {
+		var value: Int32 = 0
 		switch inputKind {
 		case .touch, .indirectPointer:
-			1  // precision scrolling
+			value |= 1  // precision scrolling
 		}
+		value |= momentum.rawValue << 1
+		return value
 	}
 }

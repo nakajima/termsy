@@ -15,7 +15,7 @@ import UIKit
 final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	nonisolated(unsafe) private(set) var surface: ghostty_surface_t?
 	private var displayLink: CADisplayLink?
-	private var hardwareKeyHandled = false
+	private var activeHardwareKeyCodes = Set<UInt16>()
 	private var keyRepeatTimer: DispatchSourceTimer?
 	private var repeatingHardwareKey: UIKey?
 	private var repeatingKeyCode: UInt16?
@@ -24,6 +24,16 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	private var activePointerButton: ghostty_input_mouse_button_e?
 	private weak var touchScrollRecognizer: UIPanGestureRecognizer?
 	private weak var indirectScrollRecognizer: UIPanGestureRecognizer?
+	private var lastScrollLocation: CGPoint?
+	private var momentumVelocity = CGPoint.zero
+	private var momentumInputKind: TerminalScrollSettings.InputKind?
+	private var smoothScrollAccumulatedOffsetY: CGFloat = 0
+	private var smoothScrollTargetOffsetY: CGFloat = 0
+	private var smoothScrollPresentationOffsetY: CGFloat = 0
+	private var smoothScrollSuppressedUntilNextScrollGesture = false
+	private let momentumVelocityThreshold: CGFloat = 50
+	private let momentumDecelerationPerFrame: CGFloat = 0.92
+	private let smoothScrollAnimationSpeed: CGFloat = 18
 
 	/// Called when the terminal produces bytes (user input, query responses).
 	var onWrite: ((Data) -> Void)?
@@ -56,6 +66,7 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		applyTheme(TerminalTheme.current.appTheme)
 		isUserInteractionEnabled = true
 		isMultipleTouchEnabled = false
+		clipsToBounds = true
 
 		let touchScrollRecognizer = UIPanGestureRecognizer(
 			target: self, action: #selector(handleScroll(_:)))
@@ -140,11 +151,15 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	}
 
 	func stop() {
+		stopMomentumScrolling()
+		snapSmoothScrollPresentationToTerminal()
 		stopDisplayLink()
 		stopKeyRepeat()
+		activeHardwareKeyCodes.removeAll()
 		suppressedKeyReleaseCodes.removeAll()
 		ClipboardAccessAuthorization.clear(for: self)
 		lastMouseLocation = nil
+		lastScrollLocation = nil
 		activePointerButton = nil
 		if let s = surface {
 			ghostty_surface_set_focus(s, false)
@@ -154,6 +169,9 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	}
 
 	func feedData(_ data: Data) {
+		guard !data.isEmpty else { return }
+		smoothScrollSuppressedUntilNextScrollGesture = true
+		snapSmoothScrollPresentationToTerminal()
 		guard let surface else { return }
 		data.withUnsafeBytes { buf in
 			guard let ptr = buf.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
@@ -174,7 +192,11 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 			ghostty_surface_refresh(surface)
 			ghostty_surface_draw(surface)
 		} else {
+			stopMomentumScrolling()
+			snapSmoothScrollPresentationToTerminal()
 			stopDisplayLink()
+			stopKeyRepeat()
+			activeHardwareKeyCodes.removeAll()
 		}
 	}
 
@@ -195,8 +217,11 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 			if let surface {
 				ghostty_surface_set_focus(surface, false)
 			}
+			stopMomentumScrolling()
+			snapSmoothScrollPresentationToTerminal()
 			stopDisplayLink()
 			stopKeyRepeat()
+			activeHardwareKeyCodes.removeAll()
 		}
 	}
 
@@ -221,10 +246,13 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		let scale = resolvedScale()
 		contentScaleFactor = scale
 		layer.contentsScale = scale
+		let presentationOffsetY = TerminalScrollSettings.smoothVisualScrollingEnabled
+			? smoothScrollPresentationOffsetY : 0
 		guard let sublayers = layer.sublayers else { return }
 		for sublayer in sublayers {
 			sublayer.frame = bounds
 			sublayer.contentsScale = scale
+			sublayer.transform = CATransform3DMakeTranslation(0, presentationOffsetY, 0)
 		}
 	}
 
@@ -258,7 +286,7 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 
 	private func startDisplayLink() {
 		guard displayLink == nil else { return }
-		let link = CADisplayLink(target: self, selector: #selector(tick))
+		let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
 		link.add(to: .main, forMode: .common)
 		displayLink = link
 	}
@@ -268,8 +296,11 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		displayLink = nil
 	}
 
-	@objc private func tick() {
+	@objc private func tick(_ link: CADisplayLink) {
 		GhosttyApp.shared.tick()
+		let deltaTime = max(CGFloat(link.targetTimestamp - link.timestamp), 1.0 / 120.0)
+		updateMomentumScrolling(deltaTime: deltaTime)
+		updateSmoothScrollPresentation(deltaTime: deltaTime)
 		guard let surface else { return }
 		ghostty_surface_refresh(surface)
 		ghostty_surface_draw(surface)
@@ -283,6 +314,8 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		guard let surface, let touch = touches.first else {
 			return
 		}
+
+		cancelActiveScrollAnimationForInteraction()
 
 		if touch.type == .indirectPointer {
 			let pos = touch.location(in: self)
@@ -354,17 +387,179 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	}
 
 	@objc private func handleScroll(_ recognizer: UIPanGestureRecognizer) {
-		guard let surface else { return }
+		guard surface != nil else { return }
 		guard activePointerButton == nil else { return }
-		let delta = recognizer.translation(in: self)
-		recognizer.setTranslation(.zero, in: self)
-		guard delta != .zero else { return }
 		let inputKind: TerminalScrollSettings.InputKind =
 			recognizer === indirectScrollRecognizer ? .indirectPointer : .touch
-		sendMousePosition(recognizer.location(in: self))
-		let adjustedDelta = TerminalScrollSettings.adjustedDelta(from: delta, inputKind: inputKind)
-		let mods = TerminalScrollSettings.scrollMods(for: inputKind)
+		let location = recognizer.location(in: self)
+
+		switch recognizer.state {
+		case .began:
+			smoothScrollSuppressedUntilNextScrollGesture = false
+			cancelActiveScrollAnimationForInteraction()
+			lastScrollLocation = location
+
+		case .changed:
+			lastScrollLocation = location
+			sendScrollTranslation(recognizer.translation(in: self), inputKind: inputKind, location: location)
+			recognizer.setTranslation(.zero, in: self)
+
+		case .ended:
+			lastScrollLocation = location
+			sendScrollTranslation(recognizer.translation(in: self), inputKind: inputKind, location: location)
+			recognizer.setTranslation(.zero, in: self)
+			startMomentumScrolling(velocity: recognizer.velocity(in: self), inputKind: inputKind)
+
+		case .cancelled, .failed:
+			recognizer.setTranslation(.zero, in: self)
+			stopMomentumScrolling()
+			releaseSmoothScrollPresentation()
+
+		default:
+			break
+		}
+	}
+
+	private func sendScrollTranslation(
+		_ translation: CGPoint,
+		inputKind: TerminalScrollSettings.InputKind,
+		location: CGPoint?
+	) {
+		guard translation != .zero else { return }
+		sendScrollDelta(translation, inputKind: inputKind, location: location, momentum: .none)
+	}
+
+	private func sendScrollDelta(
+		_ rawDelta: CGPoint,
+		inputKind: TerminalScrollSettings.InputKind,
+		location: CGPoint?,
+		momentum: TerminalScrollSettings.MomentumPhase
+	) {
+		guard let surface else { return }
+		if let location {
+			sendMousePosition(location)
+		}
+		let adjustedDelta = TerminalScrollSettings.adjustedDelta(from: rawDelta, inputKind: inputKind)
+		let mods = TerminalScrollSettings.scrollMods(for: inputKind, momentum: momentum)
 		ghostty_surface_mouse_scroll(surface, adjustedDelta.x, adjustedDelta.y, mods)
+		if rawDelta != .zero {
+			noteSmoothScrollDelta(adjustedDelta)
+		}
+	}
+
+	private func startMomentumScrolling(
+		velocity: CGPoint,
+		inputKind: TerminalScrollSettings.InputKind
+	) {
+		guard TerminalScrollSettings.momentumScrollingEnabled else {
+			releaseSmoothScrollPresentation()
+			return
+		}
+		guard abs(velocity.x) > momentumVelocityThreshold || abs(velocity.y) > momentumVelocityThreshold else {
+			releaseSmoothScrollPresentation()
+			return
+		}
+
+		momentumVelocity = velocity
+		momentumInputKind = inputKind
+		sendScrollDelta(.zero, inputKind: inputKind, location: lastScrollLocation, momentum: .began)
+	}
+
+	private func stopMomentumScrolling() {
+		guard let inputKind = momentumInputKind else { return }
+		momentumVelocity = .zero
+		momentumInputKind = nil
+		sendScrollDelta(.zero, inputKind: inputKind, location: lastScrollLocation, momentum: .none)
+	}
+
+	private func updateMomentumScrolling(deltaTime: CGFloat) {
+		guard let inputKind = momentumInputKind else { return }
+
+		let frameScale = max(deltaTime * 60, 0)
+		let deceleration = CGFloat(pow(Double(momentumDecelerationPerFrame), Double(frameScale)))
+		momentumVelocity.x *= deceleration
+		momentumVelocity.y *= deceleration
+
+		if abs(momentumVelocity.x) < momentumVelocityThreshold,
+			abs(momentumVelocity.y) < momentumVelocityThreshold
+		{
+			stopMomentumScrolling()
+			releaseSmoothScrollPresentation()
+			return
+		}
+
+		let delta = CGPoint(
+			x: momentumVelocity.x * deltaTime,
+			y: momentumVelocity.y * deltaTime
+		)
+		sendScrollDelta(delta, inputKind: inputKind, location: lastScrollLocation, momentum: .changed)
+	}
+
+	private func noteSmoothScrollDelta(_ adjustedDelta: CGPoint) {
+		guard TerminalScrollSettings.smoothVisualScrollingEnabled else {
+			snapSmoothScrollPresentationToTerminal()
+			return
+		}
+		guard !smoothScrollSuppressedUntilNextScrollGesture else { return }
+		guard let cellHeight = terminalCellHeightInPoints(), cellHeight > 0 else { return }
+		smoothScrollAccumulatedOffsetY -= adjustedDelta.y
+		smoothScrollTargetOffsetY = wrappedSmoothScrollOffset(
+			for: smoothScrollAccumulatedOffsetY,
+			cellHeight: cellHeight
+		)
+	}
+
+	private func updateSmoothScrollPresentation(deltaTime: CGFloat) {
+		guard TerminalScrollSettings.smoothVisualScrollingEnabled else {
+			snapSmoothScrollPresentationToTerminal()
+			return
+		}
+
+		let alpha = min(1, deltaTime * smoothScrollAnimationSpeed)
+		smoothScrollPresentationOffsetY +=
+			(smoothScrollTargetOffsetY - smoothScrollPresentationOffsetY) * alpha
+
+		if abs(smoothScrollPresentationOffsetY - smoothScrollTargetOffsetY) < 0.1 {
+			smoothScrollPresentationOffsetY = smoothScrollTargetOffsetY
+		}
+	}
+
+	private func releaseSmoothScrollPresentation() {
+		smoothScrollAccumulatedOffsetY = 0
+		smoothScrollTargetOffsetY = 0
+	}
+
+	private func snapSmoothScrollPresentationToTerminal() {
+		smoothScrollAccumulatedOffsetY = 0
+		smoothScrollTargetOffsetY = 0
+		smoothScrollPresentationOffsetY = 0
+		updateSublayerFrames()
+	}
+
+	private func cancelActiveScrollAnimationForInteraction() {
+		stopMomentumScrolling()
+		snapSmoothScrollPresentationToTerminal()
+	}
+
+	private func terminalCellHeightInPoints() -> CGFloat? {
+		guard let surface else { return nil }
+		let size = ghostty_surface_size(surface)
+		guard size.cell_height_px > 0 else { return nil }
+		let scale = resolvedScale()
+		guard scale > 0 else { return nil }
+		return CGFloat(size.cell_height_px) / scale
+	}
+
+	private func wrappedSmoothScrollOffset(for value: CGFloat, cellHeight: CGFloat) -> CGFloat {
+		guard cellHeight > 0 else { return 0 }
+		var remainder = value.truncatingRemainder(dividingBy: cellHeight)
+		let halfCellHeight = cellHeight / 2
+		if remainder > halfCellHeight {
+			remainder -= cellHeight
+		} else if remainder < -halfCellHeight {
+			remainder += cellHeight
+		}
+		return remainder
 	}
 
 	// MARK: - First Responder
@@ -401,8 +596,7 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 
 	func insertText(_ text: String) {
 		guard let surface else { return }
-		guard !hardwareKeyHandled else {
-			hardwareKeyHandled = false
+		guard activeHardwareKeyCodes.isEmpty else {
 			return
 		}
 		// Software keyboard path — send text directly.
@@ -413,8 +607,7 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 
 	func deleteBackward() {
 		guard let surface else { return }
-		guard !hardwareKeyHandled else {
-			hardwareKeyHandled = false
+		guard activeHardwareKeyCodes.isEmpty else {
 			return
 		}
 		// Software keyboard backspace: use mac virtual keycode 0x33
@@ -438,10 +631,9 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 				suppressedKeyReleaseCodes.insert(keyCode)
 				continue
 			}
-			// Suppress UIKit's insertText for the initial hardware key press.
-			// Character repeats still arrive through text input, while non-text keys
-			// are repeated manually below.
-			hardwareKeyHandled = true
+			// Suppress UIKit's UIKeyInput callbacks while the hardware key is down.
+			// We send both the initial press and repeats through ghostty key events.
+			activeHardwareKeyCodes.insert(keyCode)
 			if handleKey(key, action: GHOSTTY_ACTION_PRESS, surface: surface) {
 				startKeyRepeat(for: key)
 			}
@@ -452,6 +644,7 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		for press in presses {
 			guard let key = press.key, let surface else { continue }
 			let keyCode = UInt16(key.keyCode.rawValue)
+			activeHardwareKeyCodes.remove(keyCode)
 			if repeatingKeyCode == keyCode {
 				stopKeyRepeat()
 			}
@@ -460,19 +653,18 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 			}
 			handleKey(key, action: GHOSTTY_ACTION_RELEASE, surface: surface)
 		}
-		hardwareKeyHandled = false
 	}
 
 	override func pressesCancelled(_ presses: Set<UIPress>, with _: UIPressesEvent?) {
 		for press in presses {
 			guard let key = press.key else { continue }
 			let keyCode = UInt16(key.keyCode.rawValue)
+			activeHardwareKeyCodes.remove(keyCode)
 			if repeatingKeyCode == keyCode {
 				stopKeyRepeat()
 			}
 			suppressedKeyReleaseCodes.remove(keyCode)
 		}
-		hardwareKeyHandled = false
 	}
 
 	private func handleAppShortcutIfNeeded(for key: UIKey) -> Bool {
@@ -612,6 +804,8 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		switch key.keyCode {
 		case .keyboardDeleteOrBackspace,
 		     .keyboardDeleteForward,
+		     .keyboardReturnOrEnter,
+		     .keyboardTab,
 		     .keyboardUpArrow,
 		     .keyboardDownArrow,
 		     .keyboardLeftArrow,
@@ -622,7 +816,7 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		     .keyboardPageDown:
 			return true
 		default:
-			return false
+			return hardwareKeyText(for: key) != nil
 		}
 	}
 
@@ -654,6 +848,18 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		keyRepeatTimer = nil
 		repeatingHardwareKey = nil
 		repeatingKeyCode = nil
+	}
+
+	private func hardwareKeyText(for key: UIKey) -> String? {
+		let hasModifierShortcut = key.modifierFlags.intersection([.control, .alternate, .command]) != []
+		if hasModifierShortcut { return nil }
+		let chars = key.characters
+		if chars.isEmpty || chars.hasPrefix("UIKeyInput") { return nil }
+		if chars.count == 1, let scalar = chars.unicodeScalars.first {
+			if scalar.value < 0x20 { return nil }  // control char
+			if scalar.value >= 0xF700 && scalar.value <= 0xF8FF { return nil }  // PUA
+		}
+		return chars
 	}
 
 	@discardableResult
@@ -694,17 +900,7 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		// Determine text to send.
 		// For modifier shortcuts (ctrl/alt/cmd), don't send text — let ghostty encode.
 		// For normal keys, send characters but filter out control chars and PUA range.
-		let hasModifierShortcut = key.modifierFlags.intersection([.control, .alternate, .command]) != []
-		let filteredText: String? = {
-			if hasModifierShortcut { return nil }
-			let chars = key.characters
-			if chars.isEmpty || chars.hasPrefix("UIKeyInput") { return nil }
-			if chars.count == 1, let scalar = chars.unicodeScalars.first {
-				if scalar.value < 0x20 { return nil }  // control char
-				if scalar.value >= 0xF700 && scalar.value <= 0xF8FF { return nil }  // PUA
-			}
-			return chars
-		}()
+		let filteredText = hardwareKeyText(for: key)
 
 		if let text = filteredText {
 			return text.withCString { ptr in

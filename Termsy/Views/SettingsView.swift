@@ -12,6 +12,8 @@ struct SettingsView: View {
 	@AppStorage(TerminalScrollSettings.reverseVerticalScrollKey) private var reverseVerticalScroll = TerminalScrollSettings.defaultReverseVerticalScroll
 	@AppStorage(TerminalScrollSettings.touchSensitivityKey) private var touchScrollSensitivity = TerminalScrollSettings.defaultTouchSensitivity
 	@AppStorage(TerminalScrollSettings.indirectSensitivityKey) private var indirectScrollSensitivity = TerminalScrollSettings.defaultIndirectSensitivity
+	@AppStorage(TerminalScrollSettings.momentumScrollingEnabledKey) private var momentumScrollingEnabled = TerminalScrollSettings.defaultMomentumScrollingEnabled
+	@AppStorage(TerminalScrollSettings.smoothVisualScrollingEnabledKey) private var smoothVisualScrollingEnabled = TerminalScrollSettings.defaultSmoothVisualScrollingEnabled
 	@Environment(\.appTheme) private var theme
 	@Environment(\.dismiss) private var dismiss
 
@@ -49,6 +51,12 @@ struct SettingsView: View {
 				}
 
 				Section {
+					Toggle("Momentum Scrolling", isOn: $momentumScrollingEnabled)
+						.listRowBackground(theme.cardBackground)
+
+					Toggle("Smooth Visual Scrolling", isOn: $smoothVisualScrollingEnabled)
+						.listRowBackground(theme.cardBackground)
+
 					Toggle("Reverse Vertical Scrolling", isOn: $reverseVerticalScroll)
 						.listRowBackground(theme.cardBackground)
 
@@ -82,7 +90,7 @@ struct SettingsView: View {
 				} header: {
 					Text("Scrolling")
 				} footer: {
-					Text("Touch and trackpad/mouse scrolling are tuned separately. Trackpad and mouse wheel use precise scrolling and target the pointer location.")
+					Text("Momentum applies to touch and indirect scrolling. Smooth visual scrolling only animates user-driven scrolling and momentum, and snaps back to the real terminal state when live output changes the terminal.")
 				}
 
 				if let whatsNewPreview = whatsNewContent.previewChange {
