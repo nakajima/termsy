@@ -174,7 +174,15 @@ final class TabBarCollectionView: UIView {
 		backgroundColor = theme.backgroundUIColor
 
 		let newItems = tabs.map { tab in
-			TabBarItem(id: tab.id, title: "\(tab.session.username)@\(tab.session.hostname)", isConnected: tab.isConnected, hasError: tab.connectionError != nil)
+			let baseTitle = "\(tab.session.username)@\(tab.session.hostname)"
+			let title: String
+			if let tmuxName = tab.session.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+			   !tmuxName.isEmpty {
+				title = "\(tmuxName) • \(baseTitle)"
+			} else {
+				title = baseTitle
+			}
+			return TabBarItem(id: tab.id, title: title, isConnected: tab.isConnected, hasError: tab.connectionError != nil)
 		}
 
 		let changed = newItems != items
