@@ -9,78 +9,218 @@
 import GRDB
 import GRDBQuery
 import SwiftUI
+import UIKit
 
 struct SessionPickerView: View {
+	private enum PickerItemID: Hashable {
+		case session(String)
+		case newSession
+	}
+
 	@Environment(ViewCoordinator.self) var coordinator
 	@Environment(\.databaseContext) var dbContext
 	@Environment(\.appTheme) private var theme
 	@Query(SessionsRequest()) var sessions: [Session]
 
+	@State private var selectedItemID: PickerItemID?
+
+	private let selectionPageJump = 8
+
+	private var pickerItemIDs: [PickerItemID] {
+		let sessionItems = sessions.map { PickerItemID.session($0.uuid) }
+		return sessionItems + [.newSession]
+	}
+
 	var body: some View {
 		NavigationStack {
-			List {
-				if !sessions.isEmpty {
-					Section("Saved Sessions") {
-						ForEach(sessions) { session in
-							let isOpen = coordinator.tabs.contains { $0.session.uuid == session.uuid }
-
-							Button {
-								coordinator.openTab(for: session)
-								coordinator.isShowingSessionPicker = false
-							} label: {
-								HStack {
-									VStack(alignment: .leading, spacing: 2) {
-										Text("\(session.username)@\(session.hostname)")
-											.font(.body)
-											.foregroundStyle(theme.primaryText)
-										if let tmux = session.tmuxSessionName, !tmux.isEmpty {
-											Text("tmux • \(tmux)")
-												.font(.caption)
-												.foregroundStyle(theme.secondaryText)
-										}
-									}
-									Spacer()
-									if isOpen {
-										Text("Open")
-											.font(.caption)
-											.foregroundStyle(theme.secondaryText)
-									}
-								}
+			ScrollViewReader { proxy in
+				List {
+					if !sessions.isEmpty {
+						Section("Saved Sessions") {
+							ForEach(sessions) { session in
+								sessionRow(for: session)
 							}
-							.listRowBackground(theme.cardBackground)
+							.onDelete(perform: deleteSessions)
 						}
-						.onDelete(perform: deleteSessions)
 					}
-				}
 
-				Section {
-					Button {
-						coordinator.isShowingSessionPicker = false
-						coordinator.isShowingConnectView = true
-					} label: {
-						Label("New Session", systemImage: "plus.circle")
-							.font(.body)
-							.foregroundStyle(.tint)
+					Section {
+						newSessionRow
 					}
-					.keyboardShortcut("t", modifiers: .command)
-					.listRowBackground(theme.cardBackground)
+				}
+				.scrollContentBackground(.hidden)
+				.background(theme.background)
+				.navigationTitle("Sessions")
+				.navigationBarTitleDisplayMode(.inline)
+				.toolbar {
+					ToolbarItem(placement: .topBarTrailing) {
+						Button("Done") {
+							coordinator.isShowingSessionPicker = false
+						}
+						.keyboardShortcut(.cancelAction)
+					}
+				}
+				.toolbarBackground(theme.elevatedBackground, for: .navigationBar)
+				.toolbarBackground(.visible, for: .navigationBar)
+				.toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+				.background {
+					SessionPickerKeyboardHandler(
+						onMoveSelection: moveSelection,
+						onMovePage: moveSelectionByPage,
+						onMoveToBoundary: moveSelectionToBoundary,
+						onActivateSelection: activateSelection,
+						onClose: { coordinator.isShowingSessionPicker = false }
+					)
+					.frame(width: 0, height: 0)
+					.allowsHitTesting(false)
+				}
+				.onAppear {
+					ensureValidSelection()
+					scrollSelectionIfNeeded(using: proxy, animated: false)
+				}
+				.onChange(of: sessions.map(\.uuid), initial: false) { _, _ in
+					ensureValidSelection()
+				}
+				.onChange(of: selectedItemID, initial: false) { _, _ in
+					scrollSelectionIfNeeded(using: proxy, animated: true)
 				}
 			}
-			.scrollContentBackground(.hidden)
-			.background(theme.background)
-			.navigationTitle("Sessions")
-			.navigationBarTitleDisplayMode(.inline)
-			.toolbar {
-				ToolbarItem(placement: .topBarTrailing) {
-					Button("Done") {
-						coordinator.isShowingSessionPicker = false
+		}
+	}
+
+	@ViewBuilder
+	private func sessionRow(for session: Session) -> some View {
+		let itemID = PickerItemID.session(session.uuid)
+		let isOpen = coordinator.tabs.contains { $0.session.uuid == session.uuid }
+		let isSelected = selectedItemID == itemID
+
+		Button {
+			openSession(session)
+		} label: {
+			HStack {
+				VStack(alignment: .leading, spacing: 2) {
+					Text("\(session.username)@\(session.hostname)")
+						.font(.body)
+						.foregroundStyle(theme.primaryText)
+					if let tmux = session.tmuxSessionName, !tmux.isEmpty {
+						Text("tmux • \(tmux)")
+							.font(.caption)
+							.foregroundStyle(theme.secondaryText)
 					}
-					.keyboardShortcut(.cancelAction)
+				}
+				Spacer()
+				if isOpen {
+					Text("Open")
+						.font(.caption)
+						.foregroundStyle(theme.secondaryText)
 				}
 			}
-			.toolbarBackground(theme.elevatedBackground, for: .navigationBar)
-			.toolbarBackground(.visible, for: .navigationBar)
-			.toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+			.contentShape(Rectangle())
+		}
+		.buttonStyle(.plain)
+		.listRowBackground(isSelected ? theme.selectedBackground : theme.cardBackground)
+		.id(itemID)
+		.onTapGesture {
+			selectedItemID = itemID
+		}
+	}
+
+	private var newSessionRow: some View {
+		let isSelected = selectedItemID == .newSession
+
+		return Button {
+			openNewSession()
+		} label: {
+			Label("New Session", systemImage: "plus.circle")
+				.font(.body)
+				.foregroundStyle(isSelected ? theme.primaryText : theme.accent)
+				.frame(maxWidth: .infinity, alignment: .leading)
+				.contentShape(Rectangle())
+		}
+		.buttonStyle(.plain)
+		.keyboardShortcut("t", modifiers: .command)
+		.listRowBackground(isSelected ? theme.selectedBackground : theme.cardBackground)
+		.id(PickerItemID.newSession)
+		.onTapGesture {
+			selectedItemID = .newSession
+		}
+	}
+
+	private func moveSelection(by offset: Int) {
+		guard !pickerItemIDs.isEmpty else { return }
+		guard offset != 0 else { return }
+
+		let currentIndex: Int
+		if let selectedItemID, let index = pickerItemIDs.firstIndex(of: selectedItemID) {
+			currentIndex = index
+		} else {
+			currentIndex = 0
+		}
+
+		let nextIndex = min(max(currentIndex + offset, 0), pickerItemIDs.count - 1)
+		selectedItemID = pickerItemIDs[nextIndex]
+	}
+
+	private func moveSelectionByPage(_ direction: Int) {
+		guard direction != 0 else { return }
+		moveSelection(by: direction * selectionPageJump)
+	}
+
+	private func moveSelectionToBoundary(_ isMovingToEnd: Bool) {
+		guard !pickerItemIDs.isEmpty else { return }
+		selectedItemID = isMovingToEnd ? pickerItemIDs.last : pickerItemIDs.first
+	}
+
+	private func activateSelection() {
+		guard let selectedItemID else {
+			ensureValidSelection()
+			return
+		}
+
+		switch selectedItemID {
+		case let .session(uuid):
+			guard let session = sessions.first(where: { $0.uuid == uuid }) else {
+				ensureValidSelection()
+				return
+			}
+			openSession(session)
+		case .newSession:
+			openNewSession()
+		}
+	}
+
+	private func openSession(_ session: Session) {
+		selectedItemID = .session(session.uuid)
+		coordinator.openTab(for: session)
+		coordinator.isShowingSessionPicker = false
+	}
+
+	private func openNewSession() {
+		selectedItemID = .newSession
+		coordinator.isShowingSessionPicker = false
+		coordinator.isShowingConnectView = true
+	}
+
+	private func ensureValidSelection() {
+		guard let firstItemID = pickerItemIDs.first else {
+			selectedItemID = nil
+			return
+		}
+		guard let selectedItemID, pickerItemIDs.contains(selectedItemID) else {
+			self.selectedItemID = firstItemID
+			return
+		}
+	}
+
+	private func scrollSelectionIfNeeded(using proxy: ScrollViewProxy, animated: Bool) {
+		guard let selectedItemID else { return }
+		let scroll = {
+			proxy.scrollTo(selectedItemID, anchor: .center)
+		}
+		if animated {
+			withAnimation(.easeInOut(duration: 0.15), scroll)
+		} else {
+			scroll()
 		}
 	}
 
@@ -100,6 +240,173 @@ struct SessionPickerView: View {
 			SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "delete session")
 		} catch {
 			print("[DB] failed to delete sessions: \(error)")
+		}
+	}
+}
+
+private struct SessionPickerKeyboardHandler: UIViewRepresentable {
+	let onMoveSelection: (Int) -> Void
+	let onMovePage: (Int) -> Void
+	let onMoveToBoundary: (Bool) -> Void
+	let onActivateSelection: () -> Void
+	let onClose: () -> Void
+
+	func makeUIView(context: Context) -> KeyCommandView {
+		let view = KeyCommandView()
+		view.backgroundColor = .clear
+		return view
+	}
+
+	func updateUIView(_ uiView: KeyCommandView, context: Context) {
+		uiView.onMoveSelection = onMoveSelection
+		uiView.onMovePage = onMovePage
+		uiView.onMoveToBoundary = onMoveToBoundary
+		uiView.onActivateSelection = onActivateSelection
+		uiView.onClose = onClose
+		uiView.activateIfPossible()
+	}
+
+	final class KeyCommandView: UIView {
+		var onMoveSelection: ((Int) -> Void)?
+		var onMovePage: ((Int) -> Void)?
+		var onMoveToBoundary: ((Bool) -> Void)?
+		var onActivateSelection: (() -> Void)?
+		var onClose: (() -> Void)?
+
+		override var canBecomeFirstResponder: Bool { true }
+
+		override var keyCommands: [UIKeyCommand]? {
+			[
+				command(
+					input: UIKeyCommand.inputUpArrow,
+					modifiers: [],
+					action: #selector(moveUp),
+					title: "Move Selection Up"
+				),
+				command(
+					input: UIKeyCommand.inputDownArrow,
+					modifiers: [],
+					action: #selector(moveDown),
+					title: "Move Selection Down"
+				),
+				command(
+					input: "p",
+					modifiers: .control,
+					action: #selector(moveUp),
+					title: "Move Selection Up"
+				),
+				command(
+					input: "n",
+					modifiers: .control,
+					action: #selector(moveDown),
+					title: "Move Selection Down"
+				),
+				command(
+					input: UIKeyCommand.inputPageUp,
+					modifiers: [],
+					action: #selector(movePageUp),
+					title: "Page Up"
+				),
+				command(
+					input: UIKeyCommand.inputPageDown,
+					modifiers: [],
+					action: #selector(movePageDown),
+					title: "Page Down"
+				),
+				command(
+					input: UIKeyCommand.inputHome,
+					modifiers: [],
+					action: #selector(moveToStart),
+					title: "Move to First Item"
+				),
+				command(
+					input: UIKeyCommand.inputEnd,
+					modifiers: [],
+					action: #selector(moveToEnd),
+					title: "Move to Last Item"
+				),
+				command(
+					input: UIKeyCommand.inputUpArrow,
+					modifiers: .command,
+					action: #selector(moveToStart),
+					title: "Move to First Item"
+				),
+				command(
+					input: UIKeyCommand.inputDownArrow,
+					modifiers: .command,
+					action: #selector(moveToEnd),
+					title: "Move to Last Item"
+				),
+				command(
+					input: "\r",
+					modifiers: [],
+					action: #selector(activateSelection),
+					title: "Open Selection"
+				),
+				command(
+					input: UIKeyCommand.inputEscape,
+					modifiers: [],
+					action: #selector(close),
+					title: "Close"
+				),
+			]
+		}
+
+		private func command(
+			input: String,
+			modifiers: UIKeyModifierFlags,
+			action: Selector,
+			title: String
+		) -> UIKeyCommand {
+			let command = UIKeyCommand(input: input, modifierFlags: modifiers, action: action)
+			command.wantsPriorityOverSystemBehavior = true
+			command.discoverabilityTitle = title
+			return command
+		}
+
+		override func didMoveToWindow() {
+			super.didMoveToWindow()
+			activateIfPossible()
+		}
+
+		func activateIfPossible() {
+			guard window != nil else { return }
+			DispatchQueue.main.async { [weak self] in
+				guard let self, self.window != nil else { return }
+				_ = self.becomeFirstResponder()
+			}
+		}
+
+		@objc private func moveUp() {
+			onMoveSelection?(-1)
+		}
+
+		@objc private func moveDown() {
+			onMoveSelection?(1)
+		}
+
+		@objc private func movePageUp() {
+			onMovePage?(-1)
+		}
+
+		@objc private func movePageDown() {
+			onMovePage?(1)
+		}
+
+		@objc private func moveToStart() {
+			onMoveToBoundary?(false)
+		}
+
+		@objc private func moveToEnd() {
+			onMoveToBoundary?(true)
+		}
+
+		@objc private func activateSelection() {
+			onActivateSelection?()
+		}
+
+		@objc private func close() {
+			onClose?()
 		}
 	}
 }

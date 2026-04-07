@@ -52,7 +52,10 @@ final class SSHTerminalSession {
 
 	func updateTerminalSize(_ size: TerminalWindowSize) {
 		guard size.columns > 0, size.rows > 0 else { return }
+		let previousSize = terminalSize
 		terminalSize = size
+		// Avoid redundant SSH window-change requests during tab/view churn.
+		guard size.columns != previousSize.columns || size.rows != previousSize.rows else { return }
 		connection.resize(size)
 	}
 

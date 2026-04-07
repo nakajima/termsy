@@ -106,12 +106,16 @@ private struct TerminalContainer: View {
 
 	var body: some View {
 		ZStack {
-			if let tab = coordinator.selectedTab {
+			ForEach(coordinator.tabs) { tab in
+				let isSelected = tab.id == coordinator.selectedTabID
 				TerminalHostRepresentable(tab: tab) { session in
 					markSessionConnected(session)
 				}
-					.id(tab.id)
 					.ignoresSafeArea(.container, edges: .bottom)
+					.opacity(isSelected ? 1 : 0)
+					.allowsHitTesting(isSelected)
+					.accessibilityHidden(!isSelected)
+					.zIndex(isSelected ? 1 : 0)
 			}
 		}
 		.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -128,33 +132,6 @@ private struct TerminalContainer: View {
 		} catch {
 			print("[DB] failed to persist lastConnectedAt for \(session.username)@\(session.hostname): \(error)")
 		}
-	}
-}
-
-private struct SessionPickerPanelOverlay: View {
-	@Environment(ViewCoordinator.self) private var coordinator
-	@Environment(\.appTheme) private var theme
-
-	var body: some View {
-		GeometryReader { proxy in
-			let panelWidth = min(max(proxy.size.width * 0.33, 280), 400)
-
-			ZStack(alignment: .trailing) {
-				Color.clear
-					.ignoresSafeArea()
-					.contentShape(Rectangle())
-					.onTapGesture {
-						coordinator.isShowingSessionPicker = false
-					}
-
-				SessionPickerView()
-					.frame(width: panelWidth)
-					.frame(maxHeight: .infinity)
-					.background(theme.background)
-					.shadow(color: .black.opacity(0.2), radius: 16, x: -4, y: 0)
-			}
-		}
-		.ignoresSafeArea()
 	}
 }
 

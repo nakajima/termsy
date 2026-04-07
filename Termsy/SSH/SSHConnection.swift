@@ -176,7 +176,10 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	}
 
 	func resize(_ size: TerminalWindowSize) {
+		let previousSize = pendingTerminalSize
 		pendingTerminalSize = size
+		// Re-sending the same character grid can make remote TUIs redraw on tab switches.
+		guard size.columns != previousSize.columns || size.rows != previousSize.rows else { return }
 		guard let sshChildChannel, sshChildChannel.isActive else { return }
 		sshChildChannel.eventLoop.execute {
 			guard sshChildChannel.isActive else { return }
