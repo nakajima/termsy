@@ -100,9 +100,9 @@ struct ConnectView: View {
 		.scrollContentBackground(.hidden)
 		.background(theme.background)
 		.navigationTitle("New Session")
-		.navigationBarTitleDisplayMode(.inline)
+		.termsyInlineNavigationTitle()
 		.toolbar {
-			ToolbarItem(placement: .topBarLeading) {
+			ToolbarItem(placement: .termsyCancellationAction) {
 				Button("Cancel") {
 					dismissConnectView()
 				}

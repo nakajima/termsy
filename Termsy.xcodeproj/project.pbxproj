@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0C7D09F34416420DC45E5502 /* GhosttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = D82EC482864275C18DDA7148 /* GhosttyTerminal */; };
+		1DA012FF1D6E47A5C4526CDD /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = A6B5B2852F80AB96002ED882 /* GRDB */; };
+		2E7A5F0FA800F41C6235CA58 /* NIOFoundationCompat in Frameworks */ = {isa = PBXBuildFile; productRef = A6B5ACD42F809100002ED882 /* NIOFoundationCompat */; };
+		45EDDB69BB96778846B2D67B /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = A6B5B2882F80ABBA002ED882 /* GRDBQuery */; };
+		791CBF944BC00E232F44FDF8 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = A6B5ACD32F809100002ED882 /* NIOCore */; };
 		A6B5ACB22F808000002ED882 /* GhosttyKit in Frameworks */ = {isa = PBXBuildFile; productRef = A6B5ACB12F808000002ED882 /* GhosttyKit */; };
 		A6B5ACD72F809100002ED882 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = A6B5ACD32F809100002ED882 /* NIOCore */; };
 		A6B5ACD82F809100002ED882 /* NIOFoundationCompat in Frameworks */ = {isa = PBXBuildFile; productRef = A6B5ACD42F809100002ED882 /* NIOFoundationCompat */; };
@@ -14,6 +19,9 @@
 		A6B5ACDA2F809100002ED882 /* NIOTransportServices in Frameworks */ = {isa = PBXBuildFile; productRef = A6B5ACD62F809100002ED882 /* NIOTransportServices */; };
 		A6B5B2862F80AB96002ED882 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = A6B5B2852F80AB96002ED882 /* GRDB */; };
 		A6B5B2892F80ABBA002ED882 /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = A6B5B2882F80ABBA002ED882 /* GRDBQuery */; };
+		BA66B3468CE896C6C148382F /* NIOTransportServices in Frameworks */ = {isa = PBXBuildFile; productRef = A6B5ACD62F809100002ED882 /* NIOTransportServices */; };
+		ED8BD57F904B11F9266DD8E7 /* GhosttyKit in Frameworks */ = {isa = PBXBuildFile; productRef = A6B5ACB12F808000002ED882 /* GhosttyKit */; };
+		FC1DABAB48A9C00310B65FB0 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = A6B5ACD52F809100002ED882 /* NIOSSH */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -34,12 +42,33 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		40A863FA45E38E353C433157 /* TermsyMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TermsyMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A6B5AC732F7F7BE9002ED882 /* Termsy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Termsy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A6B5AC802F7F7BEA002ED882 /* TermsyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TermsyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A6B5AC8A2F7F7BEA002ED882 /* TermsyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TermsyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		031544C03F3EEB5EA3B3EAFF /* Termsy/Models */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Termsy/Models;
+			sourceTree = "<group>";
+		};
+		1783916213A44D02C861C5C0 /* TermsyMac */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TermsyMac;
+			sourceTree = "<group>";
+		};
+		2FC9AD2DEB76E926B47026C9 /* Termsy/SSH */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Termsy/SSH;
+			sourceTree = "<group>";
+		};
+		34F32C831C6CDBA240338E57 /* Termsy/Platform */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Termsy/Platform;
+			sourceTree = "<group>";
+		};
 		A6B5AC752F7F7BE9002ED882 /* Termsy */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Termsy;
@@ -58,6 +87,21 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		6E879997C509D28B3032074F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				ED8BD57F904B11F9266DD8E7 /* GhosttyKit in Frameworks */,
+				0C7D09F34416420DC45E5502 /* GhosttyTerminal in Frameworks */,
+				791CBF944BC00E232F44FDF8 /* NIOCore in Frameworks */,
+				2E7A5F0FA800F41C6235CA58 /* NIOFoundationCompat in Frameworks */,
+				FC1DABAB48A9C00310B65FB0 /* NIOSSH in Frameworks */,
+				BA66B3468CE896C6C148382F /* NIOTransportServices in Frameworks */,
+				1DA012FF1D6E47A5C4526CDD /* GRDB in Frameworks */,
+				45EDDB69BB96778846B2D67B /* GRDBQuery in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A6B5AC702F7F7BE9002ED882 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -92,6 +136,10 @@
 		A6B5AC6A2F7F7BE9002ED882 = {
 			isa = PBXGroup;
 			children = (
+				1783916213A44D02C861C5C0 /* TermsyMac */,
+				031544C03F3EEB5EA3B3EAFF /* Termsy/Models */,
+				2FC9AD2DEB76E926B47026C9 /* Termsy/SSH */,
+				34F32C831C6CDBA240338E57 /* Termsy/Platform */,
 				A6B5AC752F7F7BE9002ED882 /* Termsy */,
 				A6B5AC832F7F7BEA002ED882 /* TermsyTests */,
 				A6B5AC8D2F7F7BEA002ED882 /* TermsyUITests */,
@@ -104,6 +152,7 @@
 			isa = PBXGroup;
 			children = (
 				A6B5AC732F7F7BE9002ED882 /* Termsy.app */,
+				40A863FA45E38E353C433157 /* TermsyMac.app */,
 				A6B5AC802F7F7BEA002ED882 /* TermsyTests.xctest */,
 				A6B5AC8A2F7F7BEA002ED882 /* TermsyUITests.xctest */,
 			);
@@ -120,6 +169,39 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		60075403701494F8457396D5 /* TermsyMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F261E87AAF51D7E464C84407 /* Build configuration list for PBXNativeTarget "TermsyMac" */;
+			buildPhases = (
+				C455310ECF590E75EE5FDA07 /* Sources */,
+				6E879997C509D28B3032074F /* Frameworks */,
+				A7C2DE1D8FF438090844EC6B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				031544C03F3EEB5EA3B3EAFF /* Termsy/Models */,
+				1783916213A44D02C861C5C0 /* TermsyMac */,
+				2FC9AD2DEB76E926B47026C9 /* Termsy/SSH */,
+				34F32C831C6CDBA240338E57 /* Termsy/Platform */,
+			);
+			name = TermsyMac;
+			packageProductDependencies = (
+				A6B5ACB12F808000002ED882 /* GhosttyKit */,
+				D82EC482864275C18DDA7148 /* GhosttyTerminal */,
+				A6B5ACD32F809100002ED882 /* NIOCore */,
+				A6B5ACD42F809100002ED882 /* NIOFoundationCompat */,
+				A6B5ACD52F809100002ED882 /* NIOSSH */,
+				A6B5ACD62F809100002ED882 /* NIOTransportServices */,
+				A6B5B2852F80AB96002ED882 /* GRDB */,
+				A6B5B2882F80ABBA002ED882 /* GRDBQuery */,
+			);
+			productName = TermsyMac;
+			productReference = 40A863FA45E38E353C433157 /* TermsyMac.app */;
+			productType = "com.apple.product-type.application";
+		};
 		A6B5AC722F7F7BE9002ED882 /* Termsy */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A6B5AC942F7F7BEA002ED882 /* Build configuration list for PBXNativeTarget "Termsy" */;
@@ -205,6 +287,9 @@
 				LastSwiftUpdateCheck = 2630;
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
+					60075403701494F8457396D5 = {
+						CreatedOnToolsVersion = 26.3;
+					};
 					A6B5AC722F7F7BE9002ED882 = {
 						CreatedOnToolsVersion = 26.3;
 						SystemCapabilities = {
@@ -248,6 +333,7 @@
 				A6B5AC722F7F7BE9002ED882 /* Termsy */,
 				A6B5AC7F2F7F7BEA002ED882 /* TermsyTests */,
 				A6B5AC892F7F7BEA002ED882 /* TermsyUITests */,
+				60075403701494F8457396D5 /* TermsyMac */,
 			);
 		};
 /* End PBXProject section */
@@ -274,6 +360,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A7C2DE1D8FF438090844EC6B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -292,6 +385,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A6B5AC862F7F7BEA002ED882 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C455310ECF590E75EE5FDA07 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -440,10 +540,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Termsy/Termsy.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Z773AM52SJ;
-				CODE_SIGN_ENTITLEMENTS = Termsy/Termsy.entitlements;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
@@ -459,9 +562,11 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = fm.folder.Termsy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -477,10 +582,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Termsy/Termsy.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Z773AM52SJ;
-				CODE_SIGN_ENTITLEMENTS = Termsy/Termsy.entitlements;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
@@ -496,9 +604,11 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = fm.folder.Termsy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -593,6 +703,64 @@
 			};
 			name = Release;
 		};
+		BD8FFFAA509D43741A8DD8B2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z773AM52SJ;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = fm.folder.TermsyMac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		EE3AE24BCBFA59352809F278 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z773AM52SJ;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = fm.folder.TermsyMac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -628,6 +796,15 @@
 			buildConfigurations = (
 				A6B5AC9B2F7F7BEA002ED882 /* Debug */,
 				A6B5AC9C2F7F7BEA002ED882 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F261E87AAF51D7E464C84407 /* Build configuration list for PBXNativeTarget "TermsyMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EE3AE24BCBFA59352809F278 /* Debug */,
+				BD8FFFAA509D43741A8DD8B2 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -720,6 +897,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A6B5B2872F80ABBA002ED882 /* XCRemoteSwiftPackageReference "GRDBQuery" */;
 			productName = GRDBQuery;
+		};
+		D82EC482864275C18DDA7148 /* GhosttyTerminal */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A6B5ACB02F808000002ED882 /* XCRemoteSwiftPackageReference "libghostty-spm" */;
+			productName = GhosttyTerminal;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

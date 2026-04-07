@@ -1,45 +1,33 @@
-#if canImport(UIKit)
-//
-//  TerminalTabBarController.swift
-//  Termsy
-//
-//  UIViewController that hosts a terminal session.
-//  Keeps a per-tab TerminalView mounted while the tab remains open.
-//
-
+#if canImport(AppKit) && !canImport(UIKit)
+import AppKit
 import SwiftUI
-import UIKit
 
-// MARK: - SwiftUI Bridge
-
-struct TerminalHostRepresentable: UIViewControllerRepresentable {
+struct TerminalHostRepresentable: NSViewControllerRepresentable {
 	@Environment(\.appTheme) private var theme
 	let tab: TerminalTab
 	let onConnectionEstablished: (Session) -> Void
 
-	func makeUIViewController(context: Context) -> TerminalHostController {
+	func makeNSViewController(context: Context) -> TerminalHostController {
 		tab.onConnectionEstablished = onConnectionEstablished
 		return TerminalHostController(terminalTab: tab, theme: theme)
 	}
 
-	func updateUIViewController(_ controller: TerminalHostController, context: Context) {
+	func updateNSViewController(_ controller: TerminalHostController, context: Context) {
 		tab.onConnectionEstablished = onConnectionEstablished
 		controller.applyTheme(theme)
 	}
 
-	static func dismantleUIViewController(_ controller: TerminalHostController, coordinator: ()) {
+	static func dismantleNSViewController(_ controller: TerminalHostController, coordinator: ()) {
 		controller.teardownTerminal()
 	}
 }
 
-// MARK: - Per-Tab Host Controller
-
 @MainActor
-final class TerminalHostController: UIViewController {
+final class TerminalHostController: NSViewController {
 	let terminalTab: TerminalTab
 	private var theme: AppTheme
 	private var terminalView: TerminalView?
-	private var overlayHostController: UIHostingController<AnyView>?
+	private var overlayHostController: NSHostingController<AnyView>?
 	private var connectTask: Task<Void, Never>?
 
 	init(terminalTab: TerminalTab, theme: AppTheme) {
@@ -51,6 +39,10 @@ final class TerminalHostController: UIViewController {
 	@available(*, unavailable)
 	required init?(coder: NSCoder) { fatalError() }
 
+	override func loadView() {
+		view = NSView()
+	}
+
 	override func viewDidLoad() {
 		super.viewDidLoad()
 		terminalTab.onRequestReconnect = { [weak self] in
@@ -60,8 +52,8 @@ final class TerminalHostController: UIViewController {
 		setupTerminal()
 	}
 
-	override func viewDidAppear(_ animated: Bool) {
-		super.viewDidAppear(animated)
+	override func viewDidAppear() {
+		super.viewDidAppear()
 		if terminalView == nil {
 			setupTerminal()
 		}
@@ -69,14 +61,15 @@ final class TerminalHostController: UIViewController {
 		restoreConnectionIfNeeded()
 	}
 
-	override func viewDidLayoutSubviews() {
-		super.viewDidLayoutSubviews()
+	override func viewDidLayout() {
+		super.viewDidLayout()
 		syncTerminalSizeToSession()
 	}
 
 	func applyTheme(_ theme: AppTheme) {
 		self.theme = theme
-		view.backgroundColor = theme.backgroundUIColor
+		view.wantsLayer = true
+		view.layer?.backgroundColor = theme.backgroundUIColor.cgColor
 		terminalTab.applyTheme(theme)
 		updateOverlay()
 	}
@@ -86,11 +79,11 @@ final class TerminalHostController: UIViewController {
 
 		let tv = terminalTab.terminalView
 		tv.frame = view.bounds
-		tv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+		tv.autoresizingMask = [.width, .height]
 		tv.applyTheme(theme)
 		tv.removeFromSuperview()
 		if let overlayView = overlayHostController?.view {
-			view.insertSubview(tv, belowSubview: overlayView)
+			view.addSubview(tv, positioned: .below, relativeTo: overlayView)
 		} else {
 			view.addSubview(tv)
 		}
@@ -140,16 +133,16 @@ final class TerminalHostController: UIViewController {
 
 		if let existing = overlayHostController {
 			existing.rootView = AnyView(overlayView)
-			existing.view.isUserInteractionEnabled = overlayNeedsInteraction
+			existing.view.isHidden = !overlayNeedsInteraction
 		} else {
-			let host = UIHostingController(rootView: AnyView(overlayView))
-			host.view.backgroundColor = .clear
+			let host = NSHostingController(rootView: AnyView(overlayView))
+			host.view.wantsLayer = true
+			host.view.layer?.backgroundColor = NSColor.clear.cgColor
 			host.view.frame = view.bounds
-			host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-			host.view.isUserInteractionEnabled = overlayNeedsInteraction
+			host.view.autoresizingMask = [.width, .height]
+			host.view.isHidden = !overlayNeedsInteraction
 			addChild(host)
 			view.addSubview(host.view)
-			host.didMove(toParent: self)
 			overlayHostController = host
 		}
 	}
@@ -158,7 +151,7 @@ final class TerminalHostController: UIViewController {
 		guard let terminalView else { return }
 		terminalView.frame = view.bounds
 		guard let size = terminalView.syncSizeAndReadBack() else { return }
-		terminalTab.sshSession.updateTerminalSize(size)
+		terminalTab.updateTerminalSize(size)
 	}
 
 	private func restoreConnectionIfNeeded() {
@@ -167,7 +160,7 @@ final class TerminalHostController: UIViewController {
 			return
 		}
 		if terminalTab.isConnected {
-			guard terminalTab.sshSession.connection.isActive else {
+			guard terminalTab.connectionIsActive else {
 				reconnectAfterBackgroundLoss()
 				return
 			}
@@ -178,7 +171,6 @@ final class TerminalHostController: UIViewController {
 	}
 
 	private func reconnectAfterBackgroundLoss() {
-		print("[SSH] reconnecting after app switch/background...")
 		connectTask?.cancel()
 		terminalTab.prepareForReconnectAfterBackgroundLoss()
 		terminalView = nil
@@ -191,4 +183,3 @@ final class TerminalHostController: UIViewController {
 	}
 }
 #endif
-

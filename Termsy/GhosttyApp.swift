@@ -2,9 +2,10 @@
 //  GhosttyApp.swift
 //  Termsy
 //
-//  Manages the ghostty_app_t lifecycle. One instance per process.
+//  Manages shared Ghostty configuration state.
 //
 
+#if canImport(UIKit)
 import GhosttyKit
 import UIKit
 
@@ -63,8 +64,6 @@ final class GhosttyApp {
 		rt.userdata = userdata
 		rt.supports_selection_clipboard = false
 
-		// Wakeup: Ghostty signals from its thread that a frame is ready.
-		// Dispatch tick to main thread (same pattern as GhosttyTerminal).
 		rt.wakeup_cb = { userdata in
 			guard let userdata else { return }
 			DispatchQueue.main.async {
@@ -73,19 +72,13 @@ final class GhosttyApp {
 			}
 		}
 
-		// Action: route to the surface's userdata (our TermsyTerminalView).
 		rt.action_cb = { _, target, _ in
 			guard target.tag == GHOSTTY_TARGET_SURFACE else { return false }
-			// We could handle SET_TITLE, CELL_SIZE etc. here if needed.
 			return false
 		}
 
-		// Close surface callback — userdata is the surface's userdata (our view).
-		rt.close_surface_cb = { _, _ in
-			// No-op for now; SSH disconnect handles cleanup.
-		}
+		rt.close_surface_cb = { _, _ in }
 
-		// Clipboard
 		rt.write_clipboard_cb = { _, _, contents, contentsLen, _ in
 			guard contentsLen > 0, let content = contents?.pointee,
 			      let data = content.data
@@ -124,7 +117,6 @@ final class GhosttyApp {
 		reloadConfig(theme: theme)
 	}
 
-	/// Reloads the full config from current UserDefaults + the given theme.
 	func reloadConfig(theme: TerminalTheme? = nil) {
 		guard let app else { return }
 		let theme = theme ?? TerminalTheme.current
@@ -134,3 +126,72 @@ final class GhosttyApp {
 		ghostty_app_update_config(app, cfg)
 	}
 }
+#elseif canImport(AppKit) && canImport(GhosttyTerminal)
+import Foundation
+import GhosttyTerminal
+
+@MainActor
+final class GhosttyApp {
+	static let shared = GhosttyApp()
+
+	private let controllers = NSHashTable<TerminalController>.weakObjects()
+
+	private init() {}
+
+	static func buildConfigText(theme: TerminalTheme) -> String {
+		let cursorStyle = UserDefaults.standard.string(forKey: "cursorStyle") ?? "block"
+		let cursorBlink = UserDefaults.standard.object(forKey: "cursorBlink") as? Bool ?? true
+		var lines = [
+			"font-size = \(Int(TerminalFontSettings.defaultSize))",
+			"cursor-style = \(cursorStyle)",
+			"cursor-style-blink = \(cursorBlink)",
+			"term = xterm-256color",
+		]
+		if let fontFamily = TerminalFontSettings.family {
+			let escaped = fontFamily
+				.replacingOccurrences(of: "\\", with: "\\\\")
+				.replacingOccurrences(of: "\"", with: "\\\"")
+			lines.append("font-family = \"\(escaped)\"")
+		}
+		lines.append(theme.ghosttyConfig)
+		return lines.joined(separator: "\n")
+	}
+
+	func register(_ controller: TerminalController) {
+		controllers.add(controller)
+		let source = TerminalController.ConfigSource.generated(Self.buildConfigText(theme: TerminalTheme.current))
+		controller.updateConfigSource(source)
+	}
+
+	func unregister(_ controller: TerminalController) {
+		controllers.remove(controller)
+	}
+
+	func applyTheme(_ theme: TerminalTheme) {
+		reloadConfig(theme: theme)
+	}
+
+	func reloadConfig(theme: TerminalTheme? = nil) {
+		let source = TerminalController.ConfigSource.generated(Self.buildConfigText(theme: theme ?? TerminalTheme.current))
+		for controller in controllers.allObjects {
+			controller.updateConfigSource(source)
+		}
+	}
+}
+#elseif canImport(AppKit)
+import Foundation
+
+@MainActor
+final class GhosttyApp {
+	static let shared = GhosttyApp()
+
+	private init() {}
+
+	static func buildConfigText(theme: TerminalTheme) -> String {
+		GhosttyConfigBuilder.buildConfigText(theme: theme)
+	}
+
+	func applyTheme(_ theme: TerminalTheme) {}
+	func reloadConfig(theme: TerminalTheme? = nil) {}
+}
+#endif

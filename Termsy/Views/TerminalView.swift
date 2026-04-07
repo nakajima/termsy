@@ -1,3 +1,4 @@
+#if canImport(UIKit)
 //
 //  TerminalView.swift
 //  Termsy
@@ -179,6 +180,10 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	func processExited(code: UInt32 = 0, runtimeMs: UInt64 = 0) {
 		guard let surface else { return }
 		ghostty_surface_process_exit(surface, code, runtimeMs)
+	}
+
+	var hasAttachedWindow: Bool {
+		window != nil
 	}
 
 	func setDisplayActive(_ isActive: Bool) {
@@ -1107,3 +1112,4 @@ enum ClipboardAccessAuthorization {
 		lock.unlock()
 	}
 }
+#endif

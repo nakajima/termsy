@@ -4,7 +4,6 @@
 //
 
 import Foundation
-import UIKit
 
 enum TerminalTheme: String, CaseIterable, Identifiable {
 	case mocha
@@ -49,8 +48,8 @@ enum TerminalTheme: String, CaseIterable, Identifiable {
 		TerminalTheme(rawValue: UserDefaults.standard.string(forKey: "terminalTheme") ?? "") ?? .mocha
 	}
 
-	var backgroundUIColor: UIColor {
-		UIColor(hex: backgroundHex)
+	var backgroundUIColor: PlatformColor {
+		PlatformColor(hex: backgroundHex)
 	}
 
 	/// Ghostty config lines for this theme's colors.
@@ -157,18 +156,5 @@ enum TerminalTheme: String, CaseIterable, Identifiable {
 			selection-foreground = 4c4f69
 			"""
 		}
-	}
-}
-
-extension UIColor {
-	convenience init(hex: String) {
-		var rgb: UInt64 = 0
-		Scanner(string: hex).scanHexInt64(&rgb)
-		self.init(
-			red: CGFloat((rgb >> 16) & 0xFF) / 255,
-			green: CGFloat((rgb >> 8) & 0xFF) / 255,
-			blue: CGFloat(rgb & 0xFF) / 255,
-			alpha: 1
-		)
 	}
 }

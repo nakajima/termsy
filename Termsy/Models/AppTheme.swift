@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import UIKit
 
 struct AppTheme {
 	// MARK: - Base layers
@@ -77,18 +76,20 @@ extension EnvironmentValues {
 	}
 }
 
+#if canImport(UIKit) || canImport(AppKit)
 extension AppTheme {
-	var backgroundUIColor: UIColor { UIColor(background) }
-	var elevatedBackgroundUIColor: UIColor { UIColor(elevatedBackground) }
-	var cardBackgroundUIColor: UIColor { UIColor(cardBackground) }
-	var selectedBackgroundUIColor: UIColor { UIColor(selectedBackground) }
-	var primaryTextUIColor: UIColor { UIColor(primaryText) }
-	var secondaryTextUIColor: UIColor { UIColor(secondaryText) }
-	var tertiaryTextUIColor: UIColor { UIColor(tertiaryText) }
-	var accentUIColor: UIColor { UIColor(accent) }
-	var warningUIColor: UIColor { UIColor(warning) }
-	var dividerUIColor: UIColor { UIColor(overlay0).withAlphaComponent(0.25) }
+	var backgroundUIColor: PlatformColor { PlatformColor(background) }
+	var elevatedBackgroundUIColor: PlatformColor { PlatformColor(elevatedBackground) }
+	var cardBackgroundUIColor: PlatformColor { PlatformColor(cardBackground) }
+	var selectedBackgroundUIColor: PlatformColor { PlatformColor(selectedBackground) }
+	var primaryTextUIColor: PlatformColor { PlatformColor(primaryText) }
+	var secondaryTextUIColor: PlatformColor { PlatformColor(secondaryText) }
+	var tertiaryTextUIColor: PlatformColor { PlatformColor(tertiaryText) }
+	var accentUIColor: PlatformColor { PlatformColor(accent) }
+	var warningUIColor: PlatformColor { PlatformColor(warning) }
+	var dividerUIColor: PlatformColor { PlatformColor(overlay0).withAlphaComponent(0.25) }
 }
+#endif
 
 // MARK: - Color from hex
 

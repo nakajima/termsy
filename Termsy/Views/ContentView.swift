@@ -8,12 +8,12 @@
 import GRDB
 import GRDBQuery
 import SwiftUI
-import UIKit
 
 struct ContentView: View {
 	@Environment(ViewCoordinator.self) var coordinator
 	@Environment(\.databaseContext) private var dbContext
 	@Environment(\.appTheme) private var theme
+	@Environment(\.scenePhase) private var scenePhase
 	@State private var didAutoconnect = false
 
 	var body: some View {
@@ -23,7 +23,7 @@ struct ContentView: View {
 				NavigationStack(path: $coordinator.path) {
 					SessionListView()
 						.toolbar {
-							ToolbarItem(placement: .topBarTrailing) {
+							ToolbarItem(placement: .termsyPrimaryAction) {
 								Button {
 									coordinator.openSettings()
 								} label: {
@@ -32,9 +32,7 @@ struct ContentView: View {
 								.keyboardShortcut(",", modifiers: .command)
 							}
 						}
-						.toolbarBackground(theme.elevatedBackground, for: .navigationBar)
-						.toolbarBackground(.visible, for: .navigationBar)
-						.toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+						.termsyNavigationBarAppearance(theme)
 				}
 			} else {
 				ZStack(alignment: .top) {
@@ -66,21 +64,23 @@ struct ContentView: View {
 				ConnectView { session in
 					coordinator.openTab(for: session)
 				}
-				.toolbarBackground(theme.elevatedBackground, for: .navigationBar)
-				.toolbarBackground(.visible, for: .navigationBar)
-				.toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+				.termsyNavigationBarAppearance(theme)
 			}
 		}
 		.sheet(isPresented: $coordinator.isShowingSettings) {
 			SettingsView()
 				.environment(coordinator)
 		}
-		.onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-			coordinator.appWillResignActive()
-		}
-		.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-			coordinator.appDidBecomeActive()
-			SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "app did become active")
+		.onChange(of: scenePhase, initial: true) { _, phase in
+			switch phase {
+			case .active:
+				coordinator.appDidBecomeActive()
+				SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "app did become active")
+			case .inactive, .background:
+				coordinator.appWillResignActive()
+			@unknown default:
+				break
+			}
 		}
 		.task {
 			SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "initial load")

@@ -192,15 +192,13 @@ struct SettingsView: View {
 			.scrollContentBackground(.hidden)
 			.background(theme.background)
 			.navigationTitle("Settings")
-			.navigationBarTitleDisplayMode(.inline)
+			.termsyInlineNavigationTitle()
 			.toolbar {
-				ToolbarItem(placement: .topBarTrailing) {
+				ToolbarItem(placement: .termsyPrimaryAction) {
 					Button("Done") { dismiss() }
 				}
 			}
-			.toolbarBackground(theme.elevatedBackground, for: .navigationBar)
-			.toolbarBackground(.visible, for: .navigationBar)
-			.toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+			.termsyNavigationBarAppearance(theme)
 		}
 		.sheet(isPresented: $isShowingInstalledFontPicker) {
 			InstalledTerminalFontPickerSheet(

@@ -25,32 +25,62 @@ struct SessionListView: View {
 
 	var body: some View {
 		List {
-			ForEach(sessions) { session in
+			#if os(macOS)
+			Section("Local") {
 				Button {
-					coordinator.openTab(for: session)
+					coordinator.openLocalShellTab()
 				} label: {
 					VStack(alignment: .leading, spacing: 4) {
-						Text("\(session.username)@\(session.hostname)")
+						Text("Local Shell")
 							.font(.headline)
 							.foregroundStyle(theme.primaryText)
-						if let tmuxSessionName = session.tmuxSessionName, !tmuxSessionName.isEmpty {
-							Text("tmux • \(tmuxSessionName)")
-								.font(.caption)
-								.foregroundStyle(theme.secondaryText)
-						}
+						Text(LocalShellProfile.default.detailText)
+							.font(.caption)
+							.foregroundStyle(theme.secondaryText)
 					}
 					.frame(maxWidth: .infinity, alignment: .leading)
 					.padding(.vertical, 6)
 				}
 				.listRowBackground(theme.cardBackground)
 			}
-			.onDelete(perform: deleteSessions)
+			#endif
+
+			Section(sessions.isEmpty ? "Saved Sessions" : "") {
+				ForEach(sessions) { session in
+					Button {
+						coordinator.openTab(for: session)
+					} label: {
+						VStack(alignment: .leading, spacing: 4) {
+							Text("\(session.username)@\(session.hostname)")
+								.font(.headline)
+								.foregroundStyle(theme.primaryText)
+							if let tmuxSessionName = session.tmuxSessionName, !tmuxSessionName.isEmpty {
+								Text("tmux • \(tmuxSessionName)")
+									.font(.caption)
+									.foregroundStyle(theme.secondaryText)
+							}
+						}
+						.frame(maxWidth: .infinity, alignment: .leading)
+						.padding(.vertical, 6)
+					}
+					.listRowBackground(theme.cardBackground)
+				}
+				.onDelete(perform: deleteSessions)
+			}
 		}
 		.scrollContentBackground(.hidden)
 		.background(theme.background)
 		.navigationTitle("Termsy")
 		.toolbar {
-			ToolbarItem(placement: .topBarTrailing) {
+			#if os(macOS)
+			ToolbarItemGroup(placement: .termsyPrimaryAction) {
+				Button {
+					coordinator.openLocalShellTab()
+				} label: {
+					Label("Local Shell", systemImage: "terminal")
+				}
+				.keyboardShortcut("l", modifiers: .command)
+
 				Button {
 					coordinator.openNewTabUI()
 				} label: {
@@ -58,11 +88,23 @@ struct SessionListView: View {
 				}
 				.keyboardShortcut("t", modifiers: .command)
 			}
+			#else
+			ToolbarItem(placement: .termsyPrimaryAction) {
+				Button {
+					coordinator.openNewTabUI()
+				} label: {
+					Label("New Session", systemImage: "plus")
+				}
+				.keyboardShortcut("t", modifiers: .command)
+			}
+			#endif
 		}
 		.onAppear {
+			#if os(iOS)
 			if sessions.isEmpty {
 				coordinator.isShowingConnectView = true
 			}
+			#endif
 		}
 	}
 

@@ -66,7 +66,7 @@ struct WhatsNewView: View {
 		.scrollContentBackground(.hidden)
 		.background(theme.background)
 		.navigationTitle(content.title)
-		.navigationBarTitleDisplayMode(.inline)
+		.termsyInlineNavigationTitle()
 	}
 }
 

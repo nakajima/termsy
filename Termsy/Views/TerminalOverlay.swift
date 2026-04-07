@@ -17,7 +17,7 @@ struct TerminalOverlay: View {
 		ZStack {
 			if !tab.isConnected, tab.connectionError == nil, !tab.needsPassword {
 				theme.background
-				ProgressView("Connecting to \(tab.session.hostname)…")
+				ProgressView(tab.progressTitle)
 					.tint(theme.accent)
 					.foregroundStyle(theme.primaryText)
 			}
@@ -34,7 +34,7 @@ struct TerminalOverlay: View {
 					Image(systemName: "xmark.circle")
 						.font(.largeTitle)
 						.foregroundStyle(theme.error)
-					Text("Connection Failed")
+					Text(tab.failureTitle)
 						.font(.headline)
 						.foregroundStyle(theme.primaryText)
 					Text(error)
@@ -60,7 +60,7 @@ struct TerminalOverlay: View {
 		}
 		.allowsHitTesting(!tab.isConnected || tab.connectionError != nil || tab.isRestoring)
 		.alert("Password Required", isPresented: .init(
-			get: { tab.needsPassword },
+			get: { tab.needsPassword && !tab.isLocalShell },
 			set: { if !$0 { tab.needsPassword = false } }
 		)) {
 			SecureField("Password", text: $password)
@@ -74,7 +74,7 @@ struct TerminalOverlay: View {
 				tab.connectionError = "Authentication cancelled"
 			}
 		} message: {
-			Text("\(tab.session.username)@\(tab.session.hostname)")
+			Text(tab.detailText)
 		}
 	}
 }

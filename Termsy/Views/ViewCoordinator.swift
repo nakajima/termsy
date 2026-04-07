@@ -5,7 +5,6 @@
 //  Created by Pat Nakajima on 4/3/26.
 //
 
-import UIKit
 import Observation
 import SwiftUI
 
@@ -39,7 +38,16 @@ class ViewCoordinator {
 	}
 
 	func openTab(for session: Session) {
-		let tab = TerminalTab(session: session)
+		open(tab: TerminalTab(session: session))
+	}
+
+	#if os(macOS)
+	func openLocalShellTab(profile: LocalShellProfile = .default) {
+		open(tab: TerminalTab(localShellProfile: profile))
+	}
+	#endif
+
+	private func open(tab: TerminalTab) {
 		let tabID = tab.id
 		tab.onRequestClose = { [weak self] in
 			self?.closeTab(tabID)
@@ -99,6 +107,7 @@ class ViewCoordinator {
 
 	func appWillResignActive() {
 		appIsActive = false
+		ApplicationActivity.isActive = false
 		for tab in tabs {
 			tab.noteAppWillResignActive()
 		}
@@ -107,6 +116,7 @@ class ViewCoordinator {
 
 	func appDidBecomeActive() {
 		appIsActive = true
+		ApplicationActivity.isActive = true
 		for tab in tabs {
 			tab.noteAppDidBecomeActive()
 		}
@@ -118,7 +128,7 @@ class ViewCoordinator {
 			return
 		}
 		guard selectedTab.isConnected else { return }
-		guard !selectedTab.sshSession.connection.isActive else { return }
+		guard !selectedTab.connectionIsActive else { return }
 		selectedTab.requestReconnect()
 	}
 
@@ -128,11 +138,11 @@ class ViewCoordinator {
 
 		if let previousID, previousID != id,
 		   let prevTab = tabs.first(where: { $0.id == previousID }) {
-			prevTab.sshSession.enterBackground()
+			prevTab.enterBackground()
 		}
 
 		if let id, let tab = tabs.first(where: { $0.id == id }) {
-			tab.sshSession.enterForeground()
+			tab.enterForeground()
 		}
 
 		refreshDisplayActivity()
@@ -208,8 +218,12 @@ class ViewCoordinator {
 /// Represents a single open terminal tab.
 @Observable @MainActor
 class TerminalTab: Identifiable {
-	var session: Session
-	let sshSession: SSHTerminalSession
+	let endpoint: TerminalEndpoint
+	var session: Session?
+	let sshSession = SSHTerminalSession()
+	#if os(macOS)
+	private let localShellSession: LocalShellSession?
+	#endif
 	var terminalView: TerminalView
 	var isConnected = false
 	var connectionError: String?
@@ -232,22 +246,113 @@ class TerminalTab: Identifiable {
 	let id = UUID()
 
 	init(session: Session) {
+		self.endpoint = .remote
 		self.session = session
-		self.sshSession = SSHTerminalSession()
 		self.terminalView = TerminalView(frame: .zero)
+		#if os(macOS)
+		self.localShellSession = nil
+		#endif
 
 		configureTerminalView()
 		sshSession.onRemoteOutput = { [weak self] data in
 			self?.terminalView.feedData(data)
 		}
 		sshSession.onClose = { [weak self] reason in
-			self?.handleSessionClose(reason)
+			self?.handleSSHSessionClose(reason)
+		}
+	}
+
+	#if os(macOS)
+	init(localShellProfile: LocalShellProfile = .default) {
+		self.endpoint = .localShell(localShellProfile)
+		self.session = nil
+		self.terminalView = TerminalView(frame: .zero)
+		self.localShellSession = LocalShellSession(profile: localShellProfile)
+
+		configureTerminalView()
+		localShellSession?.onRemoteOutput = { [weak self] data in
+			self?.terminalView.feedData(data)
+		}
+		localShellSession?.onClose = { [weak self] reason in
+			self?.handleLocalShellClose(reason)
+		}
+	}
+	#endif
+
+	var displayTitle: String {
+		switch endpoint {
+		case .remote:
+			guard let session else { return "Session" }
+			let baseTitle = "\(session.username)@\(session.hostname)"
+			if let tmuxName = session.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+			   !tmuxName.isEmpty {
+				return "\(tmuxName) • \(baseTitle)"
+			}
+			return baseTitle
+		case let .localShell(profile):
+			return profile.displayName
+		}
+	}
+
+	var detailText: String {
+		switch endpoint {
+		case .remote:
+			guard let session else { return "" }
+			return "\(session.username)@\(session.hostname)"
+		case let .localShell(profile):
+			return profile.detailText
+		}
+	}
+
+	var progressTitle: String {
+		switch endpoint {
+		case .remote:
+			guard let session else { return "Connecting…" }
+			return "Connecting to \(session.hostname)…"
+		case .localShell:
+			return "Starting local shell…"
+		}
+	}
+
+	var failureTitle: String {
+		switch endpoint {
+		case .remote: "Connection Failed"
+		case .localShell: "Local Shell Failed"
+		}
+	}
+
+	var isLocalShell: Bool {
+		if case .localShell = endpoint { return true }
+		return false
+	}
+
+	var connectionIsActive: Bool {
+		switch endpoint {
+		case .remote:
+			sshSession.connection.isActive
+		case .localShell:
+			#if os(macOS)
+			localShellSession?.isActive ?? false
+			#else
+			false
+			#endif
 		}
 	}
 
 	func connect() async {
 		connectionError = nil
-		// Try none auth first, then fall back to keychain password
+		switch endpoint {
+		case .remote:
+			await connectRemote()
+		case .localShell:
+			#if os(macOS)
+			await connectLocalShell()
+			#endif
+		}
+	}
+
+	private func connectRemote() async {
+		guard let session else { return }
 		let keychainPassword = Keychain.password(for: session)
 		do {
 			try await sshSession.connect(
@@ -257,9 +362,11 @@ class TerminalTab: Identifiable {
 				password: keychainPassword
 			)
 			isConnected = true
-			session.lastConnectedAt = Date()
+			self.session?.lastConnectedAt = Date()
 			clearAppInactiveState()
-			onConnectionEstablished?(session)
+			if let session = self.session {
+				onConnectionEstablished?(session)
+			}
 			startTmuxIfNeeded()
 		} catch SSHConnectionError.authenticationFailed {
 			print("[SSH] auth failed, prompting for password")
@@ -270,9 +377,25 @@ class TerminalTab: Identifiable {
 		}
 	}
 
+	#if os(macOS)
+	private func connectLocalShell() async {
+		guard let localShellSession else { return }
+		do {
+			try localShellSession.start()
+			isConnected = true
+			clearAppInactiveState()
+		} catch {
+			print("[LocalShell] failed to start: \(error)")
+			connectionError = error.localizedDescription
+		}
+	}
+	#endif
+
 	private func startTmuxIfNeeded() {
-		guard let rawName = session.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
-		      !rawName.isEmpty else { return }
+		guard let session,
+		      let rawName = session.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+		      !rawName.isEmpty
+		else { return }
 
 		let escapedName = shellQuoted(rawName)
 		let command = Data("tmux new-session -A -s \(escapedName)\r".utf8)
@@ -289,6 +412,7 @@ class TerminalTab: Identifiable {
 	}
 
 	func connectWithPassword(_ password: String) async {
+		guard case .remote = endpoint, let session else { return }
 		needsPassword = false
 		connectionError = nil
 		disconnect()
@@ -300,10 +424,12 @@ class TerminalTab: Identifiable {
 				password: password
 			)
 			isConnected = true
-			session.lastConnectedAt = Date()
+			self.session?.lastConnectedAt = Date()
 			clearAppInactiveState()
 			Keychain.setPassword(password, for: session)
-			onConnectionEstablished?(session)
+			if let session = self.session {
+				onConnectionEstablished?(session)
+			}
 			startTmuxIfNeeded()
 		} catch {
 			print("[SSH] connection error: \(error)")
@@ -313,7 +439,14 @@ class TerminalTab: Identifiable {
 
 	func disconnect() {
 		isConnected = false
-		sshSession.disconnect()
+		switch endpoint {
+		case .remote:
+			sshSession.disconnect()
+		case .localShell:
+			#if os(macOS)
+			localShellSession?.disconnect()
+			#endif
+		}
 	}
 
 	func close() {
@@ -335,6 +468,24 @@ class TerminalTab: Identifiable {
 
 	func setDisplayActive(_ isActive: Bool) {
 		terminalView.setDisplayActive(isActive)
+	}
+
+	func enterForeground() {
+		switch endpoint {
+		case .remote:
+			sshSession.enterForeground()
+		case .localShell:
+			break
+		}
+	}
+
+	func enterBackground() {
+		switch endpoint {
+		case .remote:
+			sshSession.enterBackground()
+		case .localShell:
+			break
+		}
 	}
 
 	func noteAppWillResignActive() {
@@ -378,14 +529,26 @@ class TerminalTab: Identifiable {
 	}
 
 	private func shouldAutoReconnect(for message: String) -> Bool {
+		guard case .remote = endpoint else { return false }
 		let isTcpShutdown = message.localizedCaseInsensitiveContains("tcpShutdown")
 			|| message.localizedCaseInsensitiveContains("tcp shutdown")
 		guard isTcpShutdown else { return false }
-		if UIApplication.shared.applicationState != .active {
+		if !ApplicationActivity.isActive {
 			return wasConnectedWhenAppResignedActive
 		}
 		guard let deadline = backgroundReconnectGraceDeadline else { return false }
 		return Date() < deadline
+	}
+
+	func updateTerminalSize(_ size: TerminalWindowSize) {
+		switch endpoint {
+		case .remote:
+			sshSession.updateTerminalSize(size)
+		case .localShell:
+			#if os(macOS)
+			localShellSession?.updateTerminalSize(size)
+			#endif
+		}
 	}
 
 	private func configureTerminalView() {
@@ -408,11 +571,19 @@ class TerminalTab: Identifiable {
 			self?.requestDismissAuxiliaryUI() ?? false
 		}
 		terminalView.onWrite = { [weak self] data in
-			self?.sshSession.connection.send(data)
+			guard let self else { return }
+			switch self.endpoint {
+			case .remote:
+				self.sshSession.connection.send(data)
+			case .localShell:
+				#if os(macOS)
+				self.localShellSession?.send(data)
+				#endif
+			}
 		}
 		terminalView.onResize = { [weak self] _, _ in
 			guard let self, let size = self.terminalView.currentTerminalSize() else { return }
-			self.sshSession.updateTerminalSize(size)
+			self.updateTerminalSize(size)
 		}
 	}
 
@@ -445,7 +616,7 @@ class TerminalTab: Identifiable {
 		onRequestDismissAuxiliaryUI?() ?? false
 	}
 
-	private func handleSessionClose(_ reason: SSHTerminalSession.CloseReason) {
+	private func handleSSHSessionClose(_ reason: SSHTerminalSession.CloseReason) {
 		isConnected = false
 		needsPassword = false
 		isRestoring = false
@@ -461,7 +632,7 @@ class TerminalTab: Identifiable {
 			if shouldAutoReconnect(for: message) {
 				print("[SSH] TCP transport shut down around app switch; reconnecting: \(message)")
 				connectionError = nil
-				if UIApplication.shared.applicationState == .active, terminalView.window != nil {
+				if ApplicationActivity.isActive, terminalView.hasAttachedWindow {
 					onRequestReconnect?()
 				} else {
 					shouldReconnectOnActivation = true
@@ -472,4 +643,24 @@ class TerminalTab: Identifiable {
 			}
 		}
 	}
+
+	#if os(macOS)
+	private func handleLocalShellClose(_ reason: LocalShellSession.CloseReason) {
+		isConnected = false
+		needsPassword = false
+		isRestoring = false
+
+		switch reason {
+		case .localDisconnect:
+			clearAppInactiveState()
+		case .cleanExit:
+			clearAppInactiveState()
+			terminalView.processExited()
+			onRequestClose?()
+		case let .error(message):
+			clearAppInactiveState()
+			connectionError = message
+		}
+	}
+	#endif
 }

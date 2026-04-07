@@ -9,10 +9,10 @@
 import GRDB
 import GRDBQuery
 import SwiftUI
-import UIKit
 
 struct SessionPickerView: View {
 	private enum PickerItemID: Hashable {
+		case localShell
 		case session(String)
 		case newSession
 	}
@@ -28,13 +28,23 @@ struct SessionPickerView: View {
 
 	private var pickerItemIDs: [PickerItemID] {
 		let sessionItems = sessions.map { PickerItemID.session($0.uuid) }
+		#if os(macOS)
+		return [.localShell] + sessionItems + [.newSession]
+		#else
 		return sessionItems + [.newSession]
+		#endif
 	}
 
 	var body: some View {
 		NavigationStack {
 			ScrollViewReader { proxy in
 				List {
+					#if os(macOS)
+					Section("Local") {
+						localShellRow
+					}
+					#endif
+
 					if !sessions.isEmpty {
 						Section("Saved Sessions") {
 							ForEach(sessions) { session in
@@ -51,18 +61,16 @@ struct SessionPickerView: View {
 				.scrollContentBackground(.hidden)
 				.background(theme.background)
 				.navigationTitle("Sessions")
-				.navigationBarTitleDisplayMode(.inline)
+				.termsyInlineNavigationTitle()
 				.toolbar {
-					ToolbarItem(placement: .topBarTrailing) {
+					ToolbarItem(placement: .termsyPrimaryAction) {
 						Button("Done") {
 							coordinator.isShowingSessionPicker = false
 						}
 						.keyboardShortcut(.cancelAction)
 					}
 				}
-				.toolbarBackground(theme.elevatedBackground, for: .navigationBar)
-				.toolbarBackground(.visible, for: .navigationBar)
-				.toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+				.termsyNavigationBarAppearance(theme)
 				.background {
 					SessionPickerKeyboardHandler(
 						onMoveSelection: moveSelection,
@@ -91,7 +99,7 @@ struct SessionPickerView: View {
 	@ViewBuilder
 	private func sessionRow(for session: Session) -> some View {
 		let itemID = PickerItemID.session(session.uuid)
-		let isOpen = coordinator.tabs.contains { $0.session.uuid == session.uuid }
+		let isOpen = coordinator.tabs.contains { $0.session?.uuid == session.uuid }
 		let isSelected = selectedItemID == itemID
 
 		Button {
@@ -124,6 +132,29 @@ struct SessionPickerView: View {
 			selectedItemID = itemID
 		}
 	}
+
+	#if os(macOS)
+	private var localShellRow: some View {
+		let isSelected = selectedItemID == .localShell
+
+		return Button {
+			openLocalShell()
+		} label: {
+			Label("Local Shell", systemImage: "terminal")
+				.font(.body)
+				.foregroundStyle(isSelected ? theme.primaryText : theme.accent)
+				.frame(maxWidth: .infinity, alignment: .leading)
+				.contentShape(Rectangle())
+		}
+		.buttonStyle(.plain)
+		.keyboardShortcut("l", modifiers: .command)
+		.listRowBackground(isSelected ? theme.selectedBackground : theme.cardBackground)
+		.id(PickerItemID.localShell)
+		.onTapGesture {
+			selectedItemID = .localShell
+		}
+	}
+	#endif
 
 	private var newSessionRow: some View {
 		let isSelected = selectedItemID == .newSession
@@ -178,6 +209,12 @@ struct SessionPickerView: View {
 		}
 
 		switch selectedItemID {
+		case .localShell:
+			#if os(macOS)
+			openLocalShell()
+			#else
+			break
+			#endif
 		case let .session(uuid):
 			guard let session = sessions.first(where: { $0.uuid == uuid }) else {
 				ensureValidSelection()
@@ -194,6 +231,14 @@ struct SessionPickerView: View {
 		coordinator.openTab(for: session)
 		coordinator.isShowingSessionPicker = false
 	}
+
+	#if os(macOS)
+	private func openLocalShell() {
+		selectedItemID = .localShell
+		coordinator.isShowingSessionPicker = false
+		coordinator.openLocalShellTab()
+	}
+	#endif
 
 	private func openNewSession() {
 		selectedItemID = .newSession
@@ -244,6 +289,7 @@ struct SessionPickerView: View {
 	}
 }
 
+#if canImport(UIKit)
 private struct SessionPickerKeyboardHandler: UIViewRepresentable {
 	let onMoveSelection: (Int) -> Void
 	let onMovePage: (Int) -> Void
@@ -277,87 +323,22 @@ private struct SessionPickerKeyboardHandler: UIViewRepresentable {
 
 		override var keyCommands: [UIKeyCommand]? {
 			[
-				command(
-					input: UIKeyCommand.inputUpArrow,
-					modifiers: [],
-					action: #selector(moveUp),
-					title: "Move Selection Up"
-				),
-				command(
-					input: UIKeyCommand.inputDownArrow,
-					modifiers: [],
-					action: #selector(moveDown),
-					title: "Move Selection Down"
-				),
-				command(
-					input: "p",
-					modifiers: .control,
-					action: #selector(moveUp),
-					title: "Move Selection Up"
-				),
-				command(
-					input: "n",
-					modifiers: .control,
-					action: #selector(moveDown),
-					title: "Move Selection Down"
-				),
-				command(
-					input: UIKeyCommand.inputPageUp,
-					modifiers: [],
-					action: #selector(movePageUp),
-					title: "Page Up"
-				),
-				command(
-					input: UIKeyCommand.inputPageDown,
-					modifiers: [],
-					action: #selector(movePageDown),
-					title: "Page Down"
-				),
-				command(
-					input: UIKeyCommand.inputHome,
-					modifiers: [],
-					action: #selector(moveToStart),
-					title: "Move to First Item"
-				),
-				command(
-					input: UIKeyCommand.inputEnd,
-					modifiers: [],
-					action: #selector(moveToEnd),
-					title: "Move to Last Item"
-				),
-				command(
-					input: UIKeyCommand.inputUpArrow,
-					modifiers: .command,
-					action: #selector(moveToStart),
-					title: "Move to First Item"
-				),
-				command(
-					input: UIKeyCommand.inputDownArrow,
-					modifiers: .command,
-					action: #selector(moveToEnd),
-					title: "Move to Last Item"
-				),
-				command(
-					input: "\r",
-					modifiers: [],
-					action: #selector(activateSelection),
-					title: "Open Selection"
-				),
-				command(
-					input: UIKeyCommand.inputEscape,
-					modifiers: [],
-					action: #selector(close),
-					title: "Close"
-				),
+				command(input: UIKeyCommand.inputUpArrow, modifiers: [], action: #selector(moveUp), title: "Move Selection Up"),
+				command(input: UIKeyCommand.inputDownArrow, modifiers: [], action: #selector(moveDown), title: "Move Selection Down"),
+				command(input: "p", modifiers: .control, action: #selector(moveUp), title: "Move Selection Up"),
+				command(input: "n", modifiers: .control, action: #selector(moveDown), title: "Move Selection Down"),
+				command(input: UIKeyCommand.inputPageUp, modifiers: [], action: #selector(movePageUp), title: "Page Up"),
+				command(input: UIKeyCommand.inputPageDown, modifiers: [], action: #selector(movePageDown), title: "Page Down"),
+				command(input: UIKeyCommand.inputHome, modifiers: [], action: #selector(moveToStart), title: "Move to First Item"),
+				command(input: UIKeyCommand.inputEnd, modifiers: [], action: #selector(moveToEnd), title: "Move to Last Item"),
+				command(input: UIKeyCommand.inputUpArrow, modifiers: .command, action: #selector(moveToStart), title: "Move to First Item"),
+				command(input: UIKeyCommand.inputDownArrow, modifiers: .command, action: #selector(moveToEnd), title: "Move to Last Item"),
+				command(input: "\r", modifiers: [], action: #selector(activateSelection), title: "Open Selection"),
+				command(input: UIKeyCommand.inputEscape, modifiers: [], action: #selector(close), title: "Close"),
 			]
 		}
 
-		private func command(
-			input: String,
-			modifiers: UIKeyModifierFlags,
-			action: Selector,
-			title: String
-		) -> UIKeyCommand {
+		private func command(input: String, modifiers: UIKeyModifierFlags, action: Selector, title: String) -> UIKeyCommand {
 			let command = UIKeyCommand(input: input, modifierFlags: modifiers, action: action)
 			command.wantsPriorityOverSystemBehavior = true
 			command.discoverabilityTitle = title
@@ -377,39 +358,29 @@ private struct SessionPickerKeyboardHandler: UIViewRepresentable {
 			}
 		}
 
-		@objc private func moveUp() {
-			onMoveSelection?(-1)
-		}
-
-		@objc private func moveDown() {
-			onMoveSelection?(1)
-		}
-
-		@objc private func movePageUp() {
-			onMovePage?(-1)
-		}
-
-		@objc private func movePageDown() {
-			onMovePage?(1)
-		}
-
-		@objc private func moveToStart() {
-			onMoveToBoundary?(false)
-		}
-
-		@objc private func moveToEnd() {
-			onMoveToBoundary?(true)
-		}
-
-		@objc private func activateSelection() {
-			onActivateSelection?()
-		}
-
-		@objc private func close() {
-			onClose?()
-		}
+		@objc private func moveUp() { onMoveSelection?(-1) }
+		@objc private func moveDown() { onMoveSelection?(1) }
+		@objc private func movePageUp() { onMovePage?(-1) }
+		@objc private func movePageDown() { onMovePage?(1) }
+		@objc private func moveToStart() { onMoveToBoundary?(false) }
+		@objc private func moveToEnd() { onMoveToBoundary?(true) }
+		@objc private func activateSelection() { onActivateSelection?() }
+		@objc private func close() { onClose?() }
 	}
 }
+#else
+private struct SessionPickerKeyboardHandler: View {
+	let onMoveSelection: (Int) -> Void
+	let onMovePage: (Int) -> Void
+	let onMoveToBoundary: (Bool) -> Void
+	let onActivateSelection: () -> Void
+	let onClose: () -> Void
+
+	var body: some View {
+		Color.clear
+	}
+}
+#endif
 
 #Preview {
 	let db = DB.memory()

@@ -1,3 +1,4 @@
+#if canImport(UIKit)
 //
 //  TerminalFontPickerViews.swift
 //  Termsy
@@ -154,3 +155,4 @@ enum SystemFontCatalog {
 			.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 	}
 }
+#endif
