@@ -19,27 +19,8 @@ final class GhosttyApp {
 	private static let configURL = FileManager.default.temporaryDirectory
 		.appendingPathComponent("termsy-ghostty.conf")
 
-	private static func quotedConfigValue(_ value: String) -> String {
-		let escaped = value
-			.replacingOccurrences(of: "\\", with: "\\\\")
-			.replacingOccurrences(of: "\"", with: "\\\"")
-		return "\"\(escaped)\""
-	}
-
 	private static func buildConfigText(theme: TerminalTheme) -> String {
-		let cursorStyle = UserDefaults.standard.string(forKey: "cursorStyle") ?? "block"
-		let cursorBlink = UserDefaults.standard.object(forKey: "cursorBlink") as? Bool ?? true
-		var lines = [
-			"font-size = \(Int(TerminalFontSettings.defaultSize))",
-			"cursor-style = \(cursorStyle)",
-			"cursor-style-blink = \(cursorBlink)",
-			"term = xterm-256color",
-		]
-		if let fontFamily = TerminalFontSettings.family {
-			lines.append("font-family = \(quotedConfigValue(fontFamily))")
-		}
-		lines.append(theme.ghosttyConfig)
-		return lines.joined(separator: "\n")
+		GhosttyConfigBuilder.buildConfigText(theme: theme)
 	}
 
 	private static func loadConfig(theme: TerminalTheme) -> ghostty_config_t? {
@@ -72,8 +53,19 @@ final class GhosttyApp {
 			}
 		}
 
-		rt.action_cb = { _, target, _ in
-			guard target.tag == GHOSTTY_TARGET_SURFACE else { return false }
+		rt.action_cb = { _, target, action in
+			guard target.tag == GHOSTTY_TARGET_SURFACE,
+			      let surface = target.target.surface,
+			      let userdata = ghostty_surface_userdata(surface)
+			else { return false }
+			guard action.tag == GHOSTTY_ACTION_SET_TITLE,
+			      let cTitle = action.action.set_title.title
+			else { return false }
+			let title = String(cString: cTitle)
+			DispatchQueue.main.async {
+				let view = Unmanaged<TerminalView>.fromOpaque(userdata).takeUnretainedValue()
+				view.handleTitleChange(title)
+			}
 			return false
 		}
 
@@ -139,22 +131,7 @@ final class GhosttyApp {
 	private init() {}
 
 	static func buildConfigText(theme: TerminalTheme) -> String {
-		let cursorStyle = UserDefaults.standard.string(forKey: "cursorStyle") ?? "block"
-		let cursorBlink = UserDefaults.standard.object(forKey: "cursorBlink") as? Bool ?? true
-		var lines = [
-			"font-size = \(Int(TerminalFontSettings.defaultSize))",
-			"cursor-style = \(cursorStyle)",
-			"cursor-style-blink = \(cursorBlink)",
-			"term = xterm-256color",
-		]
-		if let fontFamily = TerminalFontSettings.family {
-			let escaped = fontFamily
-				.replacingOccurrences(of: "\\", with: "\\\\")
-				.replacingOccurrences(of: "\"", with: "\\\"")
-			lines.append("font-family = \"\(escaped)\"")
-		}
-		lines.append(theme.ghosttyConfig)
-		return lines.joined(separator: "\n")
+		GhosttyConfigBuilder.buildConfigText(theme: theme)
 	}
 
 	func register(_ controller: TerminalController) {

@@ -7,6 +7,9 @@
 
 import GRDBQuery
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 @main
 struct TermsyApp: App {
@@ -17,20 +20,34 @@ struct TermsyApp: App {
 
 	init() {
 		self.db = DB.path(URL.documentsDirectory.appending(path: "termsy.db").path)
+		#if os(macOS)
+		NSWindow.allowsAutomaticWindowTabbing = false
+		#endif
 	}
 
 	private var theme: TerminalTheme {
 		TerminalTheme(rawValue: selectedTheme) ?? .mocha
 	}
 
+	private var rootView: some View {
+		ContentView()
+			.databaseContext(.readWrite { self.db.queue })
+			.environment(coordinator)
+			.environment(\.appTheme, theme.appTheme)
+			.preferredColorScheme(theme.appTheme.colorScheme)
+			.tint(theme.appTheme.accent)
+	}
+
+	@SceneBuilder
 	var body: some Scene {
-		WindowGroup {
-			ContentView()
-				.databaseContext(.readWrite { self.db.queue })
-				.environment(coordinator)
-				.environment(\.appTheme, theme.appTheme)
-				.preferredColorScheme(theme.appTheme.colorScheme)
-				.tint(theme.appTheme.accent)
+		#if os(macOS)
+		Window("Termsy", id: "main") {
+			rootView
 		}
+		#else
+		WindowGroup {
+			rootView
+		}
+		#endif
 	}
 }

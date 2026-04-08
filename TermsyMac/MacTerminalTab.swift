@@ -55,7 +55,7 @@ final class MacTerminalTab: Identifiable {
 	var title: String {
 		switch source {
 		case .localShell:
-			return "Local Shell"
+			return LocalShellProfile.default.titleFallback
 		case let .ssh(session):
 			if let tmuxSessionName = session.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
 			   !tmuxSessionName.isEmpty {
@@ -63,6 +63,17 @@ final class MacTerminalTab: Identifiable {
 			}
 			return "\(session.username)@\(session.hostname)"
 		}
+	}
+
+	var windowTitle: String {
+		let dynamicTitle = viewState.title.trimmingCharacters(in: .whitespacesAndNewlines)
+		return dynamicTitle.isEmpty ? title : dynamicTitle
+	}
+
+	func reloadConfiguration(theme: TerminalTheme) {
+		viewState.controller.updateConfigSource(
+			.generated(GhosttyConfigBuilder.buildConfigText(theme: theme))
+		)
 	}
 
 	func startIfNeeded() async {

@@ -6,21 +6,33 @@ import SwiftUI
 
 struct MacRootView: View {
 	@Environment(\.databaseContext) private var dbContext
-	@Environment(\.appTheme) private var theme
-	@Environment(\.openWindow) private var openWindow
+	@AppStorage("terminalTheme") private var selectedTheme = TerminalTheme.mocha.rawValue
+	@AppStorage("cursorStyle") private var cursorStyle = "block"
+	@AppStorage("cursorBlink") private var cursorBlink = true
+	@AppStorage(TerminalFontSettings.familyKey) private var terminalFontFamily = ""
+	@AppStorage(TerminalBackgroundSettings.opacityKey) private var backgroundOpacity = TerminalBackgroundSettings.defaultOpacity
+	@AppStorage(TerminalBackgroundBlurSettings.key) private var backgroundBlurMode = TerminalBackgroundBlurSettings.default.rawValue
 
 	@State private var isShowingConnectSheet = false
 	@State private var window: NSWindow?
-	@State private var terminal: MacTerminalTab
 
-	init(sceneValue: MacTerminalSceneValue) {
-		_terminal = State(initialValue: MacTerminalTab(source: sceneValue.terminalSource))
+	let terminal: MacTerminalTab
+	let onOpenSSH: (Session, NSWindow?) -> Void
+	let onWindowTitleChange: (String) -> Void
+	let onWindowAppearanceChange: () -> Void
+
+	private var currentTerminalTheme: TerminalTheme {
+		TerminalTheme(rawValue: selectedTheme) ?? .mocha
+	}
+
+	private var theme: AppTheme {
+		currentTerminalTheme.appTheme
 	}
 
 	var body: some View {
 		ZStack {
 			TerminalSurfaceView(context: terminal.viewState)
-				.background(theme.background)
+				.background(.clear)
 				.task(id: terminal.viewState.surfaceSize?.columns ?? 0) {
 					guard terminal.viewState.surfaceSize != nil else { return }
 					await terminal.startIfNeeded()
@@ -59,10 +71,10 @@ struct MacRootView: View {
 			}
 		}
 		.frame(minWidth: 700, minHeight: 450)
-		.background(theme.background)
+		.background(.clear)
 		.sheet(isPresented: $isShowingConnectSheet) {
 			MacConnectSheetView { session in
-				openSSH(session)
+				onOpenSSH(session, window)
 			}
 			.databaseContext(dbContext)
 			.environment(\.appTheme, theme)
@@ -77,43 +89,70 @@ struct MacRootView: View {
 			isShowingConnectSheet = true
 		}
 		.onAppear {
-			configureWindow()
+			if !ensureBlurCompatibleOpacityIfNeeded() {
+				onWindowAppearanceChange()
+				onWindowTitleChange(terminal.windowTitle)
+			}
 		}
 		.onChange(of: window) { _ in
-			configureWindow()
+			onWindowAppearanceChange()
+			onWindowTitleChange(terminal.windowTitle)
 		}
-		.onDisappear {
-			terminal.close()
+		.onChange(of: terminal.viewState.title) { _ in
+			onWindowTitleChange(terminal.windowTitle)
+		}
+		.onChange(of: selectedTheme) { _, _ in
+			onWindowAppearanceChange()
+			reloadTerminalConfiguration()
+		}
+		.onChange(of: cursorStyle) { _, _ in
+			reloadTerminalConfiguration()
+		}
+		.onChange(of: cursorBlink) { _, _ in
+			reloadTerminalConfiguration()
+		}
+		.onChange(of: terminalFontFamily) { _, _ in
+			reloadTerminalConfiguration()
+		}
+		.onChange(of: backgroundOpacity) { _, _ in
+			if ensureBlurCompatibleOpacityIfNeeded() { return }
+			onWindowAppearanceChange()
+			reloadTerminalConfiguration()
+		}
+		.onChange(of: backgroundBlurMode) { _, _ in
+			if ensureBlurCompatibleOpacityIfNeeded() { return }
+			onWindowAppearanceChange()
+			reloadTerminalConfiguration()
 		}
 	}
 
-	private func configureWindow() {
-		guard let window else { return }
-		window.title = terminal.title
-		window.titleVisibility = .hidden
-		window.titlebarAppearsTransparent = true
-		window.isMovableByWindowBackground = true
-		window.toolbar = nil
-		window.backgroundColor = theme.backgroundUIColor
-		window.tabbingMode = .preferred
-		window.tabbingIdentifier = MacNativeTabCoordinator.tabbingIdentifier
-		terminal.onRequestClose = { [weak window] in
-			window?.performClose(nil)
-		}
-		MacNativeTabCoordinator.shared.attachIfNeeded(to: window)
+	func presentConnectSheet() {
+		isShowingConnectSheet = true
 	}
 
-	private func openSSH(_ session: Session) {
-		MacNativeTabCoordinator.shared.prepareForNewTab(from: window)
-		openWindow(value: MacTerminalSceneValue.ssh(session))
+	private func ensureBlurCompatibleOpacityIfNeeded() -> Bool {
+		let blurMode = TerminalBackgroundBlurSettings(rawValue: backgroundBlurMode) ?? .default
+		guard blurMode.requiresTransparency else { return false }
+		guard TerminalBackgroundSettings.normalizedOpacity(backgroundOpacity) >= 0.999 else { return false }
+		backgroundOpacity = TerminalBackgroundBlurSettings.recommendedOpacityWhenEnabled
+		return true
+	}
+
+	private func reloadTerminalConfiguration() {
+		terminal.reloadConfiguration(theme: currentTerminalTheme)
 	}
 }
 
 #Preview {
 	let db = DB.memory()
 	try? db.migrate()
-	return MacRootView(sceneValue: .localShell())
-		.databaseContext(.readWrite { db.queue })
-		.environment(\.appTheme, TerminalTheme.mocha.appTheme)
+	let terminal = MacTerminalTab(source: .localShell)
+	return MacRootView(
+		terminal: terminal,
+		onOpenSSH: { _, _ in },
+		onWindowTitleChange: { _ in },
+		onWindowAppearanceChange: {}
+	)
+	.databaseContext(.readWrite { db.queue })
 }
 #endif

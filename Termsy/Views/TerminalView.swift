@@ -43,6 +43,9 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	/// Called when the terminal grid resizes.
 	var onResize: ((UInt16, UInt16) -> Void)?
 
+	/// Called when the terminal updates its title.
+	var onTitleChange: ((String) -> Void)?
+
 	/// Called when the user requests closing the current tab.
 	var onCloseTabRequest: (() -> Void)?
 
@@ -180,6 +183,10 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	func processExited(code: UInt32 = 0, runtimeMs: UInt64 = 0) {
 		guard let surface else { return }
 		ghostty_surface_process_exit(surface, code, runtimeMs)
+	}
+
+	func handleTitleChange(_ title: String) {
+		onTitleChange?(title)
 	}
 
 	var hasAttachedWindow: Bool {

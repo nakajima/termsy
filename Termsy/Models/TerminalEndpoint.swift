@@ -31,6 +31,12 @@ struct LocalShellProfile: Hashable, Sendable {
 		URL(fileURLWithPath: shellPath).lastPathComponent
 	}
 
+	var titleFallback: String {
+		let abbreviatedPath = (workingDirectory as NSString).abbreviatingWithTildeInPath
+		let trimmedPath = abbreviatedPath.trimmingCharacters(in: .whitespacesAndNewlines)
+		return trimmedPath.isEmpty ? shellName : trimmedPath
+	}
+
 	var detailText: String {
 		"\(shellName) • \(workingDirectory)"
 	}

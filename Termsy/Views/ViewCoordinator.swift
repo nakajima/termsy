@@ -237,6 +237,7 @@ class TerminalTab: Identifiable {
 	var onRequestDismissAuxiliaryUI: (() -> Bool)?
 	var onRequestReconnect: (() -> Void)?
 	var onConnectionEstablished: ((Session) -> Void)?
+	var reportedTitle = ""
 
 	private var wasConnectedWhenAppResignedActive = false
 	private var shouldReconnectOnActivation = false
@@ -280,6 +281,11 @@ class TerminalTab: Identifiable {
 	#endif
 
 	var displayTitle: String {
+		let dynamicTitle = reportedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+		if !dynamicTitle.isEmpty {
+			return dynamicTitle
+		}
+
 		switch endpoint {
 		case .remote:
 			guard let session else { return "Session" }
@@ -290,7 +296,7 @@ class TerminalTab: Identifiable {
 			}
 			return baseTitle
 		case let .localShell(profile):
-			return profile.displayName
+			return profile.titleFallback
 		}
 	}
 
@@ -456,6 +462,7 @@ class TerminalTab: Identifiable {
 	}
 
 	func resetTerminalView() {
+		reportedTitle = ""
 		terminalView.stop()
 		terminalView.removeFromSuperview()
 		terminalView = TerminalView(frame: .zero)
@@ -584,6 +591,9 @@ class TerminalTab: Identifiable {
 		terminalView.onResize = { [weak self] _, _ in
 			guard let self, let size = self.terminalView.currentTerminalSize() else { return }
 			self.updateTerminalSize(size)
+		}
+		terminalView.onTitleChange = { [weak self] title in
+			self?.reportedTitle = title
 		}
 	}
 

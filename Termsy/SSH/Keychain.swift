@@ -14,6 +14,18 @@ enum Keychain {
 	}
 
 	nonisolated private static func legacyAccount(for session: Session) -> String {
+		let base = legacyAccountWithoutTmux(for: session)
+		guard let tmuxSessionName = session.tmuxSessionName?
+			.trimmingCharacters(in: .whitespacesAndNewlines),
+			!tmuxSessionName.isEmpty
+		else {
+			return base
+		}
+
+		return "\(base)#\(tmuxSessionName)"
+	}
+
+	nonisolated private static func legacyAccountWithoutTmux(for session: Session) -> String {
 		"\(session.username)@\(session.hostname):\(session.port)"
 	}
 
@@ -22,12 +34,21 @@ enum Keychain {
 			return password
 		}
 
-		guard let legacyPassword = readPassword(account: legacyAccount(for: session)) else {
+		let tmuxAwareLegacyAccount = legacyAccount(for: session)
+		if let legacyPassword = readPassword(account: tmuxAwareLegacyAccount) {
+			setPassword(legacyPassword, for: session)
+			removePassword(account: tmuxAwareLegacyAccount)
+			return legacyPassword
+		}
+
+		guard session.normalizedTmuxSessionName == nil,
+		      let legacyPassword = readPassword(account: legacyAccountWithoutTmux(for: session))
+		else {
 			return nil
 		}
 
 		setPassword(legacyPassword, for: session)
-		removePassword(account: legacyAccount(for: session))
+		removePassword(account: legacyAccountWithoutTmux(for: session))
 		return legacyPassword
 	}
 
@@ -38,6 +59,7 @@ enum Keychain {
 	nonisolated static func removePassword(for session: Session) {
 		removePassword(account: account(for: session))
 		removePassword(account: legacyAccount(for: session))
+		removePassword(account: legacyAccountWithoutTmux(for: session))
 	}
 
 	nonisolated static func movePasswordIfNeeded(from source: Session, to destination: Session) {

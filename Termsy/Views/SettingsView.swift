@@ -194,9 +194,11 @@ struct SettingsView: View {
 			.navigationTitle("Settings")
 			.termsyInlineNavigationTitle()
 			.toolbar {
+				#if !os(macOS)
 				ToolbarItem(placement: .termsyPrimaryAction) {
 					Button("Done") { dismiss() }
 				}
+				#endif
 			}
 			.termsyNavigationBarAppearance(theme)
 		}

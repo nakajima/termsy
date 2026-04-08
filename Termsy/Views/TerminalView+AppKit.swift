@@ -6,6 +6,7 @@ import GhosttyTerminal
 final class TerminalView: NSView {
 	var onWrite: ((Data) -> Void)?
 	var onResize: ((UInt16, UInt16) -> Void)?
+	var onTitleChange: ((String) -> Void)?
 	var onCloseTabRequest: (() -> Void)?
 	var onNewTabRequest: (() -> Void)?
 	var onSelectTabRequest: ((Int) -> Void)?
@@ -63,6 +64,7 @@ final class TerminalView: NSView {
 			}
 		)
 
+		platformView.delegate = self
 		platformView.configuration = TerminalSurfaceOptions(
 			backend: .inMemory(terminalSession)
 		)
@@ -124,6 +126,12 @@ final class TerminalView: NSView {
 		lastTerminalSize
 	}
 }
+
+extension TerminalView: TerminalSurfaceTitleDelegate {
+	func terminalDidChangeTitle(_ title: String) {
+		onTitleChange?(title)
+	}
+}
 #elseif canImport(AppKit) && !canImport(UIKit)
 import AppKit
 
@@ -131,6 +139,7 @@ import AppKit
 final class TerminalView: NSView {
 	var onWrite: ((Data) -> Void)?
 	var onResize: ((UInt16, UInt16) -> Void)?
+	var onTitleChange: ((String) -> Void)?
 	var onCloseTabRequest: (() -> Void)?
 	var onNewTabRequest: (() -> Void)?
 	var onSelectTabRequest: ((Int) -> Void)?

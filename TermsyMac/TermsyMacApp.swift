@@ -1,36 +1,45 @@
 #if os(macOS)
 import AppKit
-import GRDBQuery
 import SwiftUI
 
 @main
 struct TermsyMacApp: App {
-	@AppStorage("terminalTheme") private var selectedTheme = TerminalTheme.mocha.rawValue
+	@NSApplicationDelegateAdaptor(TermsyMacAppDelegate.self) private var appDelegate
 
 	let db: DB
 
 	init() {
 		NSWindow.allowsAutomaticWindowTabbing = true
 		self.db = DB.path(URL.documentsDirectory.appending(path: "termsy.db").path)
-	}
-
-	private var theme: TerminalTheme {
-		TerminalTheme(rawValue: selectedTheme) ?? .mocha
+		MacTerminalWindowManager.shared.configure(db: db)
 	}
 
 	var body: some Scene {
-		WindowGroup("Termsy", for: MacTerminalSceneValue.self) { $sceneValue in
-			MacRootView(sceneValue: sceneValue)
-				.databaseContext(.readWrite { self.db.queue })
-				.environment(\.appTheme, theme.appTheme)
-				.preferredColorScheme(theme.appTheme.colorScheme)
-				.tint(theme.appTheme.accent)
-		} defaultValue: {
-			MacTerminalSceneValue.localShell()
+		Window("Settings", id: "settings") {
+			MacSettingsView()
 		}
+		.defaultSize(width: 560, height: 480)
 		.commands {
 			TermsyMacTerminalCommands()
 		}
+	}
+}
+
+@MainActor
+final class TermsyMacAppDelegate: NSObject, NSApplicationDelegate {
+	func applicationDidFinishLaunching(_ notification: Notification) {
+		MacTerminalWindowManager.shared.openInitialWindowIfNeeded()
+	}
+
+	func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+		if !flag {
+			MacTerminalWindowManager.shared.openLocalShellWindow()
+		}
+		return true
+	}
+
+	@IBAction func newWindowForTab(_ sender: Any?) {
+		MacTerminalWindowManager.shared.openNewTabFromSystemRequest()
 	}
 }
 
@@ -38,34 +47,30 @@ private struct TermsyMacTerminalCommands: Commands {
 	@Environment(\.openWindow) private var openWindow
 
 	var body: some Commands {
-		CommandGroup(after: .newItem) {
-			Button("New Local Shell") {
-				openLocalShell()
+		CommandGroup(replacing: .appSettings) {
+			Button("Settings…") {
+				openWindow(id: "settings")
+			}
+			.keyboardShortcut(",", modifiers: .command)
+		}
+
+		CommandGroup(replacing: .newItem) {
+			Button("New Window") {
+				MacTerminalWindowManager.shared.openLocalShellWindow()
+			}
+			.keyboardShortcut("n", modifiers: .command)
+
+			Button("New Tab") {
+				MacTerminalWindowManager.shared.openNewLocalShellTabOrWindow()
 			}
 			.keyboardShortcut("t", modifiers: .command)
 
+			Divider()
+
 			Button("New SSH Session…") {
-				showNewSSHSessionSheet()
+				MacTerminalWindowManager.shared.showNewSSHSessionSheet()
 			}
 			.keyboardShortcut("n", modifiers: [.command, .shift])
-		}
-	}
-
-	private func openLocalShell() {
-		MacNativeTabCoordinator.shared.prepareForNewTab(from: NSApp.keyWindow ?? NSApp.mainWindow)
-		openWindow(value: MacTerminalSceneValue.localShell())
-	}
-
-	private func showNewSSHSessionSheet() {
-		if let window = NSApp.keyWindow ?? NSApp.mainWindow {
-			NotificationCenter.default.post(name: .termsyPresentSSHSessionSheet, object: window)
-			return
-		}
-
-		openWindow(value: MacTerminalSceneValue.localShell())
-		DispatchQueue.main.async {
-			guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
-			NotificationCenter.default.post(name: .termsyPresentSSHSessionSheet, object: window)
 		}
 	}
 }

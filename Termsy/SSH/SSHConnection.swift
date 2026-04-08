@@ -16,17 +16,23 @@ struct TerminalWindowSize: Sendable, Equatable {
 	var pixelHeight: Int
 }
 
-enum SSHConnectionError: Error, LocalizedError {
+enum SSHConnectionError: Error, LocalizedError, CustomStringConvertible {
 	case notConnected
 	case invalidChannelType
 	case authenticationFailed
+	case timedOut(String)
 
 	var errorDescription: String? {
 		switch self {
 		case .notConnected: "Not connected"
 		case .invalidChannelType: "Invalid SSH channel type"
 		case .authenticationFailed: "Authentication failed"
+		case let .timedOut(stage): "Timed out while \(stage)"
 		}
+	}
+
+	var description: String {
+		errorDescription ?? "SSH connection error"
 	}
 }
 
@@ -36,6 +42,9 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		case cleanExit
 		case error(String)
 	}
+
+	private static let sessionStartupTimeout: TimeAmount = .seconds(10)
+	private static let channelRequestTimeout: TimeAmount = .seconds(10)
 
 	private let group = NIOTSEventLoopGroup()
 	private var channel: Channel?
@@ -60,6 +69,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	}
 
 	func connect(host: String, port: Int, username: String, password: String?) async throws {
+		disconnect()
 		print("[SSH] connecting to \(host):\(port) as \(username)")
 		channel = nil
 		sshChildChannel = nil
@@ -102,66 +112,86 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		let onData = self.onData
 		let onClose = self.onClose
 
-		// All channel/pipeline operations must run on the NIO event loop.
-		let authDelegate = self.authDelegate
-		let childChannel: Channel = try await channel.eventLoop.flatSubmit {
-			print("[SSH] creating session channel...")
-			let sshHandler = try! channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
-			let promise = channel.eventLoop.makePromise(of: Channel.self)
+		do {
+			// All channel/pipeline operations must run on the NIO event loop.
+			let authDelegate = self.authDelegate
+			let childChannel: Channel = try await withTimeout(
+				channel.eventLoop.flatSubmit {
+					print("[SSH] creating session channel...")
+					let sshHandler = try! channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
+					let promise = channel.eventLoop.makePromise(of: Channel.self)
 
-			// If auth already failed before we got here, fail immediately.
-			if authDelegate?.hasFailed == true {
-				promise.fail(SSHConnectionError.authenticationFailed)
-				return promise.futureResult
-			}
+					// If auth already failed before we got here, fail immediately.
+					if authDelegate?.hasFailed == true {
+						promise.fail(SSHConnectionError.authenticationFailed)
+						return promise.futureResult
+					}
 
-			// If auth fails after this point, fail the promise so we don't hang.
-			authDelegate?.onExhausted = {
-				promise.fail(SSHConnectionError.authenticationFailed)
-			}
+					// If auth fails after this point, fail the promise so we don't hang.
+					authDelegate?.onExhausted = {
+						promise.fail(SSHConnectionError.authenticationFailed)
+					}
 
-			sshHandler.createChannel(promise) { childChannel, channelType in
-				print("[SSH] child channel init, type=\(channelType)")
-				guard channelType == .session else {
-					return childChannel.eventLoop.makeFailedFuture(SSHConnectionError.invalidChannelType)
-				}
-				return childChannel.pipeline.addHandlers([
-					SSHChannelDataHandler(onData: onData),
-					SSHChannelLifecycleHandler(
-						isDisconnecting: { [weak self] in self?.isDisconnecting ?? false },
-						onClose: { [weak self] reason in
-							self?.sshChildChannel = nil
-							self?.channel = nil
-							self?.authDelegate = nil
-							onClose(reason)
+					sshHandler.createChannel(promise) { childChannel, channelType in
+						print("[SSH] child channel init, type=\(channelType)")
+						guard channelType == .session else {
+							return childChannel.eventLoop.makeFailedFuture(SSHConnectionError.invalidChannelType)
 						}
-					),
-				])
-			}
-			return promise.futureResult
-		}.get()
+						return childChannel.pipeline.addHandlers([
+							SSHChannelDataHandler(onData: onData),
+							SSHChannelLifecycleHandler(
+								isDisconnecting: { [weak self] in self?.isDisconnecting ?? false },
+								onClose: { [weak self] reason in
+									self?.sshChildChannel = nil
+									self?.channel = nil
+									self?.authDelegate = nil
+									onClose(reason)
+								}
+							),
+						])
+					}
+					return promise.futureResult
+				},
+				on: channel.eventLoop,
+				timeout: Self.sessionStartupTimeout,
+				error: .timedOut("establishing the SSH session")
+			).get()
 
-		sshChildChannel = childChannel
-		print("[SSH] session channel open")
+			sshChildChannel = childChannel
+			print("[SSH] session channel open")
 
-		// Request PTY
-		let ptyReq = SSHChannelRequestEvent.PseudoTerminalRequest(
-			wantReply: true,
-			term: "xterm-256color",
-			terminalCharacterWidth: size.columns,
-			terminalRowHeight: size.rows,
-			terminalPixelWidth: size.pixelWidth,
-			terminalPixelHeight: size.pixelHeight,
-			terminalModes: .init([:])
-		)
-		try await childChannel.triggerUserOutboundEvent(ptyReq).get()
-		print("[SSH] PTY allocated")
+			// Request PTY
+			let ptyReq = SSHChannelRequestEvent.PseudoTerminalRequest(
+				wantReply: true,
+				term: "xterm-256color",
+				terminalCharacterWidth: size.columns,
+				terminalRowHeight: size.rows,
+				terminalPixelWidth: size.pixelWidth,
+				terminalPixelHeight: size.pixelHeight,
+				terminalModes: .init([:])
+			)
+			try await withTimeout(
+				childChannel.triggerUserOutboundEvent(ptyReq),
+				on: childChannel.eventLoop,
+				timeout: Self.channelRequestTimeout,
+				error: .timedOut("allocating a remote PTY")
+			).get()
+			print("[SSH] PTY allocated")
 
-		// Request shell
-		let shellReq = SSHChannelRequestEvent.ShellRequest(wantReply: true)
-		try await childChannel.triggerUserOutboundEvent(shellReq).get()
-		print("[SSH] shell started")
-		resize(pendingTerminalSize)
+			// Request shell
+			let shellReq = SSHChannelRequestEvent.ShellRequest(wantReply: true)
+			try await withTimeout(
+				childChannel.triggerUserOutboundEvent(shellReq),
+				on: childChannel.eventLoop,
+				timeout: Self.channelRequestTimeout,
+				error: .timedOut("starting the remote shell")
+			).get()
+			print("[SSH] shell started")
+			resize(pendingTerminalSize)
+		} catch {
+			disconnect()
+			throw error
+		}
 	}
 
 	func send(_ data: Data) {
@@ -191,6 +221,35 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 			)
 			sshChildChannel.triggerUserOutboundEvent(req, promise: nil)
 		}
+	}
+
+	private func withTimeout<T>(
+		_ future: EventLoopFuture<T>,
+		on eventLoop: EventLoop,
+		timeout: TimeAmount,
+		error: SSHConnectionError
+	) -> EventLoopFuture<T> {
+		let promise = eventLoop.makePromise(of: T.self)
+		var isComplete = false
+		let timeoutTask = eventLoop.scheduleTask(in: timeout) {
+			guard !isComplete else { return }
+			isComplete = true
+			promise.fail(error)
+		}
+
+		future.whenComplete { result in
+			guard !isComplete else { return }
+			isComplete = true
+			timeoutTask.cancel()
+			switch result {
+			case let .success(value):
+				promise.succeed(value)
+			case let .failure(error):
+				promise.fail(error)
+			}
+		}
+
+		return promise.futureResult
 	}
 
 	func disconnect() {
