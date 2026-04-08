@@ -59,42 +59,12 @@ struct TerminalOverlay: View {
 				}
 			}
 
+		}
+		.safeAreaInset(edge: .bottom) {
 			if showsConnectionLogToggle {
-				VStack {
-					Spacer()
-					VStack(alignment: .leading, spacing: 8) {
-						Button {
-							isShowingConnectionLog.toggle()
-						} label: {
-							HStack {
-								Label("Connection Log", systemImage: "list.bullet.rectangle")
-								Spacer()
-								Image(systemName: isShowingConnectionLog ? "chevron.down" : "chevron.right")
-							}
-							.font(.caption.weight(.semibold))
-						}
-						.buttonStyle(.plain)
-						.foregroundStyle(theme.primaryText)
-
-						if isShowingConnectionLog {
-							ScrollView {
-								Text(tab.connectionLogText.isEmpty ? "No connection events yet." : tab.connectionLogText)
-									.frame(maxWidth: .infinity, alignment: .leading)
-									.font(.system(.caption2, design: .monospaced))
-									.foregroundStyle(theme.secondaryText)
-									.textSelection(.enabled)
-							}
-							.frame(maxHeight: 180)
-						}
-					}
-					.padding()
-					.background(theme.cardBackground.opacity(0.95), in: .rect(cornerRadius: 12))
-					.overlay {
-						RoundedRectangle(cornerRadius: 12)
-							.stroke(theme.divider, lineWidth: 1)
-					}
-					.padding()
-				}
+				connectionLogPanel
+					.padding(.horizontal)
+					.padding(.bottom)
 			}
 		}
 		.allowsHitTesting(!tab.isConnected || tab.connectionError != nil || tab.isRestoring)
@@ -124,6 +94,41 @@ struct TerminalOverlay: View {
 
 	private var showsConnectionLogToggle: Bool {
 		!tab.isConnected || tab.connectionError != nil || tab.isRestoring
+	}
+
+	@ViewBuilder
+	private var connectionLogPanel: some View {
+		VStack(alignment: .leading, spacing: 8) {
+			Button {
+				isShowingConnectionLog.toggle()
+			} label: {
+				HStack {
+					Label("Connection Log", systemImage: "list.bullet.rectangle")
+					Spacer()
+					Image(systemName: isShowingConnectionLog ? "chevron.down" : "chevron.right")
+				}
+				.font(.caption.weight(.semibold))
+			}
+			.buttonStyle(.plain)
+			.foregroundStyle(theme.primaryText)
+
+			if isShowingConnectionLog {
+				ScrollView {
+					Text(tab.connectionLogText.isEmpty ? "No connection events yet." : tab.connectionLogText)
+						.frame(maxWidth: .infinity, alignment: .leading)
+						.font(.system(.caption2, design: .monospaced))
+						.foregroundStyle(theme.secondaryText)
+						.textSelection(.enabled)
+				}
+				.frame(maxHeight: 180)
+			}
+		}
+		.padding()
+		.background(theme.cardBackground.opacity(0.95), in: .rect(cornerRadius: 12))
+		.overlay {
+			RoundedRectangle(cornerRadius: 12)
+				.stroke(theme.divider, lineWidth: 1)
+		}
 	}
 }
 

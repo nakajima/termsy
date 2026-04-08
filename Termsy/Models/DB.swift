@@ -34,8 +34,6 @@ struct DB {
 				t.column("createdAt", .datetime).notNull()
 				t.column("lastConnectedAt", .datetime)
 			}
-
-			try db.create(indexOn: "session", columns: ["hostname", "username", "tmuxSessionName"])
 		}
 
 		migrator.registerMigration("AddSessionSyncFields") { db in
