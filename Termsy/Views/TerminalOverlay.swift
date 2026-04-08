@@ -12,6 +12,7 @@ struct TerminalOverlay: View {
 	var onRetryWithPassword: (String) -> Void
 
 	@State private var password = ""
+	@State private var isShowingConnectionLog = false
 
 	var body: some View {
 		ZStack {
@@ -57,6 +58,44 @@ struct TerminalOverlay: View {
 						.stroke(theme.divider, lineWidth: 1)
 				}
 			}
+
+			if showsConnectionLogToggle {
+				VStack {
+					Spacer()
+					VStack(alignment: .leading, spacing: 8) {
+						Button {
+							isShowingConnectionLog.toggle()
+						} label: {
+							HStack {
+								Label("Connection Log", systemImage: "list.bullet.rectangle")
+								Spacer()
+								Image(systemName: isShowingConnectionLog ? "chevron.down" : "chevron.right")
+							}
+							.font(.caption.weight(.semibold))
+						}
+						.buttonStyle(.plain)
+						.foregroundStyle(theme.primaryText)
+
+						if isShowingConnectionLog {
+							ScrollView {
+								Text(tab.connectionLogText.isEmpty ? "No connection events yet." : tab.connectionLogText)
+									.frame(maxWidth: .infinity, alignment: .leading)
+									.font(.system(.caption2, design: .monospaced))
+									.foregroundStyle(theme.secondaryText)
+									.textSelection(.enabled)
+							}
+							.frame(maxHeight: 180)
+						}
+					}
+					.padding()
+					.background(theme.cardBackground.opacity(0.95), in: .rect(cornerRadius: 12))
+					.overlay {
+						RoundedRectangle(cornerRadius: 12)
+							.stroke(theme.divider, lineWidth: 1)
+					}
+					.padding()
+				}
+			}
 		}
 		.allowsHitTesting(!tab.isConnected || tab.connectionError != nil || tab.isRestoring)
 		.alert("Password Required", isPresented: .init(
@@ -76,6 +115,15 @@ struct TerminalOverlay: View {
 		} message: {
 			Text(tab.detailText)
 		}
+		.onChange(of: tab.connectionError) { _, error in
+			if error != nil {
+				isShowingConnectionLog = true
+			}
+		}
+	}
+
+	private var showsConnectionLogToggle: Bool {
+		!tab.isConnected || tab.connectionError != nil || tab.isRestoring
 	}
 }
 

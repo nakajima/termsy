@@ -220,7 +220,7 @@ class ViewCoordinator {
 class TerminalTab: Identifiable {
 	let endpoint: TerminalEndpoint
 	var session: Session?
-	let sshSession = SSHTerminalSession()
+	var sshSession = SSHTerminalSession()
 	#if os(macOS)
 	private let localShellSession: LocalShellSession?
 	#endif
@@ -238,11 +238,14 @@ class TerminalTab: Identifiable {
 	var onRequestReconnect: (() -> Void)?
 	var onConnectionEstablished: ((Session) -> Void)?
 	var reportedTitle = ""
+	var connectionLog: [String] = []
 
-	private var wasConnectedWhenAppResignedActive = false
-	private var shouldReconnectOnActivation = false
-	private var backgroundReconnectGraceDeadline: Date?
-	private var reconnectGraceTask: Task<Void, Never>?
+	@ObservationIgnored private var wasConnectedWhenAppResignedActive = false
+	@ObservationIgnored private var shouldReconnectOnActivation = false
+	@ObservationIgnored private var backgroundReconnectGraceDeadline: Date?
+	@ObservationIgnored private var reconnectGraceTask: Task<Void, Never>?
+	@ObservationIgnored private var tmuxStartupTask: Task<Void, Never>?
+	@ObservationIgnored private var remoteConnectAttempt = 0
 
 	let id = UUID()
 
@@ -255,12 +258,7 @@ class TerminalTab: Identifiable {
 		#endif
 
 		configureTerminalView()
-		sshSession.onRemoteOutput = { [weak self] data in
-			self?.terminalView.feedData(data)
-		}
-		sshSession.onClose = { [weak self] reason in
-			self?.handleSSHSessionClose(reason)
-		}
+		configureSSHSessionCallbacks()
 	}
 
 	#if os(macOS)
@@ -345,8 +343,13 @@ class TerminalTab: Identifiable {
 		}
 	}
 
+	var connectionLogText: String {
+		connectionLog.joined(separator: "\n")
+	}
+
 	func connect() async {
 		connectionError = nil
+		logConnectionEvent("Connect requested")
 		switch endpoint {
 		case .remote:
 			await connectRemote()
@@ -360,6 +363,10 @@ class TerminalTab: Identifiable {
 	private func connectRemote() async {
 		guard let session else { return }
 		let keychainPassword = Keychain.password(for: session)
+		remoteConnectAttempt += 1
+		let attempt = remoteConnectAttempt
+		let sshSession = resetSSHSessionForNewConnection(attempt: attempt)
+		logConnectionEvent("Attempt \(attempt): connecting to \(session.username)@\(session.hostname):\(session.port)")
 		do {
 			try await sshSession.connect(
 				host: session.hostname,
@@ -367,18 +374,26 @@ class TerminalTab: Identifiable {
 				username: session.username,
 				password: keychainPassword
 			)
+			guard !Task.isCancelled, self.sshSession === sshSession else {
+				logConnectionEvent("Attempt \(attempt): ignoring stale successful connection")
+				sshSession.disconnect()
+				return
+			}
 			isConnected = true
 			self.session?.lastConnectedAt = Date()
 			clearAppInactiveState()
+			logConnectionEvent("Attempt \(attempt): connection established")
 			if let session = self.session {
 				onConnectionEstablished?(session)
 			}
-			startTmuxIfNeeded()
+			startTmuxIfNeeded(using: sshSession, attempt: attempt)
 		} catch SSHConnectionError.authenticationFailed {
-			print("[SSH] auth failed, prompting for password")
+			guard self.sshSession === sshSession else { return }
+			logConnectionEvent("Attempt \(attempt): authentication failed; prompting for password")
 			needsPassword = true
 		} catch {
-			print("[SSH] connection error: \(error)")
+			guard self.sshSession === sshSession else { return }
+			logConnectionEvent("Attempt \(attempt): connection failed: \(error)")
 			connectionError = "\(error)"
 		}
 	}
@@ -397,7 +412,7 @@ class TerminalTab: Identifiable {
 	}
 	#endif
 
-	private func startTmuxIfNeeded() {
+	private func startTmuxIfNeeded(using sshSession: SSHTerminalSession, attempt: Int) {
 		guard let session,
 		      let rawName = session.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
 		      !rawName.isEmpty
@@ -405,11 +420,13 @@ class TerminalTab: Identifiable {
 
 		let escapedName = shellQuoted(rawName)
 		let command = Data("tmux new-session -A -s \(escapedName)\r".utf8)
-
-		Task { @MainActor [weak self] in
+		tmuxStartupTask?.cancel()
+		logConnectionEvent("Attempt \(attempt): scheduling tmux attach for \(rawName)")
+		tmuxStartupTask = Task { @MainActor [weak self, weak sshSession] in
 			try? await Task.sleep(nanoseconds: 150_000_000)
-			guard let self, self.isConnected else { return }
-			self.sshSession.connection.send(command)
+			guard let self, let sshSession, self.isConnected, self.sshSession === sshSession else { return }
+			self.logConnectionEvent("Attempt \(attempt): sending tmux attach command")
+			sshSession.connection.send(command)
 		}
 	}
 
@@ -417,11 +434,50 @@ class TerminalTab: Identifiable {
 		"'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
 	}
 
+	private func resetSSHSessionForNewConnection(attempt: Int) -> SSHTerminalSession {
+		let previousSession = sshSession
+		let terminalSize = previousSession.terminalSize
+		let wasForeground = previousSession.isForeground
+		previousSession.onRemoteOutput = nil
+		previousSession.onClose = nil
+		previousSession.onEvent = nil
+		previousSession.disconnect()
+
+		let newSession = SSHTerminalSession()
+		sshSession = newSession
+		configureSSHSessionCallbacks(for: newSession)
+		newSession.updateTerminalSize(terminalSize)
+		if !wasForeground {
+			newSession.enterBackground()
+		}
+		logConnectionEvent("Attempt \(attempt): created fresh SSH transport")
+		return newSession
+	}
+
+	private func configureSSHSessionCallbacks(for sshSession: SSHTerminalSession? = nil) {
+		let sshSession = sshSession ?? self.sshSession
+		sshSession.onRemoteOutput = { [weak self, weak sshSession] data in
+			guard let self, let sshSession, self.sshSession === sshSession else { return }
+			self.terminalView.feedData(data)
+		}
+		sshSession.onClose = { [weak self, weak sshSession] reason in
+			guard let self, let sshSession, self.sshSession === sshSession else { return }
+			self.handleSSHSessionClose(reason)
+		}
+		sshSession.onEvent = { [weak self, weak sshSession] message in
+			guard let self, let sshSession, self.sshSession === sshSession else { return }
+			self.logConnectionEvent(message)
+		}
+	}
+
 	func connectWithPassword(_ password: String) async {
 		guard case .remote = endpoint, let session else { return }
 		needsPassword = false
 		connectionError = nil
-		disconnect()
+		remoteConnectAttempt += 1
+		let attempt = remoteConnectAttempt
+		let sshSession = resetSSHSessionForNewConnection(attempt: attempt)
+		logConnectionEvent("Attempt \(attempt): retrying with password for \(session.username)@\(session.hostname):\(session.port)")
 		do {
 			try await sshSession.connect(
 				host: session.hostname,
@@ -429,22 +485,32 @@ class TerminalTab: Identifiable {
 				username: session.username,
 				password: password
 			)
+			guard !Task.isCancelled, self.sshSession === sshSession else {
+				logConnectionEvent("Attempt \(attempt): ignoring stale successful password retry")
+				sshSession.disconnect()
+				return
+			}
 			isConnected = true
 			self.session?.lastConnectedAt = Date()
 			clearAppInactiveState()
 			Keychain.setPassword(password, for: session)
+			logConnectionEvent("Attempt \(attempt): connection established with password")
 			if let session = self.session {
 				onConnectionEstablished?(session)
 			}
-			startTmuxIfNeeded()
+			startTmuxIfNeeded(using: sshSession, attempt: attempt)
 		} catch {
-			print("[SSH] connection error: \(error)")
+			guard self.sshSession === sshSession else { return }
+			logConnectionEvent("Attempt \(attempt): password retry failed: \(error)")
 			connectionError = "\(error)"
 		}
 	}
 
 	func disconnect() {
 		isConnected = false
+		tmuxStartupTask?.cancel()
+		tmuxStartupTask = nil
+		logConnectionEvent("Disconnect requested")
 		switch endpoint {
 		case .remote:
 			sshSession.disconnect()
@@ -500,11 +566,13 @@ class TerminalTab: Identifiable {
 		reconnectGraceTask = nil
 		backgroundReconnectGraceDeadline = nil
 		wasConnectedWhenAppResignedActive = isConnected
+		logConnectionEvent("App will resign active; wasConnected=\(isConnected)")
 	}
 
 	func noteAppDidBecomeActive() {
 		guard wasConnectedWhenAppResignedActive else { return }
 		backgroundReconnectGraceDeadline = Date().addingTimeInterval(5)
+		logConnectionEvent("App became active; reconnect grace window started")
 		reconnectGraceTask?.cancel()
 		reconnectGraceTask = Task { @MainActor [weak self] in
 			try? await Task.sleep(nanoseconds: 5_000_000_000)
@@ -527,6 +595,7 @@ class TerminalTab: Identifiable {
 	}
 
 	func prepareForReconnectAfterBackgroundLoss() {
+		logConnectionEvent("Preparing for reconnect after background loss")
 		clearAppInactiveState()
 		connectionError = nil
 		needsPassword = false
@@ -555,6 +624,14 @@ class TerminalTab: Identifiable {
 			#if os(macOS)
 			localShellSession?.updateTerminalSize(size)
 			#endif
+		}
+	}
+
+	private func logConnectionEvent(_ message: String) {
+		let timestamp = Date().formatted(date: .omitted, time: .standard)
+		connectionLog.append("[\(timestamp)] \(message)")
+		if connectionLog.count > 60 {
+			connectionLog.removeFirst(connectionLog.count - 60)
 		}
 	}
 
@@ -630,17 +707,22 @@ class TerminalTab: Identifiable {
 		isConnected = false
 		needsPassword = false
 		isRestoring = false
+		tmuxStartupTask?.cancel()
+		tmuxStartupTask = nil
 
 		switch reason {
 		case .localDisconnect:
+			logConnectionEvent("SSH session closed locally")
 			clearAppInactiveState()
 		case .cleanExit:
+			logConnectionEvent("SSH session exited cleanly")
 			clearAppInactiveState()
 			terminalView.processExited()
 			onRequestClose?()
 		case let .error(message):
+			logConnectionEvent("SSH session closed with error: \(message)")
 			if shouldAutoReconnect(for: message) {
-				print("[SSH] TCP transport shut down around app switch; reconnecting: \(message)")
+				logConnectionEvent("Scheduling automatic reconnect after transport shutdown")
 				connectionError = nil
 				if ApplicationActivity.isActive, terminalView.hasAttachedWindow {
 					onRequestReconnect?()

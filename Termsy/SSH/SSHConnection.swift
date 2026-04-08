@@ -55,6 +55,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 	private let onData: @Sendable (Data) -> Void
 	private let onClose: @Sendable (CloseReason) -> Void
+	private let onEvent: @Sendable (String) -> Void
 
 	var isActive: Bool {
 		channel?.isActive ?? false
@@ -62,15 +63,17 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 	init(
 		onData: @escaping @Sendable (Data) -> Void,
-		onClose: @escaping @Sendable (CloseReason) -> Void
+		onClose: @escaping @Sendable (CloseReason) -> Void,
+		onEvent: @escaping @Sendable (String) -> Void = { _ in }
 	) {
 		self.onData = onData
 		self.onClose = onClose
+		self.onEvent = onEvent
 	}
 
 	func connect(host: String, port: Int, username: String, password: String?) async throws {
 		disconnect()
-		print("[SSH] connecting to \(host):\(port) as \(username)")
+		log("connecting to \(host):\(port) as \(username)")
 		channel = nil
 		sshChildChannel = nil
 		authDelegate = nil
@@ -78,15 +81,18 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 		let authDelegate = PasswordOrNoneAuthDelegate(
 			username: username,
-			password: password ?? ""
+			password: password ?? "",
+			logger: { [weak self] message in self?.log(message) }
 		)
 		self.authDelegate = authDelegate
-		let hostKeyDelegate = AcceptAllHostKeysDelegate()
+		let hostKeyDelegate = AcceptAllHostKeysDelegate(
+			logger: { [weak self] message in self?.log(message) }
+		)
 
 		let bootstrap = NIOTSConnectionBootstrap(group: group)
 			.connectTimeout(.seconds(10))
 			.channelInitializer { channel in
-				print("[SSH] TCP connected, adding SSH handler")
+				self.log("TCP connected, adding SSH handler")
 				return channel.pipeline.addHandler(
 					NIOSSHHandler(
 						role: .client(.init(
@@ -99,14 +105,14 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 				)
 			}
 
-		print("[SSH] bootstrap.connect...")
+		log("bootstrap.connect...")
 		channel = try await bootstrap.connect(host: host, port: port).get()
-		print("[SSH] connected!")
+		log("connected")
 	}
 
 	func startShell(size: TerminalWindowSize) async throws {
 		pendingTerminalSize = size
-		print("[SSH] startShell \(size.columns)x\(size.rows) px=\(size.pixelWidth)x\(size.pixelHeight)")
+		log("startShell \(size.columns)x\(size.rows) px=\(size.pixelWidth)x\(size.pixelHeight)")
 		guard let channel else { throw SSHConnectionError.notConnected }
 
 		let onData = self.onData
@@ -117,7 +123,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 			let authDelegate = self.authDelegate
 			let childChannel: Channel = try await withTimeout(
 				channel.eventLoop.flatSubmit {
-					print("[SSH] creating session channel...")
+					self.log("creating session channel...")
 					let sshHandler = try! channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
 					let promise = channel.eventLoop.makePromise(of: Channel.self)
 
@@ -133,7 +139,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 					}
 
 					sshHandler.createChannel(promise) { childChannel, channelType in
-						print("[SSH] child channel init, type=\(channelType)")
+						self.log("child channel init, type=\(channelType)")
 						guard channelType == .session else {
 							return childChannel.eventLoop.makeFailedFuture(SSHConnectionError.invalidChannelType)
 						}
@@ -158,7 +164,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 			).get()
 
 			sshChildChannel = childChannel
-			print("[SSH] session channel open")
+			log("session channel open")
 
 			// Request PTY
 			let ptyReq = SSHChannelRequestEvent.PseudoTerminalRequest(
@@ -176,7 +182,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 				timeout: Self.channelRequestTimeout,
 				error: .timedOut("allocating a remote PTY")
 			).get()
-			print("[SSH] PTY allocated")
+			log("PTY allocated")
 
 			// Request shell
 			let shellReq = SSHChannelRequestEvent.ShellRequest(wantReply: true)
@@ -186,7 +192,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 				timeout: Self.channelRequestTimeout,
 				error: .timedOut("starting the remote shell")
 			).get()
-			print("[SSH] shell started")
+			log("shell started")
 			resize(pendingTerminalSize)
 		} catch {
 			disconnect()
@@ -252,6 +258,11 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		return promise.futureResult
 	}
 
+	private func log(_ message: String) {
+		print("[SSH] \(message)")
+		onEvent(message)
+	}
+
 	func disconnect() {
 		isDisconnecting = true
 		let childChannel = sshChildChannel
@@ -265,9 +276,10 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 	deinit {
 		disconnect()
-		group.shutdownGracefully(queue: .global(qos: .utility)) { error in
+		group.shutdownGracefully(queue: .global(qos: .utility)) { [onEvent] error in
 			if let error {
 				print("[SSH] failed to shut down event loop group: \(error)")
+				onEvent("failed to shut down event loop group: \(error)")
 			}
 		}
 	}
@@ -278,27 +290,29 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 private final nonisolated class PasswordOrNoneAuthDelegate: NIOSSHClientUserAuthenticationDelegate, @unchecked Sendable {
 	private let username: String
 	private let password: String
+	private let logger: @Sendable (String) -> Void
 	private var attemptedNone = false
 	private var attemptedPassword = false
 	var hasFailed = false
 	var onExhausted: (() -> Void)?
 
-	init(username: String, password: String) {
+	init(username: String, password: String, logger: @escaping @Sendable (String) -> Void) {
 		self.username = username
 		self.password = password
+		self.logger = logger
 	}
 
 	func nextAuthenticationType(
 		availableMethods: NIOSSHAvailableUserAuthenticationMethods,
 		nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
 	) {
-		print("[SSH] auth callback: available=\(availableMethods) attemptedNone=\(attemptedNone) attemptedPassword=\(attemptedPassword)")
+		logger("auth callback: available=\(availableMethods) attemptedNone=\(attemptedNone) attemptedPassword=\(attemptedPassword)")
 
 		// Always try "none" first — Tailscale SSH accepts this
 		// when the client is an authorized tailnet node.
 		if !attemptedNone {
 			attemptedNone = true
-			print("[SSH] trying none auth")
+			logger("trying none auth")
 			nextChallengePromise.succeed(.init(
 				username: username,
 				serviceName: "",
@@ -310,7 +324,7 @@ private final nonisolated class PasswordOrNoneAuthDelegate: NIOSSHClientUserAuth
 		// Fall back to password if available
 		if !attemptedPassword, !password.isEmpty, availableMethods.contains(.password) {
 			attemptedPassword = true
-			print("[SSH] trying password auth")
+			logger("trying password auth")
 			nextChallengePromise.succeed(.init(
 				username: username,
 				serviceName: "",
@@ -320,7 +334,7 @@ private final nonisolated class PasswordOrNoneAuthDelegate: NIOSSHClientUserAuth
 		}
 
 		// No more methods
-		print("[SSH] no more auth methods, failing")
+		logger("no more auth methods, failing")
 		hasFailed = true
 		onExhausted?()
 		onExhausted = nil
@@ -329,11 +343,17 @@ private final nonisolated class PasswordOrNoneAuthDelegate: NIOSSHClientUserAuth
 }
 
 private final nonisolated class AcceptAllHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate, @unchecked Sendable {
+	private let logger: @Sendable (String) -> Void
+
+	init(logger: @escaping @Sendable (String) -> Void) {
+		self.logger = logger
+	}
+
 	func validateHostKey(
 		hostKey: NIOSSHPublicKey,
 		validationCompletePromise: EventLoopPromise<Void>
 	) {
-		print("[SSH] accepting host key: \(hostKey)")
+		logger("accepting host key: \(hostKey)")
 		validationCompletePromise.succeed(())
 	}
 }
