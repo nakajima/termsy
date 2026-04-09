@@ -37,20 +37,41 @@ final class GhosttyApp {
 				action: { target, action in
 					guard target.tag == GHOSTTY_TARGET_SURFACE,
 					      let surface = target.target.surface,
-					      let userdata = ghostty_surface_userdata(surface),
+					      let view = GhosttySurfaceUserdata.object(fromOpaque: ghostty_surface_userdata(surface), as: TerminalView.self),
 					      action.tag == GHOSTTY_ACTION_SET_TITLE,
 					      let cTitle = action.action.set_title.title
 					else { return }
 					let title = String(cString: cTitle)
-					DispatchQueue.main.async {
-						let view = Unmanaged<TerminalView>.fromOpaque(userdata).takeUnretainedValue()
-						view.handleTitleChange(title)
+					Task { @MainActor [weak view] in
+						view?.handleTitleChange(title)
 					}
 				},
 				closeSurface: { _, _ in },
-				writeClipboard: { _, string, _ in
-					DispatchQueue.main.async {
-						UIPasteboard.general.string = string
+				confirmReadClipboard: { userdata, string, opaquePtr, request in
+					guard let userdata,
+					      let opaquePtr,
+					      let view = GhosttySurfaceUserdata.object(fromOpaque: userdata, as: TerminalView.self)
+					else { return }
+					Task { @MainActor [weak view] in
+						view?.requestClipboardReadConfirmation(
+							text: string,
+							state: opaquePtr,
+							request: request
+						)
+					}
+				},
+				writeClipboard: { userdata, _, string, confirm in
+					guard confirm else {
+						DispatchQueue.main.async {
+							UIPasteboard.general.string = string
+						}
+						return
+					}
+					guard let userdata,
+					      let view = GhosttySurfaceUserdata.object(fromOpaque: userdata, as: TerminalView.self)
+					else { return }
+					Task { @MainActor [weak view] in
+						view?.requestClipboardWriteConfirmation(text: string)
 					}
 				},
 				readClipboard: { userdata, clipboard, opaquePtr in
@@ -75,6 +96,10 @@ final class GhosttyApp {
 
 	func tick() {
 		runtime?.tick()
+	}
+
+	func makeSurfaceUserdata(payload: UnsafeMutableRawPointer?, object: AnyObject? = nil) -> GhosttySurfaceUserdata? {
+		runtime?.makeSurfaceUserdata(payload: payload, object: object)
 	}
 
 	func applyTheme(_ theme: TerminalTheme) {

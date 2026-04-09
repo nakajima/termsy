@@ -35,32 +35,47 @@ final class MacGhosttyApp {
 					      let surface = target.target.surface,
 					      action.tag == GHOSTTY_ACTION_SET_TITLE,
 					      let cTitle = action.action.set_title.title,
-					      let userdata = ghostty_surface_userdata(surface)
+					      let view = GhosttySurfaceUserdata.object(fromOpaque: ghostty_surface_userdata(surface), as: MacTerminalView.self)
 					else { return }
 
 					let title = String(cString: cTitle)
-					if Thread.isMainThread {
-						let view = Unmanaged<MacTerminalView>.fromOpaque(userdata).takeUnretainedValue()
-						view.handleTitleChange(title)
-					} else {
-						DispatchQueue.main.async {
-							let view = Unmanaged<MacTerminalView>.fromOpaque(userdata).takeUnretainedValue()
-							view.handleTitleChange(title)
-						}
+					Task { @MainActor [weak view] in
+						view?.handleTitleChange(title)
 					}
 				},
 				closeSurface: { _, _ in },
-				writeClipboard: { _, string, _ in
-					if Thread.isMainThread {
-						let pasteboard = NSPasteboard.general
-						pasteboard.clearContents()
-						pasteboard.setString(string, forType: .string)
-					} else {
-						DispatchQueue.main.async {
+				confirmReadClipboard: { userdata, string, opaquePtr, request in
+					guard let userdata,
+					      let opaquePtr,
+					      let view = GhosttySurfaceUserdata.object(fromOpaque: userdata, as: MacTerminalView.self)
+					else { return }
+					Task { @MainActor [weak view] in
+						view?.requestClipboardReadConfirmation(
+							text: string,
+							state: opaquePtr,
+							request: request
+						)
+					}
+				},
+				writeClipboard: { userdata, _, string, confirm in
+					guard confirm else {
+						let write = {
 							let pasteboard = NSPasteboard.general
 							pasteboard.clearContents()
 							pasteboard.setString(string, forType: .string)
 						}
+						if Thread.isMainThread {
+							write()
+						} else {
+							DispatchQueue.main.async(execute: write)
+						}
+						return
+					}
+					guard let userdata,
+					      let view = GhosttySurfaceUserdata.object(fromOpaque: userdata, as: MacTerminalView.self)
+					else { return }
+					Task { @MainActor [weak view] in
+						view?.requestClipboardWriteConfirmation(text: string)
 					}
 				},
 				readClipboard: { userdata, clipboard, opaquePtr in
@@ -98,6 +113,10 @@ final class MacGhosttyApp {
 
 	func tick() {
 		runtime?.tick()
+	}
+
+	func makeSurfaceUserdata(payload: UnsafeMutableRawPointer?, object: AnyObject? = nil) -> GhosttySurfaceUserdata? {
+		runtime?.makeSurfaceUserdata(payload: payload, object: object)
 	}
 
 	func reloadConfig(theme: TerminalTheme? = nil) {

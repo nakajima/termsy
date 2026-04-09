@@ -16,7 +16,11 @@ import UIKit
 final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	nonisolated(unsafe) private(set) var surface: ghostty_surface_t?
 	private var hostManagedSurface: HostManagedSurface?
+	private var ghosttySurfaceUserdata: GhosttySurfaceUserdata?
 	private var displayLink: CADisplayLink?
+	private var pendingClipboardConfirmations = [PendingClipboardConfirmation]()
+	private var activeClipboardConfirmation: PendingClipboardConfirmation?
+	private weak var clipboardAlertController: UIAlertController?
 	private var activeHardwareKeyCodes = Set<UInt16>()
 	private var keyRepeatTimer: DispatchSourceTimer?
 	private var repeatingHardwareKey: UIKey?
@@ -65,6 +69,18 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 
 	/// Called when Escape should dismiss auxiliary app UI instead of reaching the terminal.
 	var onDismissAuxiliaryUIRequest: (() -> Bool)?
+
+	private enum ClipboardConfirmationAction {
+		case read(state: UnsafeMutableRawPointer, request: ghostty_clipboard_request_e)
+		case write
+	}
+
+	private struct PendingClipboardConfirmation {
+		let id = UUID()
+		let kind: GhosttyClipboardConfirmationKind
+		let text: String
+		let action: ClipboardConfirmationAction
+	}
 
 	// MARK: - Lifecycle
 
@@ -133,10 +149,17 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 				)
 			}
 
+			if ghosttySurfaceUserdata == nil {
+				ghosttySurfaceUserdata = GhosttyApp.shared.makeSurfaceUserdata(
+					payload: Unmanaged.passUnretained(self).toOpaque(),
+					object: self
+				)
+			}
+
 			let scale = resolvedScale()
 			surface = hostManagedSurface?.start(
 				app: app,
-				surfaceUserdata: Unmanaged.passUnretained(self).toOpaque(),
+				surfaceUserdata: ghosttySurfaceUserdata?.opaquePointer,
 				scaleFactor: Double(scale),
 				fontSize: TerminalFontSettings.defaultSize
 			) { cfg in
@@ -162,6 +185,7 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		lastMouseLocation = nil
 		lastScrollLocation = nil
 		activePointerButton = nil
+		denyOutstandingClipboardReadConfirmations()
 		if let surface {
 			ghostty_surface_set_focus(surface, false)
 		}
@@ -185,6 +209,40 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		onTitleChange?(title)
 	}
 
+	func requestClipboardReadConfirmation(
+		text: String,
+		state: UnsafeMutableRawPointer,
+		request: ghostty_clipboard_request_e
+	) {
+		guard let kind = GhosttyClipboardConfirmationKind(request: request) else {
+			guard let surface else { return }
+			"".withCString { cString in
+				ghostty_surface_complete_clipboard_request(surface, cString, state, true)
+			}
+			return
+		}
+
+		pendingClipboardConfirmations.append(
+			PendingClipboardConfirmation(
+				kind: kind,
+				text: text,
+				action: .read(state: state, request: request)
+			)
+		)
+		presentNextClipboardConfirmationIfNeeded()
+	}
+
+	func requestClipboardWriteConfirmation(text: String) {
+		pendingClipboardConfirmations.append(
+			PendingClipboardConfirmation(
+				kind: .osc52Write,
+				text: text,
+				action: .write
+			)
+		)
+		presentNextClipboardConfirmationIfNeeded()
+	}
+
 	var hasAttachedWindow: Bool {
 		window != nil
 	}
@@ -192,6 +250,116 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	func setDisplayActive(_ isActive: Bool) {
 		isDisplayActive = isActive
 		applyDisplayActivity()
+	}
+
+	private func presentNextClipboardConfirmationIfNeeded() {
+		guard activeClipboardConfirmation == nil,
+		      !pendingClipboardConfirmations.isEmpty
+		else { return }
+
+		let confirmation = pendingClipboardConfirmations.removeFirst()
+		activeClipboardConfirmation = confirmation
+
+		guard let presenter = topClipboardAlertPresenter() else {
+			resolveClipboardConfirmation(confirmation, allowed: false)
+			return
+		}
+
+		let alert = UIAlertController(
+			title: confirmation.kind.title,
+			message: confirmation.kind.formattedMessage(for: confirmation.text),
+			preferredStyle: .alert
+		)
+		alert.addAction(
+			UIAlertAction(title: confirmation.kind.denyButtonTitle, style: .cancel) { [weak self] _ in
+				self?.resolveClipboardConfirmation(confirmation, allowed: false)
+			}
+		)
+		alert.addAction(
+			UIAlertAction(title: confirmation.kind.allowButtonTitle, style: .default) { [weak self] _ in
+				self?.resolveClipboardConfirmation(confirmation, allowed: true)
+			}
+		)
+		clipboardAlertController = alert
+		presenter.present(alert, animated: true)
+	}
+
+	private func resolveClipboardConfirmation(_ confirmation: PendingClipboardConfirmation, allowed: Bool) {
+		guard activeClipboardConfirmation?.id == confirmation.id else { return }
+
+		switch confirmation.action {
+		case let .read(state, _):
+			guard let surface else {
+				finishClipboardConfirmation(confirmation)
+				return
+			}
+			let responseText = allowed ? confirmation.text : ""
+			responseText.withCString { cString in
+				ghostty_surface_complete_clipboard_request(surface, cString, state, true)
+			}
+
+		case .write:
+			if allowed {
+				UIPasteboard.general.string = confirmation.text
+			}
+		}
+
+		finishClipboardConfirmation(confirmation)
+	}
+
+	private func finishClipboardConfirmation(_ confirmation: PendingClipboardConfirmation) {
+		guard activeClipboardConfirmation?.id == confirmation.id else { return }
+		activeClipboardConfirmation = nil
+		clipboardAlertController = nil
+		presentNextClipboardConfirmationIfNeeded()
+	}
+
+	private func denyOutstandingClipboardReadConfirmations() {
+		let confirmations = [activeClipboardConfirmation].compactMap { $0 } + pendingClipboardConfirmations
+		if let surface {
+			for confirmation in confirmations {
+				if case let .read(state, _) = confirmation.action {
+					"".withCString { cString in
+						ghostty_surface_complete_clipboard_request(surface, cString, state, true)
+					}
+				}
+			}
+		}
+		activeClipboardConfirmation = nil
+		pendingClipboardConfirmations.removeAll()
+		clipboardAlertController?.dismiss(animated: false)
+		clipboardAlertController = nil
+	}
+
+	private func topClipboardAlertPresenter() -> UIViewController? {
+		topmostViewController(from: owningViewController() ?? window?.rootViewController)
+	}
+
+	private func owningViewController() -> UIViewController? {
+		var responder: UIResponder? = self
+		while let next = responder?.next {
+			if let viewController = next as? UIViewController {
+				return viewController
+			}
+			responder = next
+		}
+		return nil
+	}
+
+	private func topmostViewController(from root: UIViewController?) -> UIViewController? {
+		if let navigationController = root as? UINavigationController {
+			return topmostViewController(from: navigationController.visibleViewController) ?? navigationController
+		}
+		if let tabBarController = root as? UITabBarController {
+			return topmostViewController(from: tabBarController.selectedViewController) ?? tabBarController
+		}
+		if let splitViewController = root as? UISplitViewController {
+			return topmostViewController(from: splitViewController.viewControllers.last) ?? splitViewController
+		}
+		if let presented = root?.presentedViewController {
+			return topmostViewController(from: presented) ?? presented
+		}
+		return root
 	}
 
 	private func applyDisplayActivity() {

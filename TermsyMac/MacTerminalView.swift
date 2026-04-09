@@ -5,13 +5,29 @@ import TermsyGhosttyCore
 @MainActor
 final class MacTerminalView: NSView {
 	nonisolated(unsafe) private(set) var surface: ghostty_surface_t?
+	private var ghosttySurfaceUserdata: GhosttySurfaceUserdata?
 
 	var onWrite: ((Data) -> Void)?
 	var onResize: ((UInt16, UInt16) -> Void)?
 	var onTitleChange: ((String) -> Void)?
 
+	private enum ClipboardConfirmationAction {
+		case read(state: UnsafeMutableRawPointer, request: ghostty_clipboard_request_e)
+		case write
+	}
+
+	private struct PendingClipboardConfirmation {
+		let id = UUID()
+		let kind: GhosttyClipboardConfirmationKind
+		let text: String
+		let action: ClipboardConfirmationAction
+	}
+
 	private var hostManagedSurface: HostManagedSurface?
 	private var displayTimer: Timer?
+	private var pendingClipboardConfirmations = [PendingClipboardConfirmation]()
+	private var activeClipboardConfirmation: PendingClipboardConfirmation?
+	private var clipboardAlert: NSAlert?
 	private var trackingAreaRef: NSTrackingArea?
 	private var bufferedTerminalData = Data()
 	private var pendingProcessExit: (code: UInt32, runtimeMs: UInt64)?
@@ -59,10 +75,17 @@ final class MacTerminalView: NSView {
 				)
 			}
 
+			if ghosttySurfaceUserdata == nil {
+				ghosttySurfaceUserdata = MacGhosttyApp.shared.makeSurfaceUserdata(
+					payload: Unmanaged.passUnretained(self).toOpaque(),
+					object: self
+				)
+			}
+
 			let scale = resolvedScale()
 			surface = hostManagedSurface?.start(
 				app: app,
-				surfaceUserdata: Unmanaged.passUnretained(self).toOpaque(),
+				surfaceUserdata: ghosttySurfaceUserdata?.opaquePointer,
 				scaleFactor: Double(scale),
 				fontSize: TerminalFontSettings.defaultSize
 			) { cfg in
@@ -84,6 +107,7 @@ final class MacTerminalView: NSView {
 		handledMarkedTextCommand = false
 		keyTextAccumulator = nil
 		lastMouseLocation = nil
+		denyOutstandingClipboardReadConfirmations()
 		if let surface {
 			ghostty_surface_set_focus(surface, false)
 		}
@@ -115,6 +139,40 @@ final class MacTerminalView: NSView {
 		onTitleChange?(title)
 	}
 
+	func requestClipboardReadConfirmation(
+		text: String,
+		state: UnsafeMutableRawPointer,
+		request: ghostty_clipboard_request_e
+	) {
+		guard let kind = GhosttyClipboardConfirmationKind(request: request) else {
+			guard let surface else { return }
+			"".withCString { cString in
+				ghostty_surface_complete_clipboard_request(surface, cString, state, true)
+			}
+			return
+		}
+
+		pendingClipboardConfirmations.append(
+			PendingClipboardConfirmation(
+				kind: kind,
+				text: text,
+				action: .read(state: state, request: request)
+			)
+		)
+		presentNextClipboardConfirmationIfNeeded()
+	}
+
+	func requestClipboardWriteConfirmation(text: String) {
+		pendingClipboardConfirmations.append(
+			PendingClipboardConfirmation(
+				kind: .osc52Write,
+				text: text,
+				action: .write
+			)
+		)
+		presentNextClipboardConfirmationIfNeeded()
+	}
+
 	var hasAttachedWindow: Bool {
 		window != nil
 	}
@@ -122,6 +180,84 @@ final class MacTerminalView: NSView {
 	func setDisplayActive(_ isActive: Bool) {
 		isDisplayActive = isActive
 		applyDisplayActivity()
+	}
+
+	private func presentNextClipboardConfirmationIfNeeded() {
+		guard activeClipboardConfirmation == nil,
+		      !pendingClipboardConfirmations.isEmpty
+		else { return }
+
+		let confirmation = pendingClipboardConfirmations.removeFirst()
+		activeClipboardConfirmation = confirmation
+
+		guard let window else {
+			resolveClipboardConfirmation(confirmation, allowed: false)
+			return
+		}
+
+		let alert = NSAlert()
+		alert.alertStyle = confirmation.kind == .paste ? .warning : .informational
+		alert.messageText = confirmation.kind.title
+		alert.informativeText = confirmation.kind.formattedMessage(for: confirmation.text)
+		alert.addButton(withTitle: confirmation.kind.allowButtonTitle)
+		alert.addButton(withTitle: confirmation.kind.denyButtonTitle)
+		clipboardAlert = alert
+		alert.beginSheetModal(for: window) { [weak self] response in
+			self?.resolveClipboardConfirmation(confirmation, allowed: response == .alertFirstButtonReturn)
+		}
+	}
+
+	private func resolveClipboardConfirmation(_ confirmation: PendingClipboardConfirmation, allowed: Bool) {
+		guard activeClipboardConfirmation?.id == confirmation.id else { return }
+
+		switch confirmation.action {
+		case let .read(state, _):
+			guard let surface else {
+				finishClipboardConfirmation(confirmation)
+				return
+			}
+			let responseText = allowed ? confirmation.text : ""
+			responseText.withCString { cString in
+				ghostty_surface_complete_clipboard_request(surface, cString, state, true)
+			}
+
+		case .write:
+			if allowed {
+				let pasteboard = NSPasteboard.general
+				pasteboard.clearContents()
+				pasteboard.setString(confirmation.text, forType: .string)
+			}
+		}
+
+		finishClipboardConfirmation(confirmation)
+	}
+
+	private func finishClipboardConfirmation(_ confirmation: PendingClipboardConfirmation) {
+		guard activeClipboardConfirmation?.id == confirmation.id else { return }
+		activeClipboardConfirmation = nil
+		clipboardAlert = nil
+		presentNextClipboardConfirmationIfNeeded()
+	}
+
+	private func denyOutstandingClipboardReadConfirmations() {
+		let confirmations = [activeClipboardConfirmation].compactMap { $0 } + pendingClipboardConfirmations
+		if let surface {
+			for confirmation in confirmations {
+				if case let .read(state, _) = confirmation.action {
+					"".withCString { cString in
+						ghostty_surface_complete_clipboard_request(surface, cString, state, true)
+					}
+				}
+			}
+		}
+		if let alert = clipboardAlert,
+		   let sheetParent = alert.window.sheetParent
+		{
+			sheetParent.endSheet(alert.window, returnCode: .cancel)
+		}
+		activeClipboardConfirmation = nil
+		pendingClipboardConfirmations.removeAll()
+		clipboardAlert = nil
 	}
 
 	func syncSizeAndReadBack() -> TerminalWindowSize? {

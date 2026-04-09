@@ -8,24 +8,62 @@ private final class GhosttyRuntimeCallbackBox {
 	}
 }
 
+public final class GhosttySurfaceUserdata {
+	public let payload: UnsafeMutableRawPointer?
+	fileprivate weak var payloadObject: AnyObject?
+	fileprivate let callbackBox: GhosttyRuntimeCallbackBox
+
+	fileprivate init(
+		payload: UnsafeMutableRawPointer?,
+		payloadObject: AnyObject?,
+		callbackBox: GhosttyRuntimeCallbackBox
+	) {
+		self.payload = payload
+		self.payloadObject = payloadObject
+		self.callbackBox = callbackBox
+	}
+
+	public var opaquePointer: UnsafeMutableRawPointer {
+		Unmanaged.passUnretained(self).toOpaque()
+	}
+
+	public static func payload(fromOpaque userdata: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+		guard let userdata else { return nil }
+		return Unmanaged<GhosttySurfaceUserdata>.fromOpaque(userdata).takeUnretainedValue().payload
+	}
+
+	public static func object<T: AnyObject>(fromOpaque userdata: UnsafeMutableRawPointer?, as _: T.Type = T.self) -> T? {
+		guard let userdata else { return nil }
+		return Unmanaged<GhosttySurfaceUserdata>.fromOpaque(userdata).takeUnretainedValue().payloadObject as? T
+	}
+
+	fileprivate static func callbackBox(fromOpaque userdata: UnsafeMutableRawPointer?) -> GhosttyRuntimeCallbackBox? {
+		guard let userdata else { return nil }
+		return Unmanaged<GhosttySurfaceUserdata>.fromOpaque(userdata).takeUnretainedValue().callbackBox
+	}
+}
+
 public final class GhosttyRuntime {
 	public struct Handlers {
 		public var wakeup: () -> Void
 		public var action: (ghostty_target_s, ghostty_action_s) -> Void
 		public var closeSurface: (UnsafeMutableRawPointer?, Bool) -> Void
-		public var writeClipboard: (ghostty_clipboard_e, String, Bool) -> Void
+		public var confirmReadClipboard: (UnsafeMutableRawPointer?, String, UnsafeMutableRawPointer?, ghostty_clipboard_request_e) -> Void
+		public var writeClipboard: (UnsafeMutableRawPointer?, ghostty_clipboard_e, String, Bool) -> Void
 		public var readClipboard: (UnsafeMutableRawPointer?, ghostty_clipboard_e, UnsafeMutableRawPointer?) -> Bool
 
 		public init(
 			wakeup: @escaping () -> Void = {},
 			action: @escaping (ghostty_target_s, ghostty_action_s) -> Void = { _, _ in },
 			closeSurface: @escaping (UnsafeMutableRawPointer?, Bool) -> Void = { _, _ in },
-			writeClipboard: @escaping (ghostty_clipboard_e, String, Bool) -> Void = { _, _, _ in },
+			confirmReadClipboard: @escaping (UnsafeMutableRawPointer?, String, UnsafeMutableRawPointer?, ghostty_clipboard_request_e) -> Void = { _, _, _, _ in },
+			writeClipboard: @escaping (UnsafeMutableRawPointer?, ghostty_clipboard_e, String, Bool) -> Void = { _, _, _, _ in },
 			readClipboard: @escaping (UnsafeMutableRawPointer?, ghostty_clipboard_e, UnsafeMutableRawPointer?) -> Bool = { _, _, _ in false }
 		) {
 			self.wakeup = wakeup
 			self.action = action
 			self.closeSurface = closeSurface
+			self.confirmReadClipboard = confirmReadClipboard
 			self.writeClipboard = writeClipboard
 			self.readClipboard = readClipboard
 		}
@@ -72,25 +110,57 @@ public final class GhosttyRuntime {
 			return false
 		}
 		runtimeConfig.close_surface_cb = { userdata, processAlive in
-			guard let userdata else { return }
-			let callbackBox = Unmanaged<GhosttyRuntimeCallbackBox>.fromOpaque(userdata).takeUnretainedValue()
-			callbackBox.handlers.closeSurface(userdata, processAlive)
+			guard let callbackBox = GhosttySurfaceUserdata.callbackBox(fromOpaque: userdata) else { return }
+			callbackBox.handlers.closeSurface(
+				GhosttySurfaceUserdata.payload(fromOpaque: userdata),
+				processAlive
+			)
+		}
+		runtimeConfig.confirm_read_clipboard_cb = { userdata, string, opaquePtr, request in
+			guard let callbackBox = GhosttySurfaceUserdata.callbackBox(fromOpaque: userdata),
+			      let string,
+			      let value = String(validatingUTF8: string)
+			else { return }
+			callbackBox.handlers.confirmReadClipboard(
+				GhosttySurfaceUserdata.payload(fromOpaque: userdata),
+				value,
+				opaquePtr,
+				request
+			)
 		}
 		runtimeConfig.write_clipboard_cb = { userdata, clipboard, contents, contentsLen, confirm in
-			guard let userdata, contentsLen > 0, let content = contents?.pointee,
+			guard let callbackBox = GhosttySurfaceUserdata.callbackBox(fromOpaque: userdata),
+			      contentsLen > 0,
+			      let content = contents?.pointee,
 			      let data = content.data
 			else { return }
-			let callbackBox = Unmanaged<GhosttyRuntimeCallbackBox>.fromOpaque(userdata).takeUnretainedValue()
 			let string = String(cString: data)
-			callbackBox.handlers.writeClipboard(clipboard, string, confirm)
+			callbackBox.handlers.writeClipboard(
+				GhosttySurfaceUserdata.payload(fromOpaque: userdata),
+				clipboard,
+				string,
+				confirm
+			)
 		}
 		runtimeConfig.read_clipboard_cb = { userdata, clipboard, opaquePtr in
-			guard let userdata else { return false }
-			let callbackBox = Unmanaged<GhosttyRuntimeCallbackBox>.fromOpaque(userdata).takeUnretainedValue()
-			return callbackBox.handlers.readClipboard(userdata, clipboard, opaquePtr)
+			guard let callbackBox = GhosttySurfaceUserdata.callbackBox(fromOpaque: userdata) else {
+				return false
+			}
+			return callbackBox.handlers.readClipboard(
+				GhosttySurfaceUserdata.payload(fromOpaque: userdata),
+				clipboard,
+				opaquePtr
+			)
 		}
 
 		self.app = ghostty_app_new(&runtimeConfig, cfg)
+	}
+
+	public func makeSurfaceUserdata(
+		payload: UnsafeMutableRawPointer?,
+		object: AnyObject? = nil
+	) -> GhosttySurfaceUserdata {
+		GhosttySurfaceUserdata(payload: payload, payloadObject: object, callbackBox: callbackBox)
 	}
 
 	deinit {
