@@ -108,6 +108,9 @@ class ViewCoordinator {
 	func appWillResignActive() {
 		appIsActive = false
 		ApplicationActivity.isActive = false
+		if tabs.contains(where: \.shouldRequestBackgroundExecution) {
+			_ = ApplicationActivity.beginBackgroundExecution(name: "Termsy SSH")
+		}
 		for tab in tabs {
 			tab.noteAppWillResignActive()
 		}
@@ -117,6 +120,7 @@ class ViewCoordinator {
 	func appDidBecomeActive() {
 		appIsActive = true
 		ApplicationActivity.isActive = true
+		ApplicationActivity.endBackgroundExecution()
 		for tab in tabs {
 			tab.noteAppDidBecomeActive()
 		}
@@ -348,6 +352,11 @@ class TerminalTab: Identifiable {
 		connectionLog.joined(separator: "\n")
 	}
 
+	var shouldRequestBackgroundExecution: Bool {
+		guard case .remote = endpoint else { return false }
+		return isConnected || (connectionError == nil && !needsPassword)
+	}
+
 	func connect() async {
 		connectionError = nil
 		logConnectionEvent("Connect requested")
@@ -575,6 +584,9 @@ class TerminalTab: Identifiable {
 		reconnectGraceTask = nil
 		backgroundReconnectGraceDeadline = nil
 		wasConnectedWhenAppResignedActive = isConnected
+		if ApplicationActivity.hasBackgroundExecution, shouldRequestBackgroundExecution {
+			logConnectionEvent("Requested iOS background execution to keep the SSH session alive")
+		}
 		logConnectionEvent("App will resign active; wasConnected=\(isConnected)")
 	}
 
