@@ -46,7 +46,7 @@ struct SessionListView: View {
 			#endif
 
 			Section(sessions.isEmpty ? "Saved Sessions" : "") {
-				ForEach(sessions) { session in
+				ForEach(sessions, id: \.uuid) { session in
 					Button {
 						coordinator.openTab(for: session)
 					} label: {
@@ -121,7 +121,6 @@ struct SessionListView: View {
 				}
 			}
 			sessionsToDelete.forEach(Keychain.removePassword)
-			SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "delete session")
 		} catch {
 			print("[DB] failed to delete sessions: \(error)")
 		}

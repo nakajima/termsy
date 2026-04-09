@@ -9,12 +9,13 @@
 //  The encoder derives ctrl/alt sequences from the logical key + mods.
 //
 
-import GhosttyKit
+import TermsyGhosttyCore
 import UIKit
 
 @MainActor
 final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	nonisolated(unsafe) private(set) var surface: ghostty_surface_t?
+	private var hostManagedSurface: HostManagedSurface?
 	private var displayLink: CADisplayLink?
 	private var activeHardwareKeyCodes = Set<UInt16>()
 	private var keyRepeatTimer: DispatchSourceTimer?
@@ -33,6 +34,7 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	private var smoothScrollPresentationOffsetY: CGFloat = 0
 	private var smoothScrollSuppressedUntilNextScrollGesture = false
 	private var isDisplayActive = false
+	private var firstResponderTask: Task<Void, Never>?
 	private let momentumVelocityThreshold: CGFloat = 50
 	private let momentumDecelerationPerFrame: CGFloat = 0.92
 	private let smoothScrollAnimationSpeed: CGFloat = 18
@@ -116,42 +118,40 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	func start() {
 		if surface == nil {
 			guard let app = GhosttyApp.shared.app else { return }
-
-			var cfg = ghostty_surface_config_new()
-			cfg.platform_tag = GHOSTTY_PLATFORM_IOS
-			cfg.platform = ghostty_platform_u(
-				ios: ghostty_platform_ios_s(uiview: Unmanaged.passUnretained(self).toOpaque())
-			)
-			cfg.backend = GHOSTTY_SURFACE_IO_BACKEND_HOST_MANAGED
-			cfg.userdata = Unmanaged.passUnretained(self).toOpaque()
-			cfg.receive_userdata = Unmanaged.passUnretained(self).toOpaque()
-			cfg.receive_buffer = { userdata, ptr, len in
-				guard let userdata, let ptr else { return }
-				let view = Unmanaged<TerminalView>.fromOpaque(userdata).takeUnretainedValue()
-				let data = Data(bytes: ptr, count: len)
-				DispatchQueue.main.async {
-					view.onWrite?(data)
-				}
-			}
-			cfg.receive_resize = { userdata, cols, rows, _, _ in
-				guard let userdata else { return }
-				let view = Unmanaged<TerminalView>.fromOpaque(userdata).takeUnretainedValue()
-				DispatchQueue.main.async {
-					view.onResize?(cols, rows)
-				}
+			if hostManagedSurface == nil {
+				hostManagedSurface = HostManagedSurface(
+					onData: { [weak self] data in
+						DispatchQueue.main.async {
+							self?.onWrite?(data)
+						}
+					},
+					onResize: { [weak self] resize in
+						DispatchQueue.main.async {
+							self?.onResize?(resize.columns, resize.rows)
+						}
+					}
+				)
 			}
 
 			let scale = resolvedScale()
-			cfg.scale_factor = Double(scale)
-			cfg.font_size = TerminalFontSettings.defaultSize
-
-			surface = ghostty_surface_new(app, &cfg)
+			surface = hostManagedSurface?.start(
+				app: app,
+				surfaceUserdata: Unmanaged.passUnretained(self).toOpaque(),
+				scaleFactor: Double(scale),
+				fontSize: TerminalFontSettings.defaultSize
+			) { cfg in
+				cfg.platform_tag = GHOSTTY_PLATFORM_IOS
+				cfg.platform = ghostty_platform_u(
+					ios: ghostty_platform_ios_s(uiview: Unmanaged.passUnretained(self).toOpaque())
+				)
+			}
 		}
 
 		applyDisplayActivity()
 	}
 
 	func stop() {
+		cancelFirstResponderRequest()
 		stopMomentumScrolling()
 		snapSmoothScrollPresentationToTerminal()
 		stopDisplayLink()
@@ -162,27 +162,23 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		lastMouseLocation = nil
 		lastScrollLocation = nil
 		activePointerButton = nil
-		if let s = surface {
-			ghostty_surface_set_focus(s, false)
-			ghostty_surface_free(s)
-			surface = nil
+		if let surface {
+			ghostty_surface_set_focus(surface, false)
 		}
+		hostManagedSurface?.free()
+		hostManagedSurface = nil
+		surface = nil
 	}
 
 	func feedData(_ data: Data) {
 		guard !data.isEmpty else { return }
 		smoothScrollSuppressedUntilNextScrollGesture = true
 		snapSmoothScrollPresentationToTerminal()
-		guard let surface else { return }
-		data.withUnsafeBytes { buf in
-			guard let ptr = buf.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
-			ghostty_surface_write_buffer(surface, ptr, UInt(buf.count))
-		}
+		hostManagedSurface?.write(data)
 	}
 
 	func processExited(code: UInt32 = 0, runtimeMs: UInt64 = 0) {
-		guard let surface else { return }
-		ghostty_surface_process_exit(surface, code, runtimeMs)
+		hostManagedSurface?.processExit(code: code, runtimeMs: runtimeMs)
 	}
 
 	func handleTitleChange(_ title: String) {
@@ -212,7 +208,7 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		if shouldBeActive {
 			startDisplayLink()
 			ghostty_surface_set_focus(surface, true)
-			becomeFirstResponder()
+			requestFirstResponder()
 			ghostty_surface_refresh(surface)
 			ghostty_surface_draw(surface)
 		} else {
@@ -221,7 +217,37 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 		}
 	}
 
+	private var shouldHoldFirstResponder: Bool {
+		isDisplayActive && window != nil && surface != nil
+	}
+
+	private func requestFirstResponder(retryCount: Int = 4) {
+		cancelFirstResponderRequest()
+		guard shouldHoldFirstResponder else { return }
+		if isFirstResponder { return }
+
+		_ = becomeFirstResponder()
+		guard !isFirstResponder, retryCount > 0 else { return }
+
+		firstResponderTask = Task { @MainActor [weak self] in
+			guard let self else { return }
+			for _ in 0 ..< retryCount {
+				try? await Task.sleep(nanoseconds: 50_000_000)
+				guard !Task.isCancelled else { return }
+				guard self.shouldHoldFirstResponder else { return }
+				if self.isFirstResponder { return }
+				_ = self.becomeFirstResponder()
+			}
+		}
+	}
+
+	private func cancelFirstResponderRequest() {
+		firstResponderTask?.cancel()
+		firstResponderTask = nil
+	}
+
 	private func stopDisplayActivity() {
+		cancelFirstResponderRequest()
 		resignFirstResponder()
 		stopMomentumScrolling()
 		snapSmoothScrollPresentationToTerminal()
@@ -341,6 +367,7 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 			return
 		}
 
+		requestFirstResponder()
 		cancelActiveScrollAnimationForInteraction()
 
 		if touch.type == .indirectPointer {

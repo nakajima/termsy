@@ -37,7 +37,7 @@ struct MacConnectSheetView: View {
 			Form {
 				if !savedSessions.isEmpty {
 					Section("Saved Sessions") {
-						ForEach(savedSessions) { session in
+						ForEach(savedSessions, id: \.uuid) { session in
 							Button {
 								connectExisting(session)
 							} label: {

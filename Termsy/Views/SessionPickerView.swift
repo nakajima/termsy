@@ -47,7 +47,7 @@ struct SessionPickerView: View {
 
 					if !sessions.isEmpty {
 						Section("Saved Sessions") {
-							ForEach(sessions) { session in
+							ForEach(sessions, id: \.uuid) { session in
 								sessionRow(for: session)
 							}
 							.onDelete(perform: deleteSessions)
@@ -282,7 +282,6 @@ struct SessionPickerView: View {
 				}
 			}
 			sessionsToDelete.forEach(Keychain.removePassword)
-			SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "delete session")
 		} catch {
 			print("[DB] failed to delete sessions: \(error)")
 		}

@@ -1,0 +1,31 @@
+{
+  "object" : {
+    "artifacts" : [
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "termsyghostty",
+          "kind" : "root",
+          "location" : "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty",
+          "name" : "TermsyGhostty"
+        },
+        "path" : "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/BinaryTarget/libghostty.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TermsyLibghostty"
+      }
+    ],
+    "dependencies" : [
+
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}

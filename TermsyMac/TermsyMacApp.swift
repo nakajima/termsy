@@ -15,7 +15,7 @@ struct TermsyMacApp: App {
 	}
 
 	var body: some Scene {
-		Window("Settings", id: "settings") {
+		Settings {
 			MacSettingsView()
 		}
 		.defaultSize(width: 560, height: 480)
@@ -44,16 +44,7 @@ final class TermsyMacAppDelegate: NSObject, NSApplicationDelegate {
 }
 
 private struct TermsyMacTerminalCommands: Commands {
-	@Environment(\.openWindow) private var openWindow
-
 	var body: some Commands {
-		CommandGroup(replacing: .appSettings) {
-			Button("Settings…") {
-				openWindow(id: "settings")
-			}
-			.keyboardShortcut(",", modifiers: .command)
-		}
-
 		CommandGroup(replacing: .newItem) {
 			Button("New Window") {
 				MacTerminalWindowManager.shared.openLocalShellWindow()

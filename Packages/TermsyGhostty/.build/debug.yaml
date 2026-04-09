@@ -1,0 +1,78 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "PackageStructure": ["<PackageStructure>"]
+  "TermsyGhosttyCore-arm64-apple-macosx15.0-debug.module": ["<TermsyGhosttyCore-arm64-apple-macosx15.0-debug.module>"]
+  "TermsyGhosttyKit-arm64-apple-macosx15.0-debug.module": ["<TermsyGhosttyKit-arm64-apple-macosx15.0-debug.module>"]
+  "main": ["<TermsyGhosttyCore-arm64-apple-macosx15.0-debug.module>","<TermsyGhosttyKit-arm64-apple-macosx15.0-debug.module>"]
+  "test": ["<TermsyGhosttyCore-arm64-apple-macosx15.0-debug.module>","<TermsyGhosttyKit-arm64-apple-macosx15.0-debug.module>"]
+default: "main"
+nodes:
+  "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/BinaryTarget/libghostty.xcframework/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyCore/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyKit/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+commands:
+  "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyCore/Exports.swift","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyCore/GhosttyRuntime.swift","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyCore/HostManagedSurface.swift"]
+    outputs: ["/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/sources"]
+    description: "Write auxiliary file /Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/sources"
+
+  "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyKit.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyKit/TermsyGhosttyKit.swift"]
+    outputs: ["/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyKit.build/sources"]
+    description: "Write auxiliary file /Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyKit.build/sources"
+
+  "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/libghostty.a":
+    tool: copy-tool
+    inputs: ["/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/BinaryTarget/libghostty.xcframework/macos-arm64/libghostty.a"]
+    outputs: ["/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/libghostty.a"]
+    description: "Copying /Users/nakajima/apps/Termsy/Packages/TermsyGhostty/BinaryTarget/libghostty.xcframework/macos-arm64/libghostty.a"
+
+  "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+    outputs: ["/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+
+  "<TermsyGhosttyCore-arm64-apple-macosx15.0-debug.module>":
+    tool: phony
+    inputs: ["/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/Exports.swift.o","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/GhosttyRuntime.swift.o","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/HostManagedSurface.swift.o","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/Modules/TermsyGhosttyCore.swiftmodule"]
+    outputs: ["<TermsyGhosttyCore-arm64-apple-macosx15.0-debug.module>"]
+
+  "<TermsyGhosttyKit-arm64-apple-macosx15.0-debug.module>":
+    tool: phony
+    inputs: ["/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyKit.build/TermsyGhosttyKit.swift.o","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/Modules/TermsyGhosttyKit.swiftmodule"]
+    outputs: ["<TermsyGhosttyKit-arm64-apple-macosx15.0-debug.module>"]
+
+  "C.TermsyGhosttyCore-arm64-apple-macosx15.0-debug.module":
+    tool: shell
+    inputs: ["/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyCore/Exports.swift","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyCore/GhosttyRuntime.swift","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyCore/HostManagedSurface.swift","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/Modules/TermsyGhosttyKit.swiftmodule","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/libghostty.a","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/sources"]
+    outputs: ["/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/Exports.swift.o","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/GhosttyRuntime.swift.o","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/HostManagedSurface.swift.o","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/Modules/TermsyGhosttyCore.swiftmodule"]
+    description: "Compiling Swift Module 'TermsyGhosttyCore' (3 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","TermsyGhosttyCore","-emit-dependencies","-emit-module","-emit-module-path","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/Modules/TermsyGhosttyCore.swiftmodule","-output-file-map","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/sources","-I","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx13.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j16","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-I","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/BinaryTarget/libghostty.xcframework/macos-arm64/Headers","-Xcc","-I","-Xcc","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/BinaryTarget/libghostty.xcframework/macos-arm64/Headers","-module-cache-path","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-F","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug","-emit-objc-header","-emit-objc-header-path","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/include/TermsyGhosttyCore-Swift.h","-swift-version","6","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","termsyghostty"]
+
+  "C.TermsyGhosttyKit-arm64-apple-macosx15.0-debug.module":
+    tool: shell
+    inputs: ["/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyKit/TermsyGhosttyKit.swift","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/libghostty.a","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyKit.build/sources"]
+    outputs: ["/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyKit.build/TermsyGhosttyKit.swift.o","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/Modules/TermsyGhosttyKit.swiftmodule"]
+    description: "Compiling Swift Module 'TermsyGhosttyKit' (1 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","TermsyGhosttyKit","-emit-dependencies","-emit-module","-emit-module-path","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/Modules/TermsyGhosttyKit.swiftmodule","-output-file-map","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyKit.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyKit.build/sources","-I","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx13.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j16","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-I","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/BinaryTarget/libghostty.xcframework/macos-arm64/Headers","-Xcc","-I","-Xcc","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/BinaryTarget/libghostty.xcframework/macos-arm64/Headers","-module-cache-path","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-F","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug","-emit-objc-header","-emit-objc-header-path","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyKit.build/include/TermsyGhosttyKit-Swift.h","-swift-version","6","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","termsyghostty"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/BinaryTarget/libghostty.xcframework/","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyCore/","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyKit/","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Package.swift","/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+

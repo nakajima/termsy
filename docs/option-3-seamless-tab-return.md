@@ -1,6 +1,8 @@
 # Option 3 Investigation: Seamless Terminal Tab Return
 
-_Last updated: 2026-04-05_
+_Last updated: 2026-04-08_
+
+Status note: Termsy now uses the local `Packages/TermsyGhostty` package rather than the old remote `libghostty-spm` / `GhosttyTerminal` dependency. References below to the old wrapper path are historical and are only relevant where they describe the same underlying surface-centric API limits.
 
 See also: [`docs/vt-custom-renderer-architecture.md`](vt-custom-renderer-architecture.md) for a concrete architecture built on the public `libghostty-vt` API instead of `ghostty_surface_t`.
 
@@ -16,8 +18,8 @@ This document investigates a **true option 3** for Termsy: making leaving and re
   - stop destroying it on deselection
   - stop using transcript replay as the restoration mechanism
 - For a stricter, more general version of option 3 where a terminal can survive **without a bound `UIView` at all**, the blocker moves below Termsy:
-  - `libghostty-spm` does not expose detach/reattach or a separate terminal-core abstraction
-  - current public `libghostty` API also does not expose detach/reattach, headless preservation, or snapshot/restore of full terminal state
+  - the current Swift bridge layer does not expose detach/reattach or a separate terminal-core abstraction
+  - the public `libghostty` API also does not expose detach/reattach, headless preservation, or snapshot/restore of full terminal state
 - For **real iOS background suspension**, no purely local design can guarantee continuous SSH/terminal progress once the process is suspended. The realistic continuity boundary is:
   - **while the app remains resident**: preserve local live surfaces
   - **after suspension / disconnect**: recover via reconnect + remote session persistence (`tmux`)
@@ -152,7 +154,7 @@ The immediate bug is primarily caused by Termsy’s lifecycle choices:
 
 ### What Termsy can already do with the existing API
 
-With the current `GhosttyKit` C API Termsy can already:
+With the current embedded `libghostty` C API exposed through `TermsyGhosttyKit`, Termsy can already:
 
 - create one live surface per tab
 - keep it alive as long as its backing `UIView` stays alive
@@ -165,13 +167,13 @@ For **tab switching while the app is alive**, the main blocker is **Termsy’s c
 
 ---
 
-## 2. `libghostty-spm` / wrapper layer
+## 2. Swift bridge layer
 
-### Current wrapper capabilities
+### Current bridge capabilities
 
-The project is pinned to `libghostty-spm` in `Package.resolved`.
+Termsy now vendors `libghostty` through `Packages/TermsyGhostty`. The same surface-centric limits that mattered during the old remote-wrapper investigation still apply to the current bridge layer.
 
-From the public API and wrapper sources, the wrapper already exposes or can reach:
+From the public API and bridge code, the current integration already exposes or can reach:
 
 - `ghostty_surface_new(...)`
 - `ghostty_surface_free(...)`
@@ -181,9 +183,9 @@ From the public API and wrapper sources, the wrapper already exposes or can reac
 - `ghostty_surface_set_occlusion(...)`
 - `ghostty_surface_set_size(...)`
 
-The wrapper’s higher-level UIKit layer also clearly assumes a surface is created when attached to a window and freed when detached.
+The current UI bridge layers also assume a surface is created when attached to a platform view and freed when detached.
 
-### What the wrapper does **not** currently provide
+### What the bridge layer does **not** currently provide
 
 It does not provide an app-facing API for:
 
@@ -192,11 +194,11 @@ It does not provide an app-facing API for:
 - snapshotting/restoring full terminal state
 - separating terminal state ownership from surface ownership
 
-### Wrapper-level conclusion
+### Bridge-level conclusion
 
-The wrapper is not the reason Termsy cannot keep tabs seamless **today** if it keeps surfaces alive.
+The bridge layer is not the reason Termsy cannot keep tabs seamless **today** if it keeps surfaces alive.
 
-But the wrapper **is** a blocker if Termsy wants a more advanced design where a live terminal survives independently of a `UIView`.
+But the bridge layer **is** a blocker if Termsy wants a more advanced design where a live terminal survives independently of a `UIView`.
 
 ---
 
@@ -377,7 +379,7 @@ No public API currently allows:
 
 This cannot be achieved by Termsy alone. It would require at least:
 
-- new wrapper API
+- new bridge API
 - and most likely new `libghostty`/Ghostty embedding support
 
 ### Feasibility verdict
@@ -657,7 +659,7 @@ That is not a design flaw in Termsy; it is the realistic boundary for an SSH ter
 ### Where the blocker lives
 
 - The **current visible bug** is primarily a **Termsy architecture problem**.
-- The blocker for a stricter **UI-independent live terminal** lives in **wrapper + core Ghostty/libghostty API design**.
+- The blocker for a stricter **UI-independent live terminal** lives in **bridge + core Ghostty/libghostty API design**.
 
 ### What Termsy should do next
 

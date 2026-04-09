@@ -164,7 +164,6 @@ struct ConnectView: View {
 			return
 		}
 
-		SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "save session")
 		onConnect(session)
 		dismissConnectView()
 	}

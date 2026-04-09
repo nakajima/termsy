@@ -1,0 +1,26 @@
+{
+  "": {
+    "swift-dependencies": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/master.swiftdeps"
+  },
+  "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyCore/Exports.swift": {
+    "dependencies": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/Exports.d",
+    "object": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/Exports.swift.o",
+    "swiftmodule": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/Exports~partial.swiftmodule",
+    "swift-dependencies": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/Exports.swiftdeps",
+    "diagnostics": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/Exports.dia"
+  },
+  "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyCore/GhosttyRuntime.swift": {
+    "dependencies": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/GhosttyRuntime.d",
+    "object": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/GhosttyRuntime.swift.o",
+    "swiftmodule": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/GhosttyRuntime~partial.swiftmodule",
+    "swift-dependencies": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/GhosttyRuntime.swiftdeps",
+    "diagnostics": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/GhosttyRuntime.dia"
+  },
+  "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/TermsyGhosttyCore/HostManagedSurface.swift": {
+    "dependencies": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/HostManagedSurface.d",
+    "object": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/HostManagedSurface.swift.o",
+    "swiftmodule": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/HostManagedSurface~partial.swiftmodule",
+    "swift-dependencies": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/HostManagedSurface.swiftdeps",
+    "diagnostics": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/TermsyGhosttyCore.build/HostManagedSurface.dia"
+  }
+}

@@ -1,6 +1,8 @@
 # Termsy Architecture: VT Sessions + Custom Renderer
 
-_Last updated: 2026-04-05_
+_Last updated: 2026-04-08_
+
+Status note: this is an exploratory alternative architecture. The current app uses the local `TermsyGhostty` package and `ghostty_surface_t`-based embedding rather than a headless VT renderer.
 
 ## Executive summary
 
@@ -14,9 +16,9 @@ It answers the question:
 
 Under the public-API-only constraint, the recommended VT architecture is:
 
-1. **Each tab owns a headless `GhosttyTerminal`** as the source of truth.
+1. **Each tab owns a headless `ghostty_terminal`-backed core** as the source of truth.
 2. **Incoming SSH output always feeds that terminal**, whether or not the tab is visible.
-3. **The visible UI renders from `GhosttyRenderState`**, not from `ghostty_surface_t`.
+3. **The visible UI renders from `ghostty_render_state` snapshots**, not from `ghostty_surface_t`.
 4. **Hardware key, mouse, focus, and paste input are encoded using the public VT encoders/utilities** and sent to SSH.
 5. **Terminal effects** such as query replies, title changes, size reports, bell, XTVERSION, and device attributes are handled through the public terminal callback API.
 6. **Tab switching becomes trivial**: hidden tabs keep advancing state without any view attached.
@@ -28,9 +30,9 @@ This is the cleanest public-API VT design available today, but it also means:
 
 - Termsy **does not reuse the current Ghostty surface renderer/UI stack**
 - Termsy must build its own renderer on top of:
-  - `GhosttyTerminal`
-  - `GhosttyRenderState`
-  - `GhosttyFormatter`
+  - `ghostty_terminal`
+  - `ghostty_render_state`
+  - `ghostty_formatter`
 
 ---
 
@@ -114,7 +116,7 @@ Via `ghostty_terminal_set(...)` and effect callbacks:
 SSHConnection
     ↓ remote bytes
 VTTerminalCore (per tab)
-    owns GhosttyTerminal + GhosttyRenderState + encoders + effect bridge
+    owns ghostty_terminal + ghostty_render_state + encoders + effect bridge
     ↓ frame snapshots
 VTTerminalView (selected or visible tabs only)
     draws snapshot using Termsy renderer
@@ -146,9 +148,9 @@ Owns the real terminal session state for one tab.
 
 ### Owns
 
-- `GhosttyTerminal`
-- `GhosttyRenderState`
-- `GhosttyFormatter` instances or lazy formatter creation
+- `ghostty_terminal`
+- `ghostty_render_state`
+- `ghostty_formatter` instances or lazy formatter creation
 - key encoder
 - mouse encoder
 - effect bridge state

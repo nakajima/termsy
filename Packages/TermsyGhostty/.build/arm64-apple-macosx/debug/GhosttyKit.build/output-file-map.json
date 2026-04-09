@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/GhosttyKit.build/master.swiftdeps"
+  },
+  "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/Sources/GhosttyKit/GhosttyKit.swift": {
+    "dependencies": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/GhosttyKit.build/GhosttyKit.d",
+    "object": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/GhosttyKit.build/GhosttyKit.swift.o",
+    "swiftmodule": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/GhosttyKit.build/GhosttyKit~partial.swiftmodule",
+    "swift-dependencies": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/GhosttyKit.build/GhosttyKit.swiftdeps",
+    "diagnostics": "/Users/nakajima/apps/Termsy/Packages/TermsyGhostty/.build/arm64-apple-macosx/debug/GhosttyKit.build/GhosttyKit.dia"
+  }
+}

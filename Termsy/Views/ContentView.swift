@@ -75,7 +75,6 @@ struct ContentView: View {
 			switch phase {
 			case .active:
 				coordinator.appDidBecomeActive()
-				SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "app did become active")
 			case .inactive, .background:
 				coordinator.appWillResignActive()
 			@unknown default:
@@ -83,7 +82,6 @@ struct ContentView: View {
 			}
 		}
 		.task {
-			SessionRecordSync.scheduleSync(dbContext: dbContext, reason: "initial load")
 			guard !didAutoconnect else { return }
 			didAutoconnect = true
 

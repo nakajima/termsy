@@ -1,6 +1,6 @@
 #if os(macOS)
+import AppKit
 import Foundation
-import GhosttyTerminal
 import Observation
 
 @MainActor
@@ -13,21 +13,9 @@ final class MacTerminalTab: Identifiable {
 
 	let id = UUID()
 	let source: Source
-	let viewState: TerminalViewState
-	@ObservationIgnored
-	lazy var terminalSession = InMemoryTerminalSession(
-		write: { [weak self] data in
-			Task { @MainActor [weak self] in
-				self?.handleTerminalInput(data)
-			}
-		},
-		resize: { [weak self] viewport in
-			Task { @MainActor [weak self] in
-				self?.handleViewport(viewport)
-			}
-		}
-	)
+	@ObservationIgnored let terminalView: MacTerminalView
 
+	var reportedTitle = ""
 	var connectionError: String?
 	var isStarting = false
 	var hasStarted = false
@@ -38,17 +26,12 @@ final class MacTerminalTab: Identifiable {
 	@ObservationIgnored private var sshSession: MacSSHTerminalSession?
 	@ObservationIgnored private var acceptsTerminalOutput = true
 	@ObservationIgnored private var terminalDidFinish = false
+	@ObservationIgnored private static var didLogTerminalIOActivation = false
 
 	init(source: Source) {
 		self.source = source
-
-		let controller = TerminalController(
-			configSource: .generated(GhosttyConfigBuilder.buildConfigText(theme: TerminalTheme.current)),
-			theme: GhosttyTerminal.TerminalTheme()
-		)
-		self.viewState = TerminalViewState(controller: controller)
-		self.viewState.configuration = TerminalSurfaceOptions(backend: .inMemory(terminalSession))
-
+		self.terminalView = MacTerminalView(frame: NSRect(x: 0, y: 0, width: 0, height: 0))
+		configureTerminalView()
 		configureTransport()
 	}
 
@@ -66,14 +49,21 @@ final class MacTerminalTab: Identifiable {
 	}
 
 	var windowTitle: String {
-		let dynamicTitle = viewState.title.trimmingCharacters(in: .whitespacesAndNewlines)
+		let dynamicTitle = reportedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
 		return dynamicTitle.isEmpty ? title : dynamicTitle
 	}
 
+	func applyTheme(_ theme: AppTheme) {
+		terminalView.applyTheme(theme)
+	}
+
 	func reloadConfiguration(theme: TerminalTheme) {
-		viewState.controller.updateConfigSource(
-			.generated(GhosttyConfigBuilder.buildConfigText(theme: theme))
-		)
+		terminalView.applyTheme(theme.appTheme)
+		MacGhosttyApp.shared.reloadConfig(theme: theme)
+	}
+
+	func setDisplayActive(_ isActive: Bool) {
+		terminalView.setDisplayActive(isActive)
 	}
 
 	func startIfNeeded() async {
@@ -100,8 +90,22 @@ final class MacTerminalTab: Identifiable {
 
 	func close() {
 		acceptsTerminalOutput = false
+		terminalView.stop()
 		localShellSession?.stop()
 		sshSession?.stop()
+	}
+
+	private func configureTerminalView() {
+		terminalView.onWrite = { [weak self] data in
+			self?.handleTerminalInput(data)
+		}
+		terminalView.onResize = { [weak self] _, _ in
+			guard let self, let size = self.terminalView.currentTerminalSize() else { return }
+			self.handleViewport(size)
+		}
+		terminalView.onTitleChange = { [weak self] title in
+			self?.reportedTitle = title
+		}
 	}
 
 	private func configureTransport() {
@@ -136,22 +140,28 @@ final class MacTerminalTab: Identifiable {
 	}
 
 	private func handleTerminalInput(_ data: Data) {
+		if MacDebugLogging.isEnabled(
+			environmentKey: MacDebugLogging.terminalIOEnvironmentKey,
+			defaultsKey: MacDebugLogging.terminalIODefaultsKey
+		) {
+			if !Self.didLogTerminalIOActivation {
+				Self.didLogTerminalIOActivation = true
+				print(
+					"[TerminalIO] macOS terminal I/O logging enabled (env: \(MacDebugLogging.terminalIOEnvironmentKey)=1, defaults: \(MacDebugLogging.terminalIODefaultsKey)=true)"
+				)
+			}
+			print("[TerminalIO] host <- terminal \(MacDebugLogging.describe(data))")
+		}
 		localShellSession?.send(data)
 		sshSession?.write(data)
 	}
 
 	private func handleTerminalOutput(_ data: Data) {
 		guard acceptsTerminalOutput, !terminalDidFinish, !data.isEmpty else { return }
-		terminalSession.receive(data)
+		terminalView.feedData(data)
 	}
 
-	private func handleViewport(_ viewport: InMemoryTerminalViewport) {
-		let size = TerminalWindowSize(
-			columns: Int(max(viewport.columns, 1)),
-			rows: Int(max(viewport.rows, 1)),
-			pixelWidth: Int(viewport.widthPixels),
-			pixelHeight: Int(viewport.heightPixels)
-		)
+	private func handleViewport(_ size: TerminalWindowSize) {
 		currentTerminalSize = size
 		localShellSession?.updateTerminalSize(size)
 		sshSession?.resize(size)
@@ -189,7 +199,7 @@ final class MacTerminalTab: Identifiable {
 		guard !terminalDidFinish else { return }
 		terminalDidFinish = true
 		acceptsTerminalOutput = false
-		terminalSession.finish(exitCode: exitCode, runtimeMilliseconds: runtimeMilliseconds)
+		terminalView.processExited(code: exitCode, runtimeMs: runtimeMilliseconds)
 	}
 }
 

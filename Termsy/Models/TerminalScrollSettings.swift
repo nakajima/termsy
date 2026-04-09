@@ -5,7 +5,7 @@
 
 import CoreGraphics
 import Foundation
-import GhosttyKit
+import TermsyGhosttyKit
 
 enum TerminalScrollSettings {
 	enum InputKind {

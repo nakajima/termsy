@@ -18,7 +18,7 @@ final class MacTerminalWindowController: NSWindowController, NSWindowDelegate {
 		self.manager = manager
 		self.terminal = MacTerminalTab(source: source)
 
-		let window = NSWindow(
+		let window = TermsyTerminalWindow(
 			contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
 			styleMask: [.titled, .closable, .miniaturizable, .resizable],
 			backing: .buffered,
@@ -104,8 +104,19 @@ final class MacTerminalWindowController: NSWindowController, NSWindowDelegate {
 	func revealWindow() {
 		guard let window else { return }
 		window.tabGroup?.selectedWindow = window
-		window.makeKeyAndOrderFront(nil)
 		NSApp.activate(ignoringOtherApps: true)
+		window.makeKeyAndOrderFront(nil)
+		terminal.setDisplayActive(true)
+		requestTerminalFocus()
+	}
+
+	func windowDidBecomeKey(_ notification: Notification) {
+		terminal.setDisplayActive(true)
+		requestTerminalFocus()
+	}
+
+	func windowDidResignKey(_ notification: Notification) {
+		terminal.setDisplayActive(false)
 	}
 
 	func windowWillClose(_ notification: Notification) {
@@ -127,6 +138,27 @@ final class MacTerminalWindowController: NSWindowController, NSWindowDelegate {
 			}
 		)
 		.databaseContext(.readWrite { db.queue })
+	}
+
+	private func requestTerminalFocus(retryCount: Int = 6) {
+		guard let window, window.attachedSheet == nil else { return }
+		if focusTerminalView(in: window) {
+			return
+		}
+		guard retryCount > 0 else { return }
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+			self?.requestTerminalFocus(retryCount: retryCount - 1)
+		}
+	}
+
+	@discardableResult
+	private func focusTerminalView(in window: NSWindow) -> Bool {
+		let terminalView = terminal.terminalView
+		guard terminalView.window === window else { return false }
+		if window.firstResponder === terminalView {
+			return true
+		}
+		return window.makeFirstResponder(terminalView)
 	}
 }
 #endif

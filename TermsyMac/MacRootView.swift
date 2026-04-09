@@ -1,7 +1,6 @@
 #if os(macOS)
 import AppKit
 import GRDBQuery
-import GhosttyTerminal
 import SwiftUI
 
 struct MacRootView: View {
@@ -31,10 +30,9 @@ struct MacRootView: View {
 
 	var body: some View {
 		ZStack {
-			TerminalSurfaceView(context: terminal.viewState)
+			MacTerminalHostRepresentable(terminal: terminal)
 				.background(.clear)
-				.task(id: terminal.viewState.surfaceSize?.columns ?? 0) {
-					guard terminal.viewState.surfaceSize != nil else { return }
+				.task {
 					await terminal.startIfNeeded()
 				}
 
@@ -89,6 +87,8 @@ struct MacRootView: View {
 			isShowingConnectSheet = true
 		}
 		.onAppear {
+			terminal.applyTheme(theme)
+			terminal.reloadConfiguration(theme: currentTerminalTheme)
 			if !ensureBlurCompatibleOpacityIfNeeded() {
 				onWindowAppearanceChange()
 				onWindowTitleChange(terminal.windowTitle)
@@ -98,8 +98,8 @@ struct MacRootView: View {
 			onWindowAppearanceChange()
 			onWindowTitleChange(terminal.windowTitle)
 		}
-		.onChange(of: terminal.viewState.title) { _ in
-			onWindowTitleChange(terminal.windowTitle)
+		.onChange(of: terminal.windowTitle) { _, title in
+			onWindowTitleChange(title)
 		}
 		.onChange(of: selectedTheme) { _, _ in
 			onWindowAppearanceChange()
@@ -140,6 +140,33 @@ struct MacRootView: View {
 
 	private func reloadTerminalConfiguration() {
 		terminal.reloadConfiguration(theme: currentTerminalTheme)
+	}
+}
+
+private struct MacTerminalHostRepresentable: NSViewRepresentable {
+	let terminal: MacTerminalTab
+
+	func makeNSView(context: Context) -> MacTerminalHostView {
+		let view = MacTerminalHostView()
+		view.attach(terminal.terminalView)
+		return view
+	}
+
+	func updateNSView(_ nsView: MacTerminalHostView, context: Context) {
+		nsView.attach(terminal.terminalView)
+	}
+}
+
+private final class MacTerminalHostView: NSView {
+	func attach(_ terminalView: MacTerminalView) {
+		guard terminalView.superview !== self else {
+			terminalView.frame = bounds
+			return
+		}
+		terminalView.removeFromSuperview()
+		terminalView.frame = bounds
+		terminalView.autoresizingMask = [.width, .height]
+		addSubview(terminalView)
 	}
 }
 
