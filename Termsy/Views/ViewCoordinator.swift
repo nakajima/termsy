@@ -704,7 +704,12 @@ class TerminalTab: Identifiable {
 	}
 
 	func requestReconnect() {
+		logConnectionEvent("Reconnect requested")
 		onRequestReconnect?()
+	}
+
+	func noteConnectingOverlayWithoutActiveAttempt() {
+		logConnectionEvent("Connecting UI visible without an active connect attempt; retrying")
 	}
 
 	@discardableResult

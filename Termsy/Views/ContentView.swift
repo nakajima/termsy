@@ -8,6 +8,9 @@
 import GRDB
 import GRDBQuery
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct ContentView: View {
 	@Environment(ViewCoordinator.self) var coordinator
@@ -71,16 +74,34 @@ struct ContentView: View {
 			SettingsView()
 				.environment(coordinator)
 		}
+		#if os(macOS)
+		.onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+			coordinator.appDidBecomeActive()
+		}
+		.onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+			coordinator.appWillResignActive()
+		}
+		.task {
+			if NSApp.isActive {
+				coordinator.appDidBecomeActive()
+			} else {
+				coordinator.appWillResignActive()
+			}
+		}
+		#else
 		.onChange(of: scenePhase, initial: true) { _, phase in
 			switch phase {
 			case .active:
 				coordinator.appDidBecomeActive()
-			case .inactive, .background:
+			case .background:
 				coordinator.appWillResignActive()
+			case .inactive:
+				break
 			@unknown default:
 				break
 			}
 		}
+		#endif
 		.task {
 			guard !didAutoconnect else { return }
 			didAutoconnect = true
