@@ -74,13 +74,19 @@ enum Keychain {
 	}
 
 	nonisolated private static func readPassword(account: String) -> String? {
-		let query: [String: Any] = [
+		var query: [String: Any] = [
 			kSecClass as String: kSecClassGenericPassword,
 			kSecAttrService as String: service(),
 			kSecAttrAccount as String: account,
 			kSecReturnData as String: true,
 			kSecMatchLimit as String: kSecMatchLimitOne,
 		]
+		#if os(macOS)
+		// Avoid system keychain auth UI during automatic connection attempts.
+		// If the item requires user interaction, treat it as unavailable and
+		// fall back to the app's password prompt instead of stalling connect.
+		query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
+		#endif
 
 		var result: AnyObject?
 		let status = SecItemCopyMatching(query as CFDictionary, &result)

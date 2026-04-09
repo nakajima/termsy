@@ -11,6 +11,26 @@ import Testing
 
 struct TermsyTests {
 	@MainActor
+	@Test func resetTerminalViewPreservesDisplayActivity() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+		let oldView = tab.terminalView
+
+		tab.setDisplayActive(true)
+		tab.resetTerminalView()
+
+		#expect(tab.isDisplayActive)
+		#expect(tab.terminalView !== oldView)
+		#expect(tab.terminalView.isDisplayActive)
+	}
+
+	@MainActor
 	@Test func moveTabSelectionWrapsAcrossOpenTabs() {
 		let coordinator = ViewCoordinator()
 		let sessions = [

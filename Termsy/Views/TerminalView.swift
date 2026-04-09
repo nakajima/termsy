@@ -37,7 +37,7 @@ final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
 	private var smoothScrollTargetOffsetY: CGFloat = 0
 	private var smoothScrollPresentationOffsetY: CGFloat = 0
 	private var smoothScrollSuppressedUntilNextScrollGesture = false
-	private var isDisplayActive = false
+	private(set) var isDisplayActive = false
 	private var firstResponderTask: Task<Void, Never>?
 	private let momentumVelocityThreshold: CGFloat = 50
 	private let momentumDecelerationPerFrame: CGFloat = 0.92

@@ -242,6 +242,7 @@ class TerminalTab: Identifiable {
 
 	@ObservationIgnored private var wasConnectedWhenAppResignedActive = false
 	@ObservationIgnored private var shouldReconnectOnActivation = false
+	@ObservationIgnored private(set) var isDisplayActive = false
 	@ObservationIgnored private var backgroundReconnectGraceDeadline: Date?
 	@ObservationIgnored private var reconnectGraceTask: Task<Void, Never>?
 	@ObservationIgnored private var tmuxStartupTask: Task<Void, Never>?
@@ -362,9 +363,15 @@ class TerminalTab: Identifiable {
 
 	private func connectRemote() async {
 		guard let session else { return }
-		let keychainPassword = Keychain.password(for: session)
 		remoteConnectAttempt += 1
 		let attempt = remoteConnectAttempt
+		logConnectionEvent("Attempt \(attempt): checking saved credentials")
+		let keychainPassword = Keychain.password(for: session)
+		logConnectionEvent(
+			keychainPassword == nil
+				? "Attempt \(attempt): no saved password available"
+				: "Attempt \(attempt): using saved password from keychain"
+		)
 		let sshSession = resetSSHSessionForNewConnection(attempt: attempt)
 		logConnectionEvent("Attempt \(attempt): connecting to \(session.username)@\(session.hostname):\(session.port)")
 		do {
@@ -533,6 +540,7 @@ class TerminalTab: Identifiable {
 		terminalView.removeFromSuperview()
 		terminalView = TerminalView(frame: .zero)
 		configureTerminalView()
+		terminalView.setDisplayActive(isDisplayActive)
 	}
 
 	func applyTheme(_ theme: AppTheme) {
@@ -540,6 +548,7 @@ class TerminalTab: Identifiable {
 	}
 
 	func setDisplayActive(_ isActive: Bool) {
+		isDisplayActive = isActive
 		terminalView.setDisplayActive(isActive)
 	}
 
