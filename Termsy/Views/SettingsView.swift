@@ -117,7 +117,7 @@ struct SettingsView: View {
 								.monospacedDigit()
 						}
 
-						Slider(value: $touchScrollSensitivity, in: TerminalScrollSettings.minTouchSensitivity...TerminalScrollSettings.maxTouchSensitivity, step: 0.1)
+						Slider(value: $touchScrollSensitivity, in: TerminalScrollSettings.minTouchSensitivity ... TerminalScrollSettings.maxTouchSensitivity, step: 0.1)
 							.tint(theme.accent)
 					}
 					.listRowBackground(theme.cardBackground)
@@ -131,7 +131,7 @@ struct SettingsView: View {
 								.monospacedDigit()
 						}
 
-						Slider(value: $indirectScrollSensitivity, in: TerminalScrollSettings.minIndirectSensitivity...TerminalScrollSettings.maxIndirectSensitivity, step: 0.05)
+						Slider(value: $indirectScrollSensitivity, in: TerminalScrollSettings.minIndirectSensitivity ... TerminalScrollSettings.maxIndirectSensitivity, step: 0.05)
 							.tint(theme.accent)
 					}
 					.listRowBackground(theme.cardBackground)
@@ -195,9 +195,9 @@ struct SettingsView: View {
 			.termsyInlineNavigationTitle()
 			.toolbar {
 				#if !os(macOS)
-				ToolbarItem(placement: .termsyPrimaryAction) {
-					Button("Done") { dismiss() }
-				}
+					ToolbarItem(placement: .termsyPrimaryAction) {
+						Button("Done") { dismiss() }
+					}
 				#endif
 			}
 			.termsyNavigationBarAppearance(theme)

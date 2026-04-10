@@ -86,7 +86,7 @@ enum TerminalScrollSettings {
 		var value: Int32 = 0
 		switch inputKind {
 		case .touch, .indirectPointer:
-			value |= 1  // precision scrolling
+			value |= 1 // precision scrolling
 		}
 		value |= momentum.rawValue << 1
 		return value

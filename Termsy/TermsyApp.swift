@@ -8,7 +8,7 @@
 import GRDBQuery
 import SwiftUI
 #if os(macOS)
-import AppKit
+	import AppKit
 #endif
 
 @main
@@ -21,7 +21,7 @@ struct TermsyApp: App {
 	init() {
 		self.db = DB.path(URL.documentsDirectory.appending(path: "termsy.db").path)
 		#if os(macOS)
-		NSWindow.allowsAutomaticWindowTabbing = false
+			NSWindow.allowsAutomaticWindowTabbing = false
 		#endif
 	}
 
@@ -41,13 +41,13 @@ struct TermsyApp: App {
 	@SceneBuilder
 	var body: some Scene {
 		#if os(macOS)
-		Window("Termsy", id: "main") {
-			rootView
-		}
+			Window("Termsy", id: "main") {
+				rootView
+			}
 		#else
-		WindowGroup {
-			rootView
-		}
+			WindowGroup {
+				rootView
+			}
 		#endif
 	}
 }

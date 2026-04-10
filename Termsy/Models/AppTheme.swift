@@ -7,26 +7,31 @@ import SwiftUI
 
 struct AppTheme {
 	// MARK: - Base layers
+
 	let crust: Color
 	let mantle: Color
 	let base: Color
 
 	// MARK: - Surfaces
+
 	let surface0: Color
 	let surface1: Color
 	let surface2: Color
 
 	// MARK: - Overlays
+
 	let overlay0: Color
 	let overlay1: Color
 	let overlay2: Color
 
 	// MARK: - Text
+
 	let subtext0: Color
 	let subtext1: Color
 	let text: Color
 
 	// MARK: - Accents
+
 	let rosewater: Color
 	let flamingo: Color
 	let pink: Color
@@ -43,6 +48,7 @@ struct AppTheme {
 	let lavender: Color
 
 	// MARK: - Meta
+
 	let colorScheme: ColorScheme
 }
 
@@ -77,18 +83,18 @@ extension EnvironmentValues {
 }
 
 #if canImport(UIKit) || canImport(AppKit)
-extension AppTheme {
-	var backgroundUIColor: PlatformColor { PlatformColor(background) }
-	var elevatedBackgroundUIColor: PlatformColor { PlatformColor(elevatedBackground) }
-	var cardBackgroundUIColor: PlatformColor { PlatformColor(cardBackground) }
-	var selectedBackgroundUIColor: PlatformColor { PlatformColor(selectedBackground) }
-	var primaryTextUIColor: PlatformColor { PlatformColor(primaryText) }
-	var secondaryTextUIColor: PlatformColor { PlatformColor(secondaryText) }
-	var tertiaryTextUIColor: PlatformColor { PlatformColor(tertiaryText) }
-	var accentUIColor: PlatformColor { PlatformColor(accent) }
-	var warningUIColor: PlatformColor { PlatformColor(warning) }
-	var dividerUIColor: PlatformColor { PlatformColor(overlay0).withAlphaComponent(0.25) }
-}
+	extension AppTheme {
+		var backgroundUIColor: PlatformColor { PlatformColor(background) }
+		var elevatedBackgroundUIColor: PlatformColor { PlatformColor(elevatedBackground) }
+		var cardBackgroundUIColor: PlatformColor { PlatformColor(cardBackground) }
+		var selectedBackgroundUIColor: PlatformColor { PlatformColor(selectedBackground) }
+		var primaryTextUIColor: PlatformColor { PlatformColor(primaryText) }
+		var secondaryTextUIColor: PlatformColor { PlatformColor(secondaryText) }
+		var tertiaryTextUIColor: PlatformColor { PlatformColor(tertiaryText) }
+		var accentUIColor: PlatformColor { PlatformColor(accent) }
+		var warningUIColor: PlatformColor { PlatformColor(warning) }
+		var dividerUIColor: PlatformColor { PlatformColor(overlay0).withAlphaComponent(0.25) }
+	}
 #endif
 
 // MARK: - Color from hex

@@ -67,7 +67,7 @@ final class SSHTerminalSession {
 
 	func connect(host: String, port: Int, username: String, password: String?) async throws {
 		try await connection.connect(host: host, port: port, username: username, password: password)
-		try await connection.startShell(size: terminalSize)
+		try await connection.startShell(size: terminalSize, startupCommand: ShellTitleIntegration.remoteBootstrapCommand)
 	}
 
 	func disconnect() {

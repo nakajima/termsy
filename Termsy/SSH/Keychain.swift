@@ -7,13 +7,13 @@ import Foundation
 import Security
 
 enum Keychain {
-	nonisolated private static func service() -> String { "com.termsy.ssh" }
+	private nonisolated static func service() -> String { "com.termsy.ssh" }
 
-	nonisolated private static func account(for session: Session) -> String {
-		"session:\(session.uuid.lowercased())"
+	private nonisolated static func account(for session: Session) -> String {
+		"session:\(session.id ?? 0)"
 	}
 
-	nonisolated private static func legacyAccount(for session: Session) -> String {
+	private nonisolated static func legacyAccount(for session: Session) -> String {
 		let base = legacyAccountWithoutTmux(for: session)
 		guard let tmuxSessionName = session.tmuxSessionName?
 			.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -25,7 +25,7 @@ enum Keychain {
 		return "\(base)#\(tmuxSessionName)"
 	}
 
-	nonisolated private static func legacyAccountWithoutTmux(for session: Session) -> String {
+	private nonisolated static func legacyAccountWithoutTmux(for session: Session) -> String {
 		"\(session.username)@\(session.hostname):\(session.port)"
 	}
 
@@ -73,7 +73,7 @@ enum Keychain {
 		removePassword(for: source)
 	}
 
-	nonisolated private static func readPassword(account: String) -> String? {
+	private nonisolated static func readPassword(account: String) -> String? {
 		var query: [String: Any] = [
 			kSecClass as String: kSecClassGenericPassword,
 			kSecAttrService as String: service(),
@@ -82,10 +82,10 @@ enum Keychain {
 			kSecMatchLimit as String: kSecMatchLimitOne,
 		]
 		#if os(macOS)
-		// Avoid system keychain auth UI during automatic connection attempts.
-		// If the item requires user interaction, treat it as unavailable and
-		// fall back to the app's password prompt instead of stalling connect.
-		query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
+			// Avoid system keychain auth UI during automatic connection attempts.
+			// If the item requires user interaction, treat it as unavailable and
+			// fall back to the app's password prompt instead of stalling connect.
+			query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
 		#endif
 
 		var result: AnyObject?
@@ -94,7 +94,7 @@ enum Keychain {
 		return String(data: data, encoding: .utf8)
 	}
 
-	nonisolated private static func upsertPassword(_ password: String, account: String) {
+	private nonisolated static func upsertPassword(_ password: String, account: String) {
 		let data = Data(password.utf8)
 		let query: [String: Any] = [
 			kSecClass as String: kSecClassGenericPassword,
@@ -113,7 +113,7 @@ enum Keychain {
 		}
 	}
 
-	nonisolated private static func removePassword(account: String) {
+	private nonisolated static func removePassword(account: String) {
 		let query: [String: Any] = [
 			kSecClass as String: kSecClassGenericPassword,
 			kSecAttrService as String: service(),

@@ -6,6 +6,8 @@
 //  UIKit-based tab bar with liquid glass pills.
 //
 
+import GRDB
+import GRDBQuery
 import SwiftUI
 import UIKit
 
@@ -13,13 +15,17 @@ import UIKit
 
 struct TabBarRepresentable: UIViewRepresentable {
 	@Environment(ViewCoordinator.self) var coordinator
+	@Environment(\.databaseContext) private var dbContext
 	@Environment(\.appTheme) private var theme
 
-	func makeUIView(context: Context) -> TabBarCollectionView {
+	func makeUIView(context _: Context) -> TabBarCollectionView {
 		let view = TabBarCollectionView()
 		view.onSelectTab = { [coordinator] id in coordinator.selectTab(id) }
 		view.onCloseTab = { [coordinator] id in coordinator.closeTab(id) }
 		view.onCloseOtherTabs = { [coordinator] id in coordinator.closeOtherTabs(id) }
+		view.onRenameTab = { [coordinator, dbContext] id, title in
+			persistRename(for: id, title: title, coordinator: coordinator, dbContext: dbContext)
+		}
 		view.onReorderTabs = { [coordinator] ids in coordinator.reorderTabs(ids) }
 		view.onAddTab = { [coordinator] in coordinator.openNewTabUI() }
 		view.onSettings = { [coordinator] in coordinator.openSettings() }
@@ -28,15 +34,37 @@ struct TabBarRepresentable: UIViewRepresentable {
 		return view
 	}
 
-	func updateUIView(_ view: TabBarCollectionView, context: Context) {
+	func updateUIView(_ view: TabBarCollectionView, context _: Context) {
 		view.onSelectTab = { [coordinator] id in coordinator.selectTab(id) }
 		view.onCloseTab = { [coordinator] id in coordinator.closeTab(id) }
 		view.onCloseOtherTabs = { [coordinator] id in coordinator.closeOtherTabs(id) }
+		view.onRenameTab = { [coordinator, dbContext] id, title in
+			persistRename(for: id, title: title, coordinator: coordinator, dbContext: dbContext)
+		}
 		view.onReorderTabs = { [coordinator] ids in coordinator.reorderTabs(ids) }
 		view.onAddTab = { [coordinator] in coordinator.openNewTabUI() }
 		view.onSettings = { [coordinator] in coordinator.openSettings() }
 		view.applyTheme(theme)
 		view.update(tabs: coordinator.tabs, selectedID: coordinator.selectedTabID)
+	}
+
+	private func persistRename(for id: UUID, title: String?, coordinator: ViewCoordinator, dbContext: DatabaseContext) {
+		guard let tab = coordinator.tabs.first(where: { $0.id == id }) else { return }
+		coordinator.renameTab(id, to: title)
+
+		guard var session = tab.session else { return }
+		do {
+			try dbContext.writer.write { db in
+				if session.id == nil {
+					try session.save(db)
+				} else {
+					try session.update(db)
+				}
+			}
+			tab.session = session
+		} catch {
+			print("[DB] failed to persist customTitle for session \(session.id.map(String.init) ?? "new"): \(error)")
+		}
 	}
 }
 
@@ -45,6 +73,8 @@ struct TabBarRepresentable: UIViewRepresentable {
 nonisolated struct TabBarItem: Hashable, Sendable {
 	let id: UUID
 	let title: String
+	let customTitle: String?
+	let automaticTitle: String
 	let isConnected: Bool
 	let hasError: Bool
 }
@@ -60,6 +90,7 @@ final class TabBarCollectionView: UIView {
 	var onSelectTab: ((UUID) -> Void)?
 	var onCloseTab: ((UUID) -> Void)?
 	var onCloseOtherTabs: ((UUID) -> Void)?
+	var onRenameTab: ((UUID, String?) -> Void)?
 	var onReorderTabs: (([UUID]) -> Void)?
 	var onAddTab: (() -> Void)?
 	var onSettings: (() -> Void)?
@@ -175,7 +206,14 @@ final class TabBarCollectionView: UIView {
 		backgroundColor = theme.backgroundUIColor
 
 		let newItems = tabs.map { tab in
-			TabBarItem(id: tab.id, title: tab.displayTitle, isConnected: tab.isConnected, hasError: tab.connectionError != nil)
+			TabBarItem(
+				id: tab.id,
+				title: tab.displayTitle,
+				customTitle: tab.customTitle,
+				automaticTitle: tab.automaticTitle,
+				isConnected: tab.isConnected,
+				hasError: tab.connectionError != nil
+			)
 		}
 
 		let changed = newItems != items
@@ -207,6 +245,54 @@ final class TabBarCollectionView: UIView {
 		super.layoutSubviews()
 		collectionView.collectionViewLayout.invalidateLayout()
 	}
+
+	private func presentRenameAlert(for item: TabBarItem) {
+		DispatchQueue.main.async { [weak self] in
+			guard let self, let presenter = self.presentingViewController else { return }
+
+			let alert = UIAlertController(
+				title: "Rename Tab",
+				message: "Leave blank to use the automatic title.",
+				preferredStyle: .alert
+			)
+			alert.addTextField { textField in
+				textField.text = item.customTitle ?? ""
+				textField.placeholder = item.automaticTitle
+				textField.clearButtonMode = .whileEditing
+				textField.returnKeyType = .done
+			}
+
+			alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+			alert.addAction(UIAlertAction(title: "Use Automatic Title", style: .default) { [weak self] _ in
+				self?.onRenameTab?(item.id, nil)
+			})
+
+			let save = UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+				self?.onRenameTab?(item.id, alert?.textFields?.first?.text)
+			}
+			alert.addAction(save)
+			alert.preferredAction = save
+			presenter.present(alert, animated: true)
+		}
+	}
+
+	private var presentingViewController: UIViewController? {
+		if let responder = sequence(first: self as UIResponder?, next: { $0?.next }).first(where: { $0 is UIViewController }) as? UIViewController {
+			return topPresentedViewController(startingAt: responder)
+		}
+		if let rootViewController = window?.rootViewController {
+			return topPresentedViewController(startingAt: rootViewController)
+		}
+		return nil
+	}
+
+	private func topPresentedViewController(startingAt controller: UIViewController) -> UIViewController {
+		var current = controller
+		while let presented = current.presentedViewController {
+			current = presented
+		}
+		return current
+	}
 }
 
 // MARK: - Flow Layout Delegate
@@ -232,10 +318,13 @@ extension TabBarCollectionView: UICollectionViewDelegateFlowLayout {
 		guard let indexPath = indexPaths.first, indexPath.item < items.count else { return nil }
 		let item = items[indexPath.item]
 		return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+			let rename = UIAction(title: "Rename Tab", image: UIImage(systemName: "pencil")) { _ in
+				self?.presentRenameAlert(for: item)
+			}
 			let close = UIAction(title: "Close Tab", image: UIImage(systemName: "xmark")) { _ in
 				self?.onCloseTab?(item.id)
 			}
-			var actions: [UIMenuElement] = [close]
+			var actions: [UIMenuElement] = [rename, close]
 			if (self?.items.count ?? 0) > 1 {
 				let closeOthers = UIAction(title: "Close Other Tabs", image: UIImage(systemName: "xmark.circle")) { _ in
 					self?.onCloseOtherTabs?(item.id)

@@ -2,8 +2,8 @@
 
 import AppKit
 import CoreGraphics
-import ImageIO
 import Foundation
+import ImageIO
 
 struct Configuration {
 	let sourcePNG: URL
@@ -23,10 +23,10 @@ enum ScriptError: LocalizedError {
 	var errorDescription: String? {
 		switch self {
 		case let .usage(message),
-			 let .invalidSource(message),
-			 let .missingSource(message),
-			 let .invalidInset(message),
-			 let .imageReadFailed(message):
+		     let .invalidSource(message),
+		     let .missingSource(message),
+		     let .invalidInset(message),
+		     let .imageReadFailed(message):
 			return message
 		case let .invalidDimensions(width, height):
 			return "Source image must be exactly 1024x1024 pixels. Got \(width)x\(height)."
@@ -159,7 +159,7 @@ private let legacyVariants: [(filename: String, size: Int)] = [
 	("icon_512x512@2x.png", 1024),
 ]
 
-struct UpdateMacOSAppIconScript {
+enum UpdateMacOSAppIconScript {
 	static func parseArguments(_ arguments: [String]) throws -> Configuration {
 		let usage = """
 		Usage:
@@ -255,7 +255,8 @@ struct UpdateMacOSAppIconScript {
 			.appendingPathComponent("Contents.json")
 
 		guard let imageSource = CGImageSourceCreateWithURL(configuration.sourcePNG as CFURL, nil),
-		      let sourceImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+		      let sourceImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
+		else {
 			throw ScriptError.imageReadFailed("Failed to read PNG: \(configuration.sourcePNG.path)")
 		}
 

@@ -14,9 +14,11 @@ class ViewCoordinator {
 	var isShowingConnectView = false {
 		didSet { refreshDisplayActivity() }
 	}
+
 	var isShowingSessionPicker = false {
 		didSet { refreshDisplayActivity() }
 	}
+
 	var isShowingSettings = false {
 		didSet { refreshDisplayActivity() }
 	}
@@ -42,9 +44,9 @@ class ViewCoordinator {
 	}
 
 	#if os(macOS)
-	func openLocalShellTab(profile: LocalShellProfile = .default) {
-		open(tab: TerminalTab(localShellProfile: profile))
-	}
+		func openLocalShellTab(profile: LocalShellProfile = .default) {
+			open(tab: TerminalTab(localShellProfile: profile))
+		}
 	#endif
 
 	private func open(tab: TerminalTab) {
@@ -141,7 +143,8 @@ class ViewCoordinator {
 		selectedTabID = id
 
 		if let previousID, previousID != id,
-		   let prevTab = tabs.first(where: { $0.id == previousID }) {
+		   let prevTab = tabs.first(where: { $0.id == previousID })
+		{
 			prevTab.enterBackground()
 		}
 
@@ -197,6 +200,11 @@ class ViewCoordinator {
 		if let id { selectTab(id) }
 	}
 
+	func renameTab(_ id: UUID?, to title: String?) {
+		guard let id, let tab = tabs.first(where: { $0.id == id }) else { return }
+		tab.rename(to: title)
+	}
+
 	func moveTab(from source: IndexSet, to destination: Int) {
 		tabs.move(fromOffsets: source, toOffset: destination)
 	}
@@ -226,7 +234,7 @@ class TerminalTab: Identifiable {
 	var session: Session?
 	var sshSession = SSHTerminalSession()
 	#if os(macOS)
-	private let localShellSession: LocalShellSession?
+		private let localShellSession: LocalShellSession?
 	#endif
 	var terminalView: TerminalView
 	var isConnected = false
@@ -257,9 +265,10 @@ class TerminalTab: Identifiable {
 	init(session: Session) {
 		self.endpoint = .remote
 		self.session = session
+		self.customTitle = Self.normalizedTabTitle(session.customTitle)
 		self.terminalView = TerminalView(frame: .zero)
 		#if os(macOS)
-		self.localShellSession = nil
+			self.localShellSession = nil
 		#endif
 
 		configureTerminalView()
@@ -267,23 +276,25 @@ class TerminalTab: Identifiable {
 	}
 
 	#if os(macOS)
-	init(localShellProfile: LocalShellProfile = .default) {
-		self.endpoint = .localShell(localShellProfile)
-		self.session = nil
-		self.terminalView = TerminalView(frame: .zero)
-		self.localShellSession = LocalShellSession(profile: localShellProfile)
+		init(localShellProfile: LocalShellProfile = .default) {
+			self.endpoint = .localShell(localShellProfile)
+			self.session = nil
+			self.terminalView = TerminalView(frame: .zero)
+			self.localShellSession = LocalShellSession(profile: localShellProfile)
 
-		configureTerminalView()
-		localShellSession?.onRemoteOutput = { [weak self] data in
-			self?.terminalView.feedData(data)
+			configureTerminalView()
+			localShellSession?.onRemoteOutput = { [weak self] data in
+				self?.terminalView.feedData(data)
+			}
+			localShellSession?.onClose = { [weak self] reason in
+				self?.handleLocalShellClose(reason)
+			}
 		}
-		localShellSession?.onClose = { [weak self] reason in
-			self?.handleLocalShellClose(reason)
-		}
-	}
 	#endif
 
-	var displayTitle: String {
+	private(set) var customTitle: String?
+
+	var automaticTitle: String {
 		let dynamicTitle = reportedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
 		if !dynamicTitle.isEmpty {
 			return dynamicTitle
@@ -294,13 +305,18 @@ class TerminalTab: Identifiable {
 			guard let session else { return "Session" }
 			let baseTitle = "\(session.username)@\(session.hostname)"
 			if let tmuxName = session.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
-			   !tmuxName.isEmpty {
+			   !tmuxName.isEmpty
+			{
 				return "\(tmuxName) • \(baseTitle)"
 			}
 			return baseTitle
 		case let .localShell(profile):
 			return profile.titleFallback
 		}
+	}
+
+	var displayTitle: String {
+		customTitle ?? automaticTitle
 	}
 
 	var detailText: String {
@@ -341,9 +357,9 @@ class TerminalTab: Identifiable {
 			sshSession.connection.isActive
 		case .localShell:
 			#if os(macOS)
-			localShellSession?.isActive ?? false
+				localShellSession?.isActive ?? false
 			#else
-			false
+				false
 			#endif
 		}
 	}
@@ -365,7 +381,7 @@ class TerminalTab: Identifiable {
 			await connectRemote()
 		case .localShell:
 			#if os(macOS)
-			await connectLocalShell()
+				await connectLocalShell()
 			#endif
 		}
 	}
@@ -415,17 +431,17 @@ class TerminalTab: Identifiable {
 	}
 
 	#if os(macOS)
-	private func connectLocalShell() async {
-		guard let localShellSession else { return }
-		do {
-			try localShellSession.start()
-			isConnected = true
-			clearAppInactiveState()
-		} catch {
-			print("[LocalShell] failed to start: \(error)")
-			connectionError = error.localizedDescription
+		private func connectLocalShell() async {
+			guard let localShellSession else { return }
+			do {
+				try localShellSession.start()
+				isConnected = true
+				clearAppInactiveState()
+			} catch {
+				print("[LocalShell] failed to start: \(error)")
+				connectionError = error.localizedDescription
+			}
 		}
-	}
 	#endif
 
 	private func startTmuxIfNeeded(using sshSession: SSHTerminalSession, attempt: Int) {
@@ -532,7 +548,7 @@ class TerminalTab: Identifiable {
 			sshSession.disconnect()
 		case .localShell:
 			#if os(macOS)
-			localShellSession?.disconnect()
+				localShellSession?.disconnect()
 			#endif
 		}
 	}
@@ -643,7 +659,7 @@ class TerminalTab: Identifiable {
 			sshSession.updateTerminalSize(size)
 		case .localShell:
 			#if os(macOS)
-			localShellSession?.updateTerminalSize(size)
+				localShellSession?.updateTerminalSize(size)
 			#endif
 		}
 	}
@@ -682,7 +698,7 @@ class TerminalTab: Identifiable {
 				self.sshSession.connection.send(data)
 			case .localShell:
 				#if os(macOS)
-				self.localShellSession?.send(data)
+					self.localShellSession?.send(data)
 				#endif
 			}
 		}
@@ -693,6 +709,18 @@ class TerminalTab: Identifiable {
 		terminalView.onTitleChange = { [weak self] title in
 			self?.reportedTitle = title
 		}
+	}
+
+	func rename(to title: String?) {
+		let normalizedTitle = Self.normalizedTabTitle(title)
+		customTitle = normalizedTitle
+		session?.customTitle = normalizedTitle
+	}
+
+	private static func normalizedTabTitle(_ title: String?) -> String? {
+		guard let title else { return nil }
+		let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+		return trimmed.isEmpty ? nil : trimmed
 	}
 
 	func requestClose() {
@@ -763,22 +791,22 @@ class TerminalTab: Identifiable {
 	}
 
 	#if os(macOS)
-	private func handleLocalShellClose(_ reason: LocalShellSession.CloseReason) {
-		isConnected = false
-		needsPassword = false
-		isRestoring = false
+		private func handleLocalShellClose(_ reason: LocalShellSession.CloseReason) {
+			isConnected = false
+			needsPassword = false
+			isRestoring = false
 
-		switch reason {
-		case .localDisconnect:
-			clearAppInactiveState()
-		case .cleanExit:
-			clearAppInactiveState()
-			terminalView.processExited()
-			onRequestClose?()
-		case let .error(message):
-			clearAppInactiveState()
-			connectionError = message
+			switch reason {
+			case .localDisconnect:
+				clearAppInactiveState()
+			case .cleanExit:
+				clearAppInactiveState()
+				terminalView.processExited()
+				onRequestClose?()
+			case let .error(message):
+				clearAppInactiveState()
+				connectionError = message
+			}
 		}
-	}
 	#endif
 }

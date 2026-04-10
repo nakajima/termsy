@@ -9,7 +9,7 @@ import GRDB
 import GRDBQuery
 import SwiftUI
 #if os(macOS)
-import AppKit
+	import AppKit
 #endif
 
 struct ContentView: View {
@@ -90,30 +90,30 @@ struct ContentView: View {
 		}
 		#else
 		.onChange(of: scenePhase, initial: true) { _, phase in
-			switch phase {
-			case .active:
-				coordinator.appDidBecomeActive()
-			case .background:
-				coordinator.appWillResignActive()
-			case .inactive:
-				break
-			@unknown default:
-				break
-			}
-		}
+					switch phase {
+					case .active:
+						coordinator.appDidBecomeActive()
+					case .background:
+						coordinator.appWillResignActive()
+					case .inactive:
+						break
+					@unknown default:
+						break
+					}
+				}
 		#endif
-		.task {
-			guard !didAutoconnect else { return }
-			didAutoconnect = true
+				.task {
+					guard !didAutoconnect else { return }
+					didAutoconnect = true
 
-			let sessions = try? dbContext.reader.read { db in
-				try Session.autoconnectingOrdered().fetchAll(db)
-			}
+					let sessions = try? dbContext.reader.read { db in
+						try Session.autoconnectingOrdered().fetchAll(db)
+					}
 
-			for session in sessions ?? [] {
-				coordinator.openTab(for: session)
-			}
-		}
+					for session in sessions ?? [] {
+						coordinator.openTab(for: session)
+					}
+				}
 	}
 }
 
@@ -130,11 +130,11 @@ private struct TerminalContainer: View {
 				TerminalHostRepresentable(tab: tab) { session in
 					markSessionConnected(session)
 				}
-					.ignoresSafeArea(.container, edges: .bottom)
-					.opacity(isSelected ? 1 : 0)
-					.allowsHitTesting(isSelected)
-					.accessibilityHidden(!isSelected)
-					.zIndex(isSelected ? 1 : 0)
+				.ignoresSafeArea(.container, edges: .bottom)
+				.opacity(isSelected ? 1 : 0)
+				.allowsHitTesting(isSelected)
+				.accessibilityHidden(!isSelected)
+				.zIndex(isSelected ? 1 : 0)
 			}
 		}
 		.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -158,7 +158,14 @@ private struct TabKeyboardShortcuts: View {
 	@Environment(ViewCoordinator.self) private var coordinator
 
 	private var shortcutsEnabled: Bool {
-		!coordinator.isPresentingAuxiliaryUI && !(coordinator.selectedTab?.terminalView.isFirstResponder ?? false)
+		if coordinator.isPresentingAuxiliaryUI {
+			return false
+		}
+		#if os(macOS)
+			return true
+		#else
+			return !(coordinator.selectedTab?.terminalView.isFirstResponder ?? false)
+		#endif
 	}
 
 	var body: some View {

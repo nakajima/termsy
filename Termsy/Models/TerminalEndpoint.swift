@@ -9,7 +9,8 @@ struct LocalShellProfile: Hashable, Sendable {
 	static var defaultShellPath: String {
 		if let pw = getpwuid(getuid()),
 		   let shell = pw.pointee.pw_shell,
-		   shell.pointee != 0 {
+		   shell.pointee != 0
+		{
 			return String(cString: shell)
 		}
 		return ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"

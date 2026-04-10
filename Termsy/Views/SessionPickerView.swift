@@ -29,9 +29,9 @@ struct SessionPickerView: View {
 	private var pickerItemIDs: [PickerItemID] {
 		let sessionItems = sessions.map { PickerItemID.session($0.uuid) }
 		#if os(macOS)
-		return [.localShell] + sessionItems + [.newSession]
+			return [.localShell] + sessionItems + [.newSession]
 		#else
-		return sessionItems + [.newSession]
+			return sessionItems + [.newSession]
 		#endif
 	}
 
@@ -40,9 +40,9 @@ struct SessionPickerView: View {
 			ScrollViewReader { proxy in
 				List {
 					#if os(macOS)
-					Section("Local") {
-						localShellRow
-					}
+						Section("Local") {
+							localShellRow
+						}
 					#endif
 
 					if !sessions.isEmpty {
@@ -134,26 +134,26 @@ struct SessionPickerView: View {
 	}
 
 	#if os(macOS)
-	private var localShellRow: some View {
-		let isSelected = selectedItemID == .localShell
+		private var localShellRow: some View {
+			let isSelected = selectedItemID == .localShell
 
-		return Button {
-			openLocalShell()
-		} label: {
-			Label("Local Shell", systemImage: "terminal")
-				.font(.body)
-				.foregroundStyle(isSelected ? theme.primaryText : theme.accent)
-				.frame(maxWidth: .infinity, alignment: .leading)
-				.contentShape(Rectangle())
+			return Button {
+				openLocalShell()
+			} label: {
+				Label("Local Shell", systemImage: "terminal")
+					.font(.body)
+					.foregroundStyle(isSelected ? theme.primaryText : theme.accent)
+					.frame(maxWidth: .infinity, alignment: .leading)
+					.contentShape(Rectangle())
+			}
+			.buttonStyle(.plain)
+			.keyboardShortcut("l", modifiers: .command)
+			.listRowBackground(isSelected ? theme.selectedBackground : theme.cardBackground)
+			.id(PickerItemID.localShell)
+			.onTapGesture {
+				selectedItemID = .localShell
+			}
 		}
-		.buttonStyle(.plain)
-		.keyboardShortcut("l", modifiers: .command)
-		.listRowBackground(isSelected ? theme.selectedBackground : theme.cardBackground)
-		.id(PickerItemID.localShell)
-		.onTapGesture {
-			selectedItemID = .localShell
-		}
-	}
 	#endif
 
 	private var newSessionRow: some View {
@@ -211,9 +211,9 @@ struct SessionPickerView: View {
 		switch selectedItemID {
 		case .localShell:
 			#if os(macOS)
-			openLocalShell()
+				openLocalShell()
 			#else
-			break
+				break
 			#endif
 		case let .session(uuid):
 			guard let session = sessions.first(where: { $0.uuid == uuid }) else {
@@ -233,11 +233,11 @@ struct SessionPickerView: View {
 	}
 
 	#if os(macOS)
-	private func openLocalShell() {
-		selectedItemID = .localShell
-		coordinator.isShowingSessionPicker = false
-		coordinator.openLocalShellTab()
-	}
+		private func openLocalShell() {
+			selectedItemID = .localShell
+			coordinator.isShowingSessionPicker = false
+			coordinator.openLocalShellTab()
+		}
 	#endif
 
 	private func openNewSession() {
@@ -289,96 +289,96 @@ struct SessionPickerView: View {
 }
 
 #if canImport(UIKit)
-private struct SessionPickerKeyboardHandler: UIViewRepresentable {
-	let onMoveSelection: (Int) -> Void
-	let onMovePage: (Int) -> Void
-	let onMoveToBoundary: (Bool) -> Void
-	let onActivateSelection: () -> Void
-	let onClose: () -> Void
+	private struct SessionPickerKeyboardHandler: UIViewRepresentable {
+		let onMoveSelection: (Int) -> Void
+		let onMovePage: (Int) -> Void
+		let onMoveToBoundary: (Bool) -> Void
+		let onActivateSelection: () -> Void
+		let onClose: () -> Void
 
-	func makeUIView(context: Context) -> KeyCommandView {
-		let view = KeyCommandView()
-		view.backgroundColor = .clear
-		return view
-	}
-
-	func updateUIView(_ uiView: KeyCommandView, context: Context) {
-		uiView.onMoveSelection = onMoveSelection
-		uiView.onMovePage = onMovePage
-		uiView.onMoveToBoundary = onMoveToBoundary
-		uiView.onActivateSelection = onActivateSelection
-		uiView.onClose = onClose
-		uiView.activateIfPossible()
-	}
-
-	final class KeyCommandView: UIView {
-		var onMoveSelection: ((Int) -> Void)?
-		var onMovePage: ((Int) -> Void)?
-		var onMoveToBoundary: ((Bool) -> Void)?
-		var onActivateSelection: (() -> Void)?
-		var onClose: (() -> Void)?
-
-		override var canBecomeFirstResponder: Bool { true }
-
-		override var keyCommands: [UIKeyCommand]? {
-			[
-				command(input: UIKeyCommand.inputUpArrow, modifiers: [], action: #selector(moveUp), title: "Move Selection Up"),
-				command(input: UIKeyCommand.inputDownArrow, modifiers: [], action: #selector(moveDown), title: "Move Selection Down"),
-				command(input: "p", modifiers: .control, action: #selector(moveUp), title: "Move Selection Up"),
-				command(input: "n", modifiers: .control, action: #selector(moveDown), title: "Move Selection Down"),
-				command(input: UIKeyCommand.inputPageUp, modifiers: [], action: #selector(movePageUp), title: "Page Up"),
-				command(input: UIKeyCommand.inputPageDown, modifiers: [], action: #selector(movePageDown), title: "Page Down"),
-				command(input: UIKeyCommand.inputHome, modifiers: [], action: #selector(moveToStart), title: "Move to First Item"),
-				command(input: UIKeyCommand.inputEnd, modifiers: [], action: #selector(moveToEnd), title: "Move to Last Item"),
-				command(input: UIKeyCommand.inputUpArrow, modifiers: .command, action: #selector(moveToStart), title: "Move to First Item"),
-				command(input: UIKeyCommand.inputDownArrow, modifiers: .command, action: #selector(moveToEnd), title: "Move to Last Item"),
-				command(input: "\r", modifiers: [], action: #selector(activateSelection), title: "Open Selection"),
-				command(input: UIKeyCommand.inputEscape, modifiers: [], action: #selector(close), title: "Close"),
-			]
+		func makeUIView(context _: Context) -> KeyCommandView {
+			let view = KeyCommandView()
+			view.backgroundColor = .clear
+			return view
 		}
 
-		private func command(input: String, modifiers: UIKeyModifierFlags, action: Selector, title: String) -> UIKeyCommand {
-			let command = UIKeyCommand(input: input, modifierFlags: modifiers, action: action)
-			command.wantsPriorityOverSystemBehavior = true
-			command.discoverabilityTitle = title
-			return command
+		func updateUIView(_ uiView: KeyCommandView, context _: Context) {
+			uiView.onMoveSelection = onMoveSelection
+			uiView.onMovePage = onMovePage
+			uiView.onMoveToBoundary = onMoveToBoundary
+			uiView.onActivateSelection = onActivateSelection
+			uiView.onClose = onClose
+			uiView.activateIfPossible()
 		}
 
-		override func didMoveToWindow() {
-			super.didMoveToWindow()
-			activateIfPossible()
-		}
+		final class KeyCommandView: UIView {
+			var onMoveSelection: ((Int) -> Void)?
+			var onMovePage: ((Int) -> Void)?
+			var onMoveToBoundary: ((Bool) -> Void)?
+			var onActivateSelection: (() -> Void)?
+			var onClose: (() -> Void)?
 
-		func activateIfPossible() {
-			guard window != nil else { return }
-			DispatchQueue.main.async { [weak self] in
-				guard let self, self.window != nil else { return }
-				_ = self.becomeFirstResponder()
+			override var canBecomeFirstResponder: Bool { true }
+
+			override var keyCommands: [UIKeyCommand]? {
+				[
+					command(input: UIKeyCommand.inputUpArrow, modifiers: [], action: #selector(moveUp), title: "Move Selection Up"),
+					command(input: UIKeyCommand.inputDownArrow, modifiers: [], action: #selector(moveDown), title: "Move Selection Down"),
+					command(input: "p", modifiers: .control, action: #selector(moveUp), title: "Move Selection Up"),
+					command(input: "n", modifiers: .control, action: #selector(moveDown), title: "Move Selection Down"),
+					command(input: UIKeyCommand.inputPageUp, modifiers: [], action: #selector(movePageUp), title: "Page Up"),
+					command(input: UIKeyCommand.inputPageDown, modifiers: [], action: #selector(movePageDown), title: "Page Down"),
+					command(input: UIKeyCommand.inputHome, modifiers: [], action: #selector(moveToStart), title: "Move to First Item"),
+					command(input: UIKeyCommand.inputEnd, modifiers: [], action: #selector(moveToEnd), title: "Move to Last Item"),
+					command(input: UIKeyCommand.inputUpArrow, modifiers: .command, action: #selector(moveToStart), title: "Move to First Item"),
+					command(input: UIKeyCommand.inputDownArrow, modifiers: .command, action: #selector(moveToEnd), title: "Move to Last Item"),
+					command(input: "\r", modifiers: [], action: #selector(activateSelection), title: "Open Selection"),
+					command(input: UIKeyCommand.inputEscape, modifiers: [], action: #selector(close), title: "Close"),
+				]
 			}
+
+			private func command(input: String, modifiers: UIKeyModifierFlags, action: Selector, title: String) -> UIKeyCommand {
+				let command = UIKeyCommand(input: input, modifierFlags: modifiers, action: action)
+				command.wantsPriorityOverSystemBehavior = true
+				command.discoverabilityTitle = title
+				return command
+			}
+
+			override func didMoveToWindow() {
+				super.didMoveToWindow()
+				activateIfPossible()
+			}
+
+			func activateIfPossible() {
+				guard window != nil else { return }
+				DispatchQueue.main.async { [weak self] in
+					guard let self, self.window != nil else { return }
+					_ = self.becomeFirstResponder()
+				}
+			}
+
+			@objc private func moveUp() { onMoveSelection?(-1) }
+			@objc private func moveDown() { onMoveSelection?(1) }
+			@objc private func movePageUp() { onMovePage?(-1) }
+			@objc private func movePageDown() { onMovePage?(1) }
+			@objc private func moveToStart() { onMoveToBoundary?(false) }
+			@objc private func moveToEnd() { onMoveToBoundary?(true) }
+			@objc private func activateSelection() { onActivateSelection?() }
+			@objc private func close() { onClose?() }
 		}
-
-		@objc private func moveUp() { onMoveSelection?(-1) }
-		@objc private func moveDown() { onMoveSelection?(1) }
-		@objc private func movePageUp() { onMovePage?(-1) }
-		@objc private func movePageDown() { onMovePage?(1) }
-		@objc private func moveToStart() { onMoveToBoundary?(false) }
-		@objc private func moveToEnd() { onMoveToBoundary?(true) }
-		@objc private func activateSelection() { onActivateSelection?() }
-		@objc private func close() { onClose?() }
 	}
-}
 #else
-private struct SessionPickerKeyboardHandler: View {
-	let onMoveSelection: (Int) -> Void
-	let onMovePage: (Int) -> Void
-	let onMoveToBoundary: (Bool) -> Void
-	let onActivateSelection: () -> Void
-	let onClose: () -> Void
+	private struct SessionPickerKeyboardHandler: View {
+		let onMoveSelection: (Int) -> Void
+		let onMovePage: (Int) -> Void
+		let onMoveToBoundary: (Bool) -> Void
+		let onActivateSelection: () -> Void
+		let onClose: () -> Void
 
-	var body: some View {
-		Color.clear
+		var body: some View {
+			Color.clear
+		}
 	}
-}
 #endif
 
 #Preview {

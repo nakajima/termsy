@@ -1,248 +1,247 @@
 #if canImport(UIKit)
 //
-//  TerminalTabBarController.swift
-//  Termsy
+	//  TerminalTabBarController.swift
+	//  Termsy
 //
-//  UIViewController that hosts a terminal session.
-//  Keeps a per-tab TerminalView mounted while the tab remains open.
+	//  UIViewController that hosts a terminal session.
+	//  Keeps a per-tab TerminalView mounted while the tab remains open.
 //
 
-import SwiftUI
-import UIKit
+	import SwiftUI
+	import UIKit
 
-// MARK: - SwiftUI Bridge
+	// MARK: - SwiftUI Bridge
 
-struct TerminalHostRepresentable: UIViewControllerRepresentable {
-	@Environment(\.appTheme) private var theme
-	let tab: TerminalTab
-	let onConnectionEstablished: (Session) -> Void
+	struct TerminalHostRepresentable: UIViewControllerRepresentable {
+		@Environment(\.appTheme) private var theme
+		let tab: TerminalTab
+		let onConnectionEstablished: (Session) -> Void
 
-	func makeUIViewController(context: Context) -> TerminalHostController {
-		tab.onConnectionEstablished = onConnectionEstablished
-		return TerminalHostController(terminalTab: tab, theme: theme)
-	}
-
-	func updateUIViewController(_ controller: TerminalHostController, context: Context) {
-		tab.onConnectionEstablished = onConnectionEstablished
-		controller.applyTheme(theme)
-	}
-
-	static func dismantleUIViewController(_ controller: TerminalHostController, coordinator: ()) {
-		controller.teardownTerminal()
-	}
-}
-
-// MARK: - Per-Tab Host Controller
-
-@MainActor
-final class TerminalHostController: UIViewController {
-	let terminalTab: TerminalTab
-	private var theme: AppTheme
-	private var terminalView: TerminalView?
-	private var overlayHostController: UIHostingController<AnyView>?
-	private var connectTask: Task<Void, Never>?
-	private var activeConnectTaskID: UUID?
-	private var connectionWatchdogTask: Task<Void, Never>?
-
-	init(terminalTab: TerminalTab, theme: AppTheme) {
-		self.terminalTab = terminalTab
-		self.theme = theme
-		super.init(nibName: nil, bundle: nil)
-	}
-
-	@available(*, unavailable)
-	required init?(coder: NSCoder) { fatalError() }
-
-	override func viewDidLoad() {
-		super.viewDidLoad()
-		terminalTab.onRequestReconnect = { [weak self] in
-			self?.reconnectAfterBackgroundLoss()
+		func makeUIViewController(context _: Context) -> TerminalHostController {
+			tab.onConnectionEstablished = onConnectionEstablished
+			return TerminalHostController(terminalTab: tab, theme: theme)
 		}
-		applyTheme(theme)
-		setupTerminal()
+
+		func updateUIViewController(_ controller: TerminalHostController, context _: Context) {
+			tab.onConnectionEstablished = onConnectionEstablished
+			controller.applyTheme(theme)
+		}
+
+		static func dismantleUIViewController(_ controller: TerminalHostController, coordinator _: ()) {
+			controller.teardownTerminal()
+		}
 	}
 
-	override func viewDidAppear(_ animated: Bool) {
-		super.viewDidAppear(animated)
-		if terminalView == nil {
+	// MARK: - Per-Tab Host Controller
+
+	@MainActor
+	final class TerminalHostController: UIViewController {
+		let terminalTab: TerminalTab
+		private var theme: AppTheme
+		private var terminalView: TerminalView?
+		private var overlayHostController: UIHostingController<AnyView>?
+		private var connectTask: Task<Void, Never>?
+		private var activeConnectTaskID: UUID?
+		private var connectionWatchdogTask: Task<Void, Never>?
+
+		init(terminalTab: TerminalTab, theme: AppTheme) {
+			self.terminalTab = terminalTab
+			self.theme = theme
+			super.init(nibName: nil, bundle: nil)
+		}
+
+		@available(*, unavailable)
+		required init?(coder _: NSCoder) { fatalError() }
+
+		override func viewDidLoad() {
+			super.viewDidLoad()
+			terminalTab.onRequestReconnect = { [weak self] in
+				self?.reconnectAfterBackgroundLoss()
+			}
+			applyTheme(theme)
 			setupTerminal()
 		}
-		_ = terminalView?.syncSizeAndReadBack()
-		restoreConnectionIfNeeded()
-	}
 
-	override func viewDidLayoutSubviews() {
-		super.viewDidLayoutSubviews()
-		syncTerminalSizeToSession()
-	}
-
-	func applyTheme(_ theme: AppTheme) {
-		self.theme = theme
-		view.backgroundColor = theme.backgroundUIColor
-		terminalTab.applyTheme(theme)
-		updateOverlay()
-	}
-
-	func setupTerminal() {
-		guard terminalView == nil else { return }
-
-		let tv = terminalTab.terminalView
-		tv.frame = view.bounds
-		tv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-		tv.applyTheme(theme)
-		tv.removeFromSuperview()
-		if let overlayView = overlayHostController?.view {
-			view.insertSubview(tv, belowSubview: overlayView)
-		} else {
-			view.addSubview(tv)
-		}
-		terminalView = tv
-		syncTerminalSizeToSession()
-		updateOverlay()
-	}
-
-	func teardownTerminal() {
-		terminalTab.setDisplayActive(false)
-		connectTask?.cancel()
-		activeConnectTaskID = nil
-		connectionWatchdogTask?.cancel()
-		connectionWatchdogTask = nil
-		terminalView?.removeFromSuperview()
-		terminalView = nil
-	}
-
-	private func connectIfNeeded() {
-		guard !terminalTab.isConnected,
-		      terminalTab.connectionError == nil,
-		      !terminalTab.needsPassword,
-		      !terminalTab.isRestoring,
-		      activeConnectTaskID == nil,
-		      !terminalTab.connectionIsActive
-		else { return }
-
-		let taskID = UUID()
-		activeConnectTaskID = taskID
-		connectTask = Task { [weak self] in
-			guard let self else { return }
-			defer {
-				if self.activeConnectTaskID == taskID {
-					self.activeConnectTaskID = nil
-					self.connectTask = nil
-					self.updateOverlay()
-				}
+		override func viewDidAppear(_ animated: Bool) {
+			super.viewDidAppear(animated)
+			if terminalView == nil {
+				setupTerminal()
 			}
-			await self.terminalTab.connect()
-			self.syncTerminalSizeToSession()
-			self.updateOverlay()
+			_ = terminalView?.syncSizeAndReadBack()
+			restoreConnectionIfNeeded()
 		}
-	}
 
-	private func updateOverlay() {
-		let overlayView = TerminalOverlay(
-			tab: terminalTab,
-			onReconnect: { [weak self] in
-				self?.reconnectAfterBackgroundLoss()
-			},
-			onRetryWithPassword: { [weak self] password in
-				guard let self else { return }
-				Task {
-					await self.terminalTab.connectWithPassword(password)
-					self.syncTerminalSizeToSession()
-					self.updateOverlay()
-				}
+		override func viewDidLayoutSubviews() {
+			super.viewDidLayoutSubviews()
+			syncTerminalSizeToSession()
+		}
+
+		func applyTheme(_ theme: AppTheme) {
+			self.theme = theme
+			view.backgroundColor = theme.backgroundUIColor
+			terminalTab.applyTheme(theme)
+			updateOverlay()
+		}
+
+		func setupTerminal() {
+			guard terminalView == nil else { return }
+
+			let tv = terminalTab.terminalView
+			tv.frame = view.bounds
+			tv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+			tv.applyTheme(theme)
+			tv.removeFromSuperview()
+			if let overlayView = overlayHostController?.view {
+				view.insertSubview(tv, belowSubview: overlayView)
+			} else {
+				view.addSubview(tv)
 			}
-		)
-		.environment(\.appTheme, theme)
-
-		let overlayNeedsInteraction = !terminalTab.isConnected
-			|| terminalTab.connectionError != nil
-			|| terminalTab.isRestoring
-			|| terminalTab.needsPassword
-
-		if let existing = overlayHostController {
-			existing.rootView = AnyView(overlayView)
-			existing.view.isUserInteractionEnabled = overlayNeedsInteraction
-		} else {
-			let host = UIHostingController(rootView: AnyView(overlayView))
-			host.view.backgroundColor = .clear
-			host.view.frame = view.bounds
-			host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-			host.view.isUserInteractionEnabled = overlayNeedsInteraction
-			addChild(host)
-			view.addSubview(host.view)
-			host.didMove(toParent: self)
-			overlayHostController = host
+			terminalView = tv
+			syncTerminalSizeToSession()
+			updateOverlay()
 		}
-		updateConnectionWatchdog()
-	}
 
-	private var showsConnectingOverlay: Bool {
-		!terminalTab.isConnected
-			&& terminalTab.connectionError == nil
-			&& !terminalTab.needsPassword
-			&& !terminalTab.isRestoring
-	}
-
-	private func updateConnectionWatchdog() {
-		guard showsConnectingOverlay else {
+		func teardownTerminal() {
+			terminalTab.setDisplayActive(false)
+			connectTask?.cancel()
+			activeConnectTaskID = nil
 			connectionWatchdogTask?.cancel()
 			connectionWatchdogTask = nil
-			return
+			terminalView?.removeFromSuperview()
+			terminalView = nil
 		}
-		guard connectionWatchdogTask == nil else { return }
-		connectionWatchdogTask = Task { [weak self] in
-			defer {
-				self?.connectionWatchdogTask = nil
-			}
-			while !Task.isCancelled {
-				try? await Task.sleep(nanoseconds: 1_000_000_000)
+
+		private func connectIfNeeded() {
+			guard !terminalTab.isConnected,
+			      terminalTab.connectionError == nil,
+			      !terminalTab.needsPassword,
+			      !terminalTab.isRestoring,
+			      activeConnectTaskID == nil,
+			      !terminalTab.connectionIsActive
+			else { return }
+
+			let taskID = UUID()
+			activeConnectTaskID = taskID
+			connectTask = Task { [weak self] in
 				guard let self else { return }
-				guard self.showsConnectingOverlay else { return }
-				guard self.activeConnectTaskID == nil, !self.terminalTab.connectionIsActive else { continue }
-				self.terminalTab.noteConnectingOverlayWithoutActiveAttempt()
-				self.connectIfNeeded()
+				defer {
+					if self.activeConnectTaskID == taskID {
+						self.activeConnectTaskID = nil
+						self.connectTask = nil
+						self.updateOverlay()
+					}
+				}
+				await self.terminalTab.connect()
+				self.syncTerminalSizeToSession()
+				self.updateOverlay()
 			}
 		}
-	}
 
-	private func syncTerminalSizeToSession() {
-		guard let terminalView else { return }
-		terminalView.frame = view.bounds
-		guard let size = terminalView.syncSizeAndReadBack() else { return }
-		terminalTab.sshSession.updateTerminalSize(size)
-	}
+		private func updateOverlay() {
+			let overlayView = TerminalOverlay(
+				tab: terminalTab,
+				onReconnect: { [weak self] in
+					self?.reconnectAfterBackgroundLoss()
+				},
+				onRetryWithPassword: { [weak self] password in
+					guard let self else { return }
+					Task {
+						await self.terminalTab.connectWithPassword(password)
+						self.syncTerminalSizeToSession()
+						self.updateOverlay()
+					}
+				}
+			)
+			.environment(\.appTheme, theme)
 
-	private func restoreConnectionIfNeeded() {
-		if terminalTab.consumeReconnectOnActivation() {
-			reconnectAfterBackgroundLoss()
-			return
+			let overlayNeedsInteraction = !terminalTab.isConnected
+				|| terminalTab.connectionError != nil
+				|| terminalTab.isRestoring
+				|| terminalTab.needsPassword
+
+			if let existing = overlayHostController {
+				existing.rootView = AnyView(overlayView)
+				existing.view.isUserInteractionEnabled = overlayNeedsInteraction
+			} else {
+				let host = UIHostingController(rootView: AnyView(overlayView))
+				host.view.backgroundColor = .clear
+				host.view.frame = view.bounds
+				host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+				host.view.isUserInteractionEnabled = overlayNeedsInteraction
+				addChild(host)
+				view.addSubview(host.view)
+				host.didMove(toParent: self)
+				overlayHostController = host
+			}
+			updateConnectionWatchdog()
 		}
-		if terminalTab.isConnected {
-			guard terminalTab.sshSession.connection.isActive else {
+
+		private var showsConnectingOverlay: Bool {
+			!terminalTab.isConnected
+				&& terminalTab.connectionError == nil
+				&& !terminalTab.needsPassword
+				&& !terminalTab.isRestoring
+		}
+
+		private func updateConnectionWatchdog() {
+			guard showsConnectingOverlay else {
+				connectionWatchdogTask?.cancel()
+				connectionWatchdogTask = nil
+				return
+			}
+			guard connectionWatchdogTask == nil else { return }
+			connectionWatchdogTask = Task { [weak self] in
+				defer {
+					self?.connectionWatchdogTask = nil
+				}
+				while !Task.isCancelled {
+					try? await Task.sleep(nanoseconds: 1_000_000_000)
+					guard let self else { return }
+					guard self.showsConnectingOverlay else { return }
+					guard self.activeConnectTaskID == nil, !self.terminalTab.connectionIsActive else { continue }
+					self.terminalTab.noteConnectingOverlayWithoutActiveAttempt()
+					self.connectIfNeeded()
+				}
+			}
+		}
+
+		private func syncTerminalSizeToSession() {
+			guard let terminalView else { return }
+			terminalView.frame = view.bounds
+			guard let size = terminalView.syncSizeAndReadBack() else { return }
+			terminalTab.sshSession.updateTerminalSize(size)
+		}
+
+		private func restoreConnectionIfNeeded() {
+			if terminalTab.consumeReconnectOnActivation() {
 				reconnectAfterBackgroundLoss()
 				return
 			}
-			syncTerminalSizeToSession()
-			return
+			if terminalTab.isConnected {
+				guard terminalTab.sshSession.connection.isActive else {
+					reconnectAfterBackgroundLoss()
+					return
+				}
+				syncTerminalSizeToSession()
+				return
+			}
+			connectIfNeeded()
 		}
-		connectIfNeeded()
-	}
 
-	private func reconnectAfterBackgroundLoss() {
-		print("[SSH] reconnecting after app switch/background...")
-		connectTask?.cancel()
-		connectTask = nil
-		activeConnectTaskID = nil
-		terminalTab.prepareForReconnectAfterBackgroundLoss()
-		terminalView = nil
-		setupTerminal()
-		connectIfNeeded()
-	}
+		private func reconnectAfterBackgroundLoss() {
+			print("[SSH] reconnecting after app switch/background...")
+			connectTask?.cancel()
+			connectTask = nil
+			activeConnectTaskID = nil
+			terminalTab.prepareForReconnectAfterBackgroundLoss()
+			terminalView = nil
+			setupTerminal()
+			connectIfNeeded()
+		}
 
-	deinit {
-		connectTask?.cancel()
-		connectionWatchdogTask?.cancel()
+		deinit {
+			connectTask?.cancel()
+			connectionWatchdogTask?.cancel()
+		}
 	}
-}
 #endif
-

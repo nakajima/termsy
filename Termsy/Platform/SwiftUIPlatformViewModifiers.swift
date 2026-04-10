@@ -4,21 +4,20 @@ extension View {
 	@ViewBuilder
 	func termsyInlineNavigationTitle() -> some View {
 		#if os(iOS)
-		self.navigationBarTitleDisplayMode(.inline)
+			navigationBarTitleDisplayMode(.inline)
 		#else
-		self
+			self
 		#endif
 	}
 
 	@ViewBuilder
 	func termsyNavigationBarAppearance(_ theme: AppTheme) -> some View {
 		#if os(iOS)
-		self
-			.toolbarBackground(theme.elevatedBackground, for: .navigationBar)
-			.toolbarBackground(.visible, for: .navigationBar)
-			.toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+			toolbarBackground(theme.elevatedBackground, for: .navigationBar)
+				.toolbarBackground(.visible, for: .navigationBar)
+				.toolbarColorScheme(theme.colorScheme, for: .navigationBar)
 		#else
-		self
+			self
 		#endif
 	}
 }
@@ -26,17 +25,17 @@ extension View {
 extension ToolbarItemPlacement {
 	static var termsyPrimaryAction: Self {
 		#if os(macOS)
-		.primaryAction
+			.primaryAction
 		#else
-		.topBarTrailing
+			.topBarTrailing
 		#endif
 	}
 
 	static var termsyCancellationAction: Self {
 		#if os(macOS)
-		.cancellationAction
+			.cancellationAction
 		#else
-		.topBarLeading
+			.topBarLeading
 		#endif
 	}
 }

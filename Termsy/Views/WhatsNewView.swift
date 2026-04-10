@@ -79,7 +79,7 @@ struct WhatsNewView: View {
 				changes: [
 					"Fix tab resume behavior when returning to the app.",
 					"Improve touch scrolling and pointer input in terminal sessions.",
-					"Make reconnection handling more reliable after backgrounding."
+					"Make reconnection handling more reliable after backgrounding.",
 				]
 			),
 			versionDisplay: "1.0 (1)"

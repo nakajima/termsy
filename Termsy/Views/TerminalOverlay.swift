@@ -58,7 +58,6 @@ struct TerminalOverlay: View {
 						.stroke(theme.divider, lineWidth: 1)
 				}
 			}
-
 		}
 		.safeAreaInset(edge: .bottom) {
 			if showsConnectionLogToggle {

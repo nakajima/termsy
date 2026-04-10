@@ -1,13 +1,13 @@
 import SwiftUI
 
 #if canImport(UIKit)
-import UIKit
+	import UIKit
 
-typealias PlatformColor = UIColor
+	typealias PlatformColor = UIColor
 #elseif canImport(AppKit)
-import AppKit
+	import AppKit
 
-typealias PlatformColor = NSColor
+	typealias PlatformColor = NSColor
 #endif
 
 extension PlatformColor {
@@ -18,9 +18,9 @@ extension PlatformColor {
 		let green = CGFloat((rgb >> 8) & 0xFF) / 255
 		let blue = CGFloat(rgb & 0xFF) / 255
 		#if canImport(UIKit)
-		self.init(red: red, green: green, blue: blue, alpha: 1)
+			self.init(red: red, green: green, blue: blue, alpha: 1)
 		#elseif canImport(AppKit)
-		self.init(srgbRed: red, green: green, blue: blue, alpha: 1)
+			self.init(srgbRed: red, green: green, blue: blue, alpha: 1)
 		#endif
 	}
 }

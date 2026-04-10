@@ -26,23 +26,23 @@ struct SessionListView: View {
 	var body: some View {
 		List {
 			#if os(macOS)
-			Section("Local") {
-				Button {
-					coordinator.openLocalShellTab()
-				} label: {
-					VStack(alignment: .leading, spacing: 4) {
-						Text("Local Shell")
-							.font(.headline)
-							.foregroundStyle(theme.primaryText)
-						Text(LocalShellProfile.default.detailText)
-							.font(.caption)
-							.foregroundStyle(theme.secondaryText)
+				Section("Local") {
+					Button {
+						coordinator.openLocalShellTab()
+					} label: {
+						VStack(alignment: .leading, spacing: 4) {
+							Text("Local Shell")
+								.font(.headline)
+								.foregroundStyle(theme.primaryText)
+							Text(LocalShellProfile.default.detailText)
+								.font(.caption)
+								.foregroundStyle(theme.secondaryText)
+						}
+						.frame(maxWidth: .infinity, alignment: .leading)
+						.padding(.vertical, 6)
 					}
-					.frame(maxWidth: .infinity, alignment: .leading)
-					.padding(.vertical, 6)
+					.listRowBackground(theme.cardBackground)
 				}
-				.listRowBackground(theme.cardBackground)
-			}
 			#endif
 
 			Section(sessions.isEmpty ? "Saved Sessions" : "") {
@@ -73,37 +73,37 @@ struct SessionListView: View {
 		.navigationTitle("Termsy")
 		.toolbar {
 			#if os(macOS)
-			ToolbarItemGroup(placement: .termsyPrimaryAction) {
-				Button {
-					coordinator.openLocalShellTab()
-				} label: {
-					Label("Local Shell", systemImage: "terminal")
-				}
-				.keyboardShortcut("l", modifiers: .command)
+				ToolbarItemGroup(placement: .termsyPrimaryAction) {
+					Button {
+						coordinator.openLocalShellTab()
+					} label: {
+						Label("Local Shell", systemImage: "terminal")
+					}
+					.keyboardShortcut("l", modifiers: .command)
 
-				Button {
-					coordinator.openNewTabUI()
-				} label: {
-					Label("New Session", systemImage: "plus")
+					Button {
+						coordinator.openNewTabUI()
+					} label: {
+						Label("New Session", systemImage: "plus")
+					}
+					.keyboardShortcut("t", modifiers: .command)
 				}
-				.keyboardShortcut("t", modifiers: .command)
-			}
 			#else
-			ToolbarItem(placement: .termsyPrimaryAction) {
-				Button {
-					coordinator.openNewTabUI()
-				} label: {
-					Label("New Session", systemImage: "plus")
+				ToolbarItem(placement: .termsyPrimaryAction) {
+					Button {
+						coordinator.openNewTabUI()
+					} label: {
+						Label("New Session", systemImage: "plus")
+					}
+					.keyboardShortcut("t", modifiers: .command)
 				}
-				.keyboardShortcut("t", modifiers: .command)
-			}
 			#endif
 		}
 		.onAppear {
 			#if os(iOS)
-			if sessions.isEmpty {
-				coordinator.isShowingConnectView = true
-			}
+				if sessions.isEmpty {
+					coordinator.isShowingConnectView = true
+				}
 			#endif
 		}
 	}
