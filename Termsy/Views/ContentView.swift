@@ -107,7 +107,7 @@ struct ContentView: View {
 					didAutoconnect = true
 
 					let sessions = try? dbContext.reader.read { db in
-						try Session.autoconnectingOrdered().fetchAll(db)
+						try Session.filter{$0.autoconnect == true}.fetchAll(db)
 					}
 
 					for session in sessions ?? [] {
@@ -144,8 +144,8 @@ private struct TerminalContainer: View {
 		do {
 			try dbContext.writer.write { db in
 				try db.execute(
-					sql: "UPDATE session SET lastConnectedAt = ? WHERE uuid = ?",
-					arguments: [session.lastConnectedAt ?? Date(), session.uuid]
+					sql: "UPDATE session SET lastConnectedAt = ? WHERE id = ?",
+					arguments: [session.lastConnectedAt ?? Date(), session.id]
 				)
 			}
 		} catch {

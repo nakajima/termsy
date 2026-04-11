@@ -13,7 +13,7 @@ struct SessionsRequest: ValueObservationQueryable {
 	static var defaultValue: [Session] { [] }
 
 	func fetch(_ db: Database) throws -> [Session] {
-		try Session.activeOrdered().fetchAll(db)
+		try Session.fetchAll(db)
 	}
 }
 
@@ -46,7 +46,7 @@ struct SessionListView: View {
 			#endif
 
 			Section(sessions.isEmpty ? "Saved Sessions" : "") {
-				ForEach(sessions, id: \.uuid) { session in
+				ForEach(sessions, id: \.id) { session in
 					Button {
 						coordinator.openTab(for: session)
 					} label: {
@@ -115,9 +115,8 @@ struct SessionListView: View {
 
 		do {
 			try dbContext.writer.write { db in
-				for var session in sessionsToDelete {
-					session.markDeleted()
-					try session.update(db)
+				for session in sessionsToDelete {
+					try session.delete(db)
 				}
 			}
 			sessionsToDelete.forEach(Keychain.removePassword)

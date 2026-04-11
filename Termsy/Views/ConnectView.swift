@@ -31,8 +31,7 @@ struct ConnectView: View {
 
 	@State private var host = ""
 	@State private var port = "22"
-	@State private var username = ""
-	@State private var password = ""
+	@AppStorage("lastUsername") private var username = ""
 	@State private var tmuxSessionName = ""
 	@State private var errorMessage: String? = nil
 	@State private var autoconnect: Bool = true
@@ -66,7 +65,10 @@ struct ConnectView: View {
 				}
 				.listRowBackground(theme.cardBackground)
 			}
-			Section(header: Text("Tmux Session Name"), footer: Text("Will be started using `tmux new-session -A -s`")) {
+			Section(
+				header: Text("Tmux Session Name"),
+				footer: Text("Will be started using `tmux new-session -A -s`")
+			) {
 				TextField("Tmux Session Name", text: $tmuxSessionName)
 					.textContentType(.username)
 					.autocorrectionDisabled()
@@ -142,15 +144,12 @@ struct ConnectView: View {
 
 		do {
 			try dbContext.writer.write { db in
-				session.normalizeConnectionTarget()
-				if var existingSession = try Session.activeExactDuplicate(of: session, in: db) {
+				if var existingSession = try Session.existing(session, in: db) {
 					existingSession.hostname = session.hostname
 					existingSession.username = session.username
 					existingSession.tmuxSessionName = session.tmuxSessionName
 					existingSession.port = session.port
 					existingSession.autoconnect = session.autoconnect
-					existingSession.deletedAt = nil
-					existingSession.touch()
 					try existingSession.update(db)
 					session = existingSession
 				} else {

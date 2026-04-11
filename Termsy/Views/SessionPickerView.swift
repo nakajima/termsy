@@ -27,7 +27,7 @@ struct SessionPickerView: View {
 	private let selectionPageJump = 8
 
 	private var pickerItemIDs: [PickerItemID] {
-		let sessionItems = sessions.map { PickerItemID.session($0.uuid) }
+		let sessionItems = sessions.map { PickerItemID.session($0.normalizedTargetKey) }
 		#if os(macOS)
 			return [.localShell] + sessionItems + [.newSession]
 		#else
@@ -47,7 +47,7 @@ struct SessionPickerView: View {
 
 					if !sessions.isEmpty {
 						Section("Saved Sessions") {
-							ForEach(sessions, id: \.uuid) { session in
+							ForEach(sessions) { session in
 								sessionRow(for: session)
 							}
 							.onDelete(perform: deleteSessions)
@@ -86,7 +86,7 @@ struct SessionPickerView: View {
 					ensureValidSelection()
 					scrollSelectionIfNeeded(using: proxy, animated: false)
 				}
-				.onChange(of: sessions.map(\.uuid), initial: false) { _, _ in
+				.onChange(of: sessions.map(\.id), initial: false) { _, _ in
 					ensureValidSelection()
 				}
 				.onChange(of: selectedItemID, initial: false) { _, _ in
@@ -98,8 +98,8 @@ struct SessionPickerView: View {
 
 	@ViewBuilder
 	private func sessionRow(for session: Session) -> some View {
-		let itemID = PickerItemID.session(session.uuid)
-		let isOpen = coordinator.tabs.contains { $0.session?.uuid == session.uuid }
+		let itemID = PickerItemID.session(session.normalizedTargetKey)
+		let isOpen = coordinator.tabs.contains { $0.session?.normalizedTargetKey == session.normalizedTargetKey }
 		let isSelected = selectedItemID == itemID
 
 		Button {
@@ -215,8 +215,8 @@ struct SessionPickerView: View {
 			#else
 				break
 			#endif
-		case let .session(uuid):
-			guard let session = sessions.first(where: { $0.uuid == uuid }) else {
+		case let .session(key):
+			guard let session = sessions.first(where: { $0.normalizedTargetKey == key }) else {
 				ensureValidSelection()
 				return
 			}
@@ -227,7 +227,7 @@ struct SessionPickerView: View {
 	}
 
 	private func openSession(_ session: Session) {
-		selectedItemID = .session(session.uuid)
+		selectedItemID = .session(session.normalizedTargetKey)
 		coordinator.openTab(for: session)
 		coordinator.isShowingSessionPicker = false
 	}
@@ -276,9 +276,8 @@ struct SessionPickerView: View {
 
 		do {
 			try dbContext.writer.write { db in
-				for var session in sessionsToDelete {
-					session.markDeleted()
-					try session.update(db)
+				for session in sessionsToDelete {
+					try session.delete(db)
 				}
 			}
 			sessionsToDelete.forEach(Keychain.removePassword)

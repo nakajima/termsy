@@ -137,223 +137,223 @@ enum ShellTitleIntegration {
 	}
 
 	private static let bashScript = #"""
-if [[ "$-" != *i* ]]; then
-  return 0 2>/dev/null || exit 0
-fi
+	if [[ "$-" != *i* ]]; then
+	  return 0 2>/dev/null || exit 0
+	fi
 
-[ -r /etc/profile ] && builtin source /etc/profile
-for _termsy_rcfile in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
-  if [ -r "$_termsy_rcfile" ]; then
-    builtin source "$_termsy_rcfile"
-    break
-  fi
-done
-builtin unset _termsy_rcfile
+	[ -r /etc/profile ] && builtin source /etc/profile
+	for _termsy_rcfile in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+	  if [ -r "$_termsy_rcfile" ]; then
+	    builtin source "$_termsy_rcfile"
+	    break
+	  fi
+	done
+	builtin unset _termsy_rcfile
 
-if [[ -n "${TERMSY_TITLE_HOOKS_ACTIVE-}" ]]; then
-  return 0 2>/dev/null || exit 0
-fi
-TERMSY_TITLE_HOOKS_ACTIVE=1
+	if [[ -n "${TERMSY_TITLE_HOOKS_ACTIVE-}" ]]; then
+	  return 0 2>/dev/null || exit 0
+	fi
+	TERMSY_TITLE_HOOKS_ACTIVE=1
 
-__termsy_sanitize_title() {
-  local title=$1
-  title=${title//$'\e'/}
-  title=${title//$'\a'/}
-  title=${title//$'\r'/ }
-  title=${title//$'\n'/ }
-  printf '%s' "$title"
-}
+	__termsy_sanitize_title() {
+	  local title=$1
+	  title=${title//$'\e'/}
+	  title=${title//$'\a'/}
+	  title=${title//$'\r'/ }
+	  title=${title//$'\n'/ }
+	  printf '%s' "$title"
+	}
 
-__termsy_set_title() {
-  local title
-  title="$(__termsy_sanitize_title "$1")"
-  printf '\e]2;%s\a' "$title"
-}
+	__termsy_set_title() {
+	  local title
+	  title="$(__termsy_sanitize_title "$1")"
+	  printf '\e]2;%s\a' "$title"
+	}
 
-__termsy_prompt_title() {
-  __termsy_in_prompt_command=1
-  __termsy_preexec_seen=0
-  local path="${PWD/#$HOME/~}"
-  __termsy_set_title "$path"
-  __termsy_in_prompt_command=0
-}
+	__termsy_prompt_title() {
+	  __termsy_in_prompt_command=1
+	  __termsy_preexec_seen=0
+	  local path="${PWD/#$HOME/~}"
+	  __termsy_set_title "$path"
+	  __termsy_in_prompt_command=0
+	}
 
-__termsy_preexec() {
-  [[ "${__termsy_in_prompt_command-0}" == 1 ]] && return
-  [[ "${__termsy_preexec_seen-0}" == 1 ]] && return
-  __termsy_preexec_seen=1
-  __termsy_set_title "$1"
-}
+	__termsy_preexec() {
+	  [[ "${__termsy_in_prompt_command-0}" == 1 ]] && return
+	  [[ "${__termsy_preexec_seen-0}" == 1 ]] && return
+	  __termsy_preexec_seen=1
+	  __termsy_set_title "$1"
+	}
 
-if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
-  PROMPT_COMMAND=(__termsy_prompt_title "${PROMPT_COMMAND[@]}")
-elif [[ -n "${PROMPT_COMMAND-}" ]]; then
-  PROMPT_COMMAND="__termsy_prompt_title; ${PROMPT_COMMAND}"
-else
-  PROMPT_COMMAND="__termsy_prompt_title"
-fi
+	if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
+	  PROMPT_COMMAND=(__termsy_prompt_title "${PROMPT_COMMAND[@]}")
+	elif [[ -n "${PROMPT_COMMAND-}" ]]; then
+	  PROMPT_COMMAND="__termsy_prompt_title; ${PROMPT_COMMAND}"
+	else
+	  PROMPT_COMMAND="__termsy_prompt_title"
+	fi
 
-if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
-  PS0='${ __termsy_preexec "$BASH_COMMAND"; }'"${PS0-}"
-else
-  trap '__termsy_preexec "$BASH_COMMAND"' DEBUG
-fi
+	if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
+	  PS0='${ __termsy_preexec "$BASH_COMMAND"; }'"${PS0-}"
+	else
+	  trap '__termsy_preexec "$BASH_COMMAND"' DEBUG
+	fi
 
-__termsy_prompt_title
-"""#
+	__termsy_prompt_title
+	"""#
 
 	private static let fishScript = #"""
-function __termsy_set_title -a title
-    set -l sanitized (string replace -ar '[\x00-\x1f\x7f]' ' ' -- "$title")
-    printf '\e]2;%s\a' "$sanitized"
-end
+	function __termsy_set_title -a title
+	    set -l sanitized (string replace -ar '[\x00-\x1f\x7f]' ' ' -- "$title")
+	    printf '\e]2;%s\a' "$sanitized"
+	end
 
-function __termsy_prompt_title --on-event fish_prompt
-    __termsy_set_title (prompt_pwd)
-end
+	function __termsy_prompt_title --on-event fish_prompt
+	    __termsy_set_title (prompt_pwd)
+	end
 
-function __termsy_command_title --on-event fish_preexec -a commandline
-    if test -n "$commandline"
-        __termsy_set_title "$commandline"
-    end
-end
+	function __termsy_command_title --on-event fish_preexec -a commandline
+	    if test -n "$commandline"
+	        __termsy_set_title "$commandline"
+	    end
+	end
 
-__termsy_prompt_title
-"""#
+	__termsy_prompt_title
+	"""#
 
 	private static let zshEnvScript = #"""
-if [[ -n "${TERMSY_TITLE_ORIGINAL_ZDOTDIR+X}" ]]; then
-  builtin export ZDOTDIR="$TERMSY_TITLE_ORIGINAL_ZDOTDIR"
-  builtin unset TERMSY_TITLE_ORIGINAL_ZDOTDIR
-else
-  builtin unset ZDOTDIR
-fi
+	if [[ -n "${TERMSY_TITLE_ORIGINAL_ZDOTDIR+X}" ]]; then
+	  builtin export ZDOTDIR="$TERMSY_TITLE_ORIGINAL_ZDOTDIR"
+	  builtin unset TERMSY_TITLE_ORIGINAL_ZDOTDIR
+	else
+	  builtin unset ZDOTDIR
+	fi
 
-{
-  builtin typeset _termsy_file=${ZDOTDIR-$HOME}/.zshenv
-  [[ ! -r "$_termsy_file" ]] || builtin source -- "$_termsy_file"
-} always {
-  if [[ -o interactive ]]; then
-    builtin typeset _termsy_file="${TERMSY_TITLE_ZSH_INTEGRATION_FILE:-${${(%):-%x}:A:h}/termsy-title.zsh}"
-    [[ ! -r "$_termsy_file" ]] || builtin source -- "$_termsy_file"
-  fi
-  builtin unset _termsy_file
-}
-"""#
+	{
+	  builtin typeset _termsy_file=${ZDOTDIR-$HOME}/.zshenv
+	  [[ ! -r "$_termsy_file" ]] || builtin source -- "$_termsy_file"
+	} always {
+	  if [[ -o interactive ]]; then
+	    builtin typeset _termsy_file="${TERMSY_TITLE_ZSH_INTEGRATION_FILE:-${${(%):-%x}:A:h}/termsy-title.zsh}"
+	    [[ ! -r "$_termsy_file" ]] || builtin source -- "$_termsy_file"
+	  fi
+	  builtin unset _termsy_file
+	}
+	"""#
 
 	private static let zshIntegrationScript = #"""
-if [[ -n "${TERMSY_TITLE_HOOKS_ACTIVE-}" ]]; then
-  return 0 2>/dev/null || exit 0
-fi
-typeset -g TERMSY_TITLE_HOOKS_ACTIVE=1
+	if [[ -n "${TERMSY_TITLE_HOOKS_ACTIVE-}" ]]; then
+	  return 0 2>/dev/null || exit 0
+	fi
+	typeset -g TERMSY_TITLE_HOOKS_ACTIVE=1
 
-_termsy_sanitize_title() {
-  emulate -L zsh
-  local title=$1
-  title=${title//$'\e'/}
-  title=${title//$'\a'/}
-  title=${title//$'\r'/ }
-  title=${title//$'\n'/ }
-  print -rn -- "$title"
-}
+	_termsy_sanitize_title() {
+	  emulate -L zsh
+	  local title=$1
+	  title=${title//$'\e'/}
+	  title=${title//$'\a'/}
+	  title=${title//$'\r'/ }
+	  title=${title//$'\n'/ }
+	  print -rn -- "$title"
+	}
 
-_termsy_set_title() {
-  emulate -L zsh
-  local title
-  title=$(_termsy_sanitize_title "$1")
-  print -rn -- $'\e]2;'${title}$'\a'
-}
+	_termsy_set_title() {
+	  emulate -L zsh
+	  local title
+	  title=$(_termsy_sanitize_title "$1")
+	  print -rn -- $'\e]2;'${title}$'\a'
+	}
 
-_termsy_prompt_title() {
-  emulate -L zsh
-  local path="${PWD/#$HOME/~}"
-  _termsy_set_title "$path"
-}
+	_termsy_prompt_title() {
+	  emulate -L zsh
+	  local path="${PWD/#$HOME/~}"
+	  _termsy_set_title "$path"
+	}
 
-_termsy_preexec_title() {
-  emulate -L zsh
-  _termsy_set_title "$1"
-}
+	_termsy_preexec_title() {
+	  emulate -L zsh
+	  _termsy_set_title "$1"
+	}
 
-autoload -Uz add-zsh-hook 2>/dev/null
-if (( $+functions[add-zsh-hook] )); then
-  add-zsh-hook precmd _termsy_prompt_title
-  add-zsh-hook preexec _termsy_preexec_title
-else
-  typeset -ag precmd_functions preexec_functions
-  precmd_functions+=(_termsy_prompt_title)
-  preexec_functions+=(_termsy_preexec_title)
-fi
+	autoload -Uz add-zsh-hook 2>/dev/null
+	if (( $+functions[add-zsh-hook] )); then
+	  add-zsh-hook precmd _termsy_prompt_title
+	  add-zsh-hook preexec _termsy_preexec_title
+	else
+	  typeset -ag precmd_functions preexec_functions
+	  precmd_functions+=(_termsy_prompt_title)
+	  preexec_functions+=(_termsy_preexec_title)
+	fi
 
-_termsy_prompt_title
-"""#
+	_termsy_prompt_title
+	"""#
 
 	private static let remoteBootstrapScript: String = {
 		let cacheRootScript = #"""
-shell_path=${SHELL:-}
-if [ -z "$shell_path" ] && [ -n "${USER:-}" ] && [ -r /etc/passwd ]; then
-  shell_path=$(awk -F: -v user="$USER" '$1 == user { print $7; exit }' /etc/passwd 2>/dev/null)
-fi
-[ -n "$shell_path" ] || shell_path=/bin/sh
-shell_name=${shell_path##*/}
-cache_root=${XDG_CACHE_HOME:-}
-if [ -z "$cache_root" ]; then
-  if [ -n "${HOME:-}" ]; then
-    cache_root="$HOME/.cache"
-  else
-    cache_root="${TMPDIR:-/tmp}"
-  fi
-fi
-cache_root="$cache_root/termsy-shell-title"
-export TERM_PROGRAM=Termsy
-export COLORTERM=truecolor
-"""#
+		shell_path=${SHELL:-}
+		if [ -z "$shell_path" ] && [ -n "${USER:-}" ] && [ -r /etc/passwd ]; then
+		  shell_path=$(awk -F: -v user="$USER" '$1 == user { print $7; exit }' /etc/passwd 2>/dev/null)
+		fi
+		[ -n "$shell_path" ] || shell_path=/bin/sh
+		shell_name=${shell_path##*/}
+		cache_root=${XDG_CACHE_HOME:-}
+		if [ -z "$cache_root" ]; then
+		  if [ -n "${HOME:-}" ]; then
+		    cache_root="$HOME/.cache"
+		  else
+		    cache_root="${TMPDIR:-/tmp}"
+		  fi
+		fi
+		cache_root="$cache_root/termsy-shell-title"
+		export TERM_PROGRAM=Termsy
+		export COLORTERM=truecolor
+		"""#
 
 		return """
-\(cacheRootScript)
-case "$shell_name" in
-  bash)
-    bash_dir="$cache_root/bash"
-    mkdir -p "$bash_dir"
-    cat >"$bash_dir/termsy-title.bash" <<'__TERMSY_BASH__'
-\(bashScript)
-__TERMSY_BASH__
-    exec "$shell_path" --noprofile --norc --rcfile "$bash_dir/termsy-title.bash" -i
-    ;;
-  fish)
-    fish_dir="$cache_root/fish"
-    mkdir -p "$fish_dir/fish/vendor_conf.d"
-    cat >"$fish_dir/fish/vendor_conf.d/termsy-title.fish" <<'__TERMSY_FISH__'
-\(fishScript)
-__TERMSY_FISH__
-    if [ -n "${XDG_DATA_DIRS:-}" ]; then
-      export XDG_DATA_DIRS="$fish_dir:$XDG_DATA_DIRS"
-    else
-      export XDG_DATA_DIRS="$fish_dir:/usr/local/share:/usr/share"
-    fi
-    exec "$shell_path" -i -l
-    ;;
-  zsh)
-    zsh_dir="$cache_root/zsh"
-    mkdir -p "$zsh_dir"
-    cat >"$zsh_dir/.zshenv" <<'__TERMSY_ZSHENV__'
-\(zshEnvScript)
-__TERMSY_ZSHENV__
-    cat >"$zsh_dir/termsy-title.zsh" <<'__TERMSY_ZSH__'
-\(zshIntegrationScript)
-__TERMSY_ZSH__
-    if [ "${ZDOTDIR+set}" = set ]; then
-      export TERMSY_TITLE_ORIGINAL_ZDOTDIR="$ZDOTDIR"
-    fi
-    export TERMSY_TITLE_ZSH_INTEGRATION_FILE="$zsh_dir/termsy-title.zsh"
-    export ZDOTDIR="$zsh_dir"
-    exec "$shell_path" -i -l
-    ;;
-  *)
-    exec "$shell_path"
-    ;;
-esac
-"""
+		\(cacheRootScript)
+		case "$shell_name" in
+		  bash)
+		    bash_dir="$cache_root/bash"
+		    mkdir -p "$bash_dir"
+		    cat >"$bash_dir/termsy-title.bash" <<'__TERMSY_BASH__'
+		\(bashScript)
+		__TERMSY_BASH__
+		    exec "$shell_path" --noprofile --norc --rcfile "$bash_dir/termsy-title.bash" -i
+		    ;;
+		  fish)
+		    fish_dir="$cache_root/fish"
+		    mkdir -p "$fish_dir/fish/vendor_conf.d"
+		    cat >"$fish_dir/fish/vendor_conf.d/termsy-title.fish" <<'__TERMSY_FISH__'
+		\(fishScript)
+		__TERMSY_FISH__
+		    if [ -n "${XDG_DATA_DIRS:-}" ]; then
+		      export XDG_DATA_DIRS="$fish_dir:$XDG_DATA_DIRS"
+		    else
+		      export XDG_DATA_DIRS="$fish_dir:/usr/local/share:/usr/share"
+		    fi
+		    exec "$shell_path" -i -l
+		    ;;
+		  zsh)
+		    zsh_dir="$cache_root/zsh"
+		    mkdir -p "$zsh_dir"
+		    cat >"$zsh_dir/.zshenv" <<'__TERMSY_ZSHENV__'
+		\(zshEnvScript)
+		__TERMSY_ZSHENV__
+		    cat >"$zsh_dir/termsy-title.zsh" <<'__TERMSY_ZSH__'
+		\(zshIntegrationScript)
+		__TERMSY_ZSH__
+		    if [ "${ZDOTDIR+set}" = set ]; then
+		      export TERMSY_TITLE_ORIGINAL_ZDOTDIR="$ZDOTDIR"
+		    fi
+		    export TERMSY_TITLE_ZSH_INTEGRATION_FILE="$zsh_dir/termsy-title.zsh"
+		    export ZDOTDIR="$zsh_dir"
+		    exec "$shell_path" -i -l
+		    ;;
+		  *)
+		    exec "$shell_path"
+		    ;;
+		esac
+		"""
 	}()
 }
 

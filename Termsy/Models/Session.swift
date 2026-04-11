@@ -37,7 +37,10 @@ extension Session {
 		static let lastConnectedAt = Column(CodingKeys.lastConnectedAt)
 	}
 
-	init(hostname: String, username: String, tmuxSessionName: String?, port: Int, autoconnect: Bool, customTitle: String? = nil) {
+	init(
+		hostname: String, username: String, tmuxSessionName: String?, port: Int, autoconnect: Bool,
+		customTitle: String? = nil
+	) {
 		let now = Date()
 		self.id = nil
 		self.hostname = hostname
@@ -48,6 +51,14 @@ extension Session {
 		self.autoconnect = autoconnect
 		self.createdAt = now
 		self.lastConnectedAt = nil
+	}
+
+	static func existing(_ other: Session, in db: Database) throws -> Session? {
+		try Session.filter { $0.hostname == other.hostname }
+			.filter { $0.tmuxSessionName == other.tmuxSessionName }
+			.filter { $0.username == other.username }
+			.filter { $0.port == other.port }
+			.fetchOne(db)
 	}
 
 	var normalizedHostname: String {
