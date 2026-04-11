@@ -136,6 +136,11 @@
 			hostManagedSurface?.processExit(code: code, runtimeMs: runtimeMs)
 		}
 
+		var needsCloseConfirmation: Bool {
+			guard let surface else { return false }
+			return ghostty_surface_needs_confirm_quit(surface)
+		}
+
 		func handleTitleChange(_ title: String) {
 			onTitleChange?(title)
 		}

@@ -27,9 +27,11 @@
 		private var repeatingKeyCode: UInt16?
 		private var suppressedKeyReleaseCodes = Set<UInt16>()
 		private var lastMouseLocation: CGPoint?
+		private var lastIndirectPointerHoverLocation: CGPoint?
 		private var activePointerButton: ghostty_input_mouse_button_e?
 		private weak var touchScrollRecognizer: UIPanGestureRecognizer?
 		private weak var indirectScrollRecognizer: UIPanGestureRecognizer?
+		private weak var indirectPointerHoverRecognizer: UIHoverGestureRecognizer?
 		private var lastScrollLocation: CGPoint?
 		private var momentumVelocity = CGPoint.zero
 		private var momentumInputKind: TerminalScrollSettings.InputKind?
@@ -109,7 +111,9 @@
 				let indirectScrollRecognizer = UIPanGestureRecognizer(
 					target: self, action: #selector(handleScroll(_:))
 				)
-				indirectScrollRecognizer.allowedTouchTypes = []
+				indirectScrollRecognizer.allowedTouchTypes = [
+					NSNumber(value: UITouch.TouchType.indirectPointer.rawValue),
+				]
 				indirectScrollRecognizer.allowedScrollTypesMask = [.continuous, .discrete]
 				indirectScrollRecognizer.cancelsTouchesInView = false
 				indirectScrollRecognizer.delaysTouchesBegan = false
@@ -117,6 +121,15 @@
 				indirectScrollRecognizer.requiresExclusiveTouchType = false
 				addGestureRecognizer(indirectScrollRecognizer)
 				self.indirectScrollRecognizer = indirectScrollRecognizer
+
+				let indirectPointerHoverRecognizer = UIHoverGestureRecognizer(
+					target: self, action: #selector(handleIndirectPointerHover(_:))
+				)
+				indirectPointerHoverRecognizer.cancelsTouchesInView = false
+				indirectPointerHoverRecognizer.delaysTouchesBegan = false
+				indirectPointerHoverRecognizer.delaysTouchesEnded = false
+				addGestureRecognizer(indirectPointerHoverRecognizer)
+				self.indirectPointerHoverRecognizer = indirectPointerHoverRecognizer
 			}
 
 			addInteraction(UIContextMenuInteraction(delegate: self))
@@ -185,6 +198,7 @@
 			suppressedKeyReleaseCodes.removeAll()
 			ClipboardAccessAuthorization.clear(for: self)
 			lastMouseLocation = nil
+			lastIndirectPointerHoverLocation = nil
 			lastScrollLocation = nil
 			activePointerButton = nil
 			denyOutstandingClipboardReadConfirmations()
@@ -426,6 +440,7 @@
 			activeHardwareKeyCodes.removeAll()
 			suppressedKeyReleaseCodes.removeAll()
 			lastScrollLocation = nil
+			lastIndirectPointerHoverLocation = nil
 			activePointerButton = nil
 		}
 
@@ -611,12 +626,27 @@
 			return GHOSTTY_MOUSE_LEFT
 		}
 
+		@objc private func handleIndirectPointerHover(_ recognizer: UIHoverGestureRecognizer) {
+			let location = recognizer.location(in: self)
+			switch recognizer.state {
+			case .began, .changed:
+				lastIndirectPointerHoverLocation = location
+				sendMousePosition(location)
+			case .ended, .cancelled:
+				lastIndirectPointerHoverLocation = nil
+			default:
+				break
+			}
+		}
+
 		@objc private func handleScroll(_ recognizer: UIPanGestureRecognizer) {
 			guard surface != nil else { return }
 			guard activePointerButton == nil else { return }
 			let inputKind: TerminalScrollSettings.InputKind =
 				recognizer === indirectScrollRecognizer ? .indirectPointer : .touch
-			let location = recognizer.location(in: self)
+			let location = inputKind == .indirectPointer
+				? (lastIndirectPointerHoverLocation ?? recognizer.location(in: self))
+				: recognizer.location(in: self)
 
 			switch recognizer.state {
 			case .began:

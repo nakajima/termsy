@@ -12,6 +12,8 @@
 
 		private let db: DB
 		private weak var manager: MacTerminalWindowManager?
+		private var bypassesCloseConfirmation = false
+		private var isShowingCloseConfirmation = false
 
 		init(source: MacTerminalTab.Source, db: DB, manager: MacTerminalWindowManager) {
 			self.source = source
@@ -33,7 +35,7 @@
 			super.init(window: window)
 
 			terminal.onRequestClose = { [weak self] in
-				self?.close()
+				self?.requestClose()
 			}
 			terminal.onRequestRename = { [weak self] in
 				self?.presentRenameAlert()
@@ -65,6 +67,14 @@
 		func presentConnectSheet() {
 			guard let window else { return }
 			NotificationCenter.default.post(name: .termsyPresentSSHSessionSheet, object: window)
+		}
+
+		func requestClose() {
+			guard let window else {
+				close()
+				return
+			}
+			window.performClose(nil)
 		}
 
 		func presentRenameAlert() {
@@ -171,6 +181,33 @@
 			window.makeKeyAndOrderFront(nil)
 			terminal.setDisplayActive(true)
 			requestTerminalFocus()
+		}
+
+		func windowShouldClose(_ sender: NSWindow) -> Bool {
+			if bypassesCloseConfirmation {
+				bypassesCloseConfirmation = false
+				return true
+			}
+
+			guard terminal.needsCloseConfirmation else { return true }
+			guard !isShowingCloseConfirmation else { return false }
+
+			let alert = NSAlert()
+			alert.messageText = "Close Tab?"
+			alert.informativeText = "A process may still be running in this tab. Close it anyway?"
+			alert.alertStyle = .warning
+			alert.addButton(withTitle: "Close Tab")
+			alert.addButton(withTitle: "Cancel")
+
+			isShowingCloseConfirmation = true
+			alert.beginSheetModal(for: sender) { [weak self, weak sender] response in
+				guard let self else { return }
+				self.isShowingCloseConfirmation = false
+				guard response == .alertFirstButtonReturn, let sender else { return }
+				self.bypassesCloseConfirmation = true
+				sender.performClose(nil)
+			}
+			return false
 		}
 
 		func windowDidBecomeKey(_: Notification) {

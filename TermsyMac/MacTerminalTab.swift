@@ -70,6 +70,10 @@
 			title
 		}
 
+		var needsCloseConfirmation: Bool {
+			terminalView.needsCloseConfirmation
+		}
+
 		func applyTheme(_ theme: AppTheme) {
 			terminalView.applyTheme(theme)
 		}
