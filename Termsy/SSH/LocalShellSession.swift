@@ -67,7 +67,10 @@
 				setenv("SHELL", shellPath, 1)
 				setenv("TERM", "xterm-256color", 1)
 				setenv("COLORTERM", "truecolor", 1)
-				setenv("TERM_PROGRAM", "Termsy", 1)
+				setenv("TERM_PROGRAM", ShellTitleIntegration.termProgram, 1)
+				if !ShellTitleIntegration.termProgramVersion.isEmpty {
+					setenv("TERM_PROGRAM_VERSION", ShellTitleIntegration.termProgramVersion, 1)
+				}
 				for (key, value) in shellLaunch?.environment ?? [:] {
 					setenv(key, value, 1)
 				}

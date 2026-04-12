@@ -1,8 +1,8 @@
 diff --git a/include/ghostty.h b/include/ghostty.h
-index 40ff55c..4c4f01b 100644
+index afc20bb3f..e21716505 100644
 --- a/include/ghostty.h
 +++ b/include/ghostty.h
-@@ -437,10 +437,26 @@ typedef enum {
+@@ -465,10 +465,26 @@ typedef enum {
    GHOSTTY_SURFACE_CONTEXT_SPLIT = 2,
  } ghostty_surface_context_e;
  
@@ -29,20 +29,20 @@ index 40ff55c..4c4f01b 100644
    double scale_factor;
    float font_size;
    const char* working_directory;
-@@ -1080,6 +1096,8 @@ ghostty_surface_config_s ghostty_surface_inherited_config(ghostty_surface_t, gho
- void ghostty_surface_update_config(ghostty_surface_t, ghostty_config_t);
- bool ghostty_surface_needs_confirm_quit(ghostty_surface_t);
- bool ghostty_surface_process_exited(ghostty_surface_t);
-+void ghostty_surface_write_buffer(ghostty_surface_t, const uint8_t*, uintptr_t);
-+void ghostty_surface_process_exit(ghostty_surface_t, uint32_t, uint64_t);
- void ghostty_surface_refresh(ghostty_surface_t);
- void ghostty_surface_draw(ghostty_surface_t);
- void ghostty_surface_set_content_scale(ghostty_surface_t, double, double);
+@@ -1108,6 +1124,8 @@ GHOSTTY_API ghostty_surface_config_s ghostty_surface_inherited_config(ghostty_su
+ GHOSTTY_API void ghostty_surface_update_config(ghostty_surface_t, ghostty_config_t);
+ GHOSTTY_API bool ghostty_surface_needs_confirm_quit(ghostty_surface_t);
+ GHOSTTY_API bool ghostty_surface_process_exited(ghostty_surface_t);
++GHOSTTY_API void ghostty_surface_write_buffer(ghostty_surface_t, const uint8_t*, uintptr_t);
++GHOSTTY_API void ghostty_surface_process_exit(ghostty_surface_t, uint32_t, uint64_t);
+ GHOSTTY_API void ghostty_surface_refresh(ghostty_surface_t);
+ GHOSTTY_API void ghostty_surface_draw(ghostty_surface_t);
+ GHOSTTY_API void ghostty_surface_set_content_scale(ghostty_surface_t, double, double);
 diff --git a/src/Surface.zig b/src/Surface.zig
-index 4d66622..145d113 100644
+index dfc3a50ea..93a3a231f 100644
 --- a/src/Surface.zig
 +++ b/src/Surface.zig
-@@ -620,34 +620,42 @@ pub fn init(
+@@ -635,38 +635,49 @@ pub fn init(
      // This separate block ({}) is important because our errdefers must
      // be scoped here to be valid.
      {
@@ -51,17 +51,49 @@ index 4d66622..145d113 100644
 -            log.warn("error getting env map for surface err={}", .{err});
 -            break :env internal_os.getEnvMap(alloc) catch
 -                std.process.EnvMap.init(alloc);
+-        };
+-        errdefer env.deinit();
 +        const backend: termio.Backend = switch (rt_surface.termioBackend()) {
 +            .exec => backend: {
 +                var env = rt_surface.defaultTermioEnv() catch |err| env: {
++                    // If an error occurs, we don't want to block surface startup.
 +                    log.warn("error getting env map for surface err={}", .{err});
 +                    break :env internal_os.getEnvMap(alloc) catch
 +                        std.process.EnvMap.init(alloc);
 +                };
 +                errdefer env.deinit();
-+
+ 
+-        // don't leak GHOSTTY_LOG to any subprocesses
+-        env.remove("GHOSTTY_LOG");
++                // don't leak GHOSTTY_LOG to any subprocesses
 +                env.remove("GHOSTTY_LOG");
-+
+ 
+-        var buf: [18]u8 = undefined;
+-        try env.put(
+-            "GHOSTTY_SURFACE_ID",
+-            std.fmt.bufPrint(&buf, "0x{x:0>16}", .{self.id}) catch unreachable,
+-        );
++                var buf: [18]u8 = undefined;
++                try env.put(
++                    "GHOSTTY_SURFACE_ID",
++                    std.fmt.bufPrint(&buf, "0x{x:0>16}", .{self.id}) catch unreachable,
++                );
+ 
+-        // Initialize our IO backend
+-        var io_exec = try termio.Exec.init(alloc, .{
+-            .command = command,
+-            .env = env,
+-            .env_override = config.env,
+-            .shell_integration = config.@"shell-integration",
+-            .shell_integration_features = config.@"shell-integration-features",
+-            .cursor_blink = config.@"cursor-style-blink",
+-            .working_directory = if (config.@"working-directory") |wd| wd.value() else null,
+-            .resources_dir = global_state.resources_dir.host(),
+-            .term = config.term,
+-            .rt_pre_exec_info = .init(config),
+-            .rt_post_fork_info = .init(config),
+-        });
+-        errdefer io_exec.deinit();
 +                var io_exec = try termio.Exec.init(alloc, .{
 +                    .command = command,
 +                    .env = env,
@@ -85,33 +117,11 @@ index 4d66622..145d113 100644
 +                    try rt_surface.hostManagedConfig(),
 +                ),
 +            },
-         };
--        errdefer env.deinit();
--
--        // don't leak GHOSTTY_LOG to any subprocesses
--        env.remove("GHOSTTY_LOG");
--
--        // Initialize our IO backend
--        var io_exec = try termio.Exec.init(alloc, .{
--            .command = command,
--            .env = env,
--            .env_override = config.env,
--            .shell_integration = config.@"shell-integration",
--            .shell_integration_features = config.@"shell-integration-features",
--            .cursor_blink = config.@"cursor-style-blink",
--            .working_directory = if (config.@"working-directory") |wd| wd.value() else null,
--            .resources_dir = global_state.resources_dir.host(),
--            .term = config.term,
--            .rt_pre_exec_info = .init(config),
--            .rt_post_fork_info = .init(config),
--        });
--        errdefer io_exec.deinit();
++        };
  
--        // Initialize our IO mailbox
+         // Initialize our IO mailbox
          var io_mailbox = try termio.Mailbox.initSPSC(alloc);
-         errdefer io_mailbox.deinit(alloc);
- 
-@@ -655,7 +663,7 @@ pub fn init(
+@@ -676,7 +687,7 @@ pub fn init(
              .size = size,
              .full_config = config,
              .config = try termio.Termio.DerivedConfig.init(alloc, config),
@@ -120,7 +130,7 @@ index 4d66622..145d113 100644
              .mailbox = io_mailbox,
              .renderer_state = &self.renderer_state,
              .renderer_wakeup = render_thread.wakeup,
-@@ -1289,9 +1297,11 @@ fn childExitedAbnormally(
+@@ -1310,9 +1321,11 @@ fn childExitedAbnormally(
      const alloc = arena.allocator();
  
      // Build up our command for the error message
@@ -136,7 +146,7 @@ index 4d66622..145d113 100644
  
      self.renderer_state.mutex.lock();
 diff --git a/src/apprt/embedded.zig b/src/apprt/embedded.zig
-index 0d5a4f8..b44d4d3 100644
+index 519a35f2b..25798d009 100644
 --- a/src/apprt/embedded.zig
 +++ b/src/apprt/embedded.zig
 @@ -15,6 +15,7 @@ const input = @import("../input.zig");
@@ -258,7 +268,7 @@ index 0d5a4f8..b44d4d3 100644
      export fn ghostty_surface_has_selection(surface: *Surface) bool {
          return surface.core_surface.hasSelection();
 diff --git a/src/termio.zig b/src/termio.zig
-index b168851..6931fcb 100644
+index b16885109..6931fcb58 100644
 --- a/src/termio.zig
 +++ b/src/termio.zig
 @@ -23,6 +23,7 @@ const message = @import("termio/message.zig");
@@ -271,7 +281,7 @@ index b168851..6931fcb 100644
  pub const Thread = @import("termio/Thread.zig");
 diff --git a/src/termio/HostManaged.zig b/src/termio/HostManaged.zig
 new file mode 100644
-index 0000000..0d18213
+index 000000000..0d1821350
 --- /dev/null
 +++ b/src/termio/HostManaged.zig
 @@ -0,0 +1,136 @@
@@ -412,10 +422,10 @@ index 0000000..0d18213
 +    }
 +};
 diff --git a/src/termio/backend.zig b/src/termio/backend.zig
-index ae0e200..f1d35d2 100644
+index c29009acb..9857cbd7a 100644
 --- a/src/termio/backend.zig
 +++ b/src/termio/backend.zig
-@@ -10,28 +10,34 @@ const termio = @import("../termio.zig");
+@@ -11,28 +11,34 @@ const ProcessInfo = @import("../pty.zig").ProcessInfo;
  const WRITE_REQ_PREALLOC = std.math.pow(usize, 2, 5);
  
  /// The kinds of backends.
@@ -451,7 +461,7 @@ index ae0e200..f1d35d2 100644
          }
      }
  
-@@ -43,12 +49,14 @@ pub const Backend = union(Kind) {
+@@ -44,12 +50,14 @@ pub const Backend = union(Kind) {
      ) !void {
          switch (self.*) {
              .exec => |*exec| try exec.threadEnter(alloc, io, td),
@@ -466,7 +476,7 @@ index ae0e200..f1d35d2 100644
          }
      }
  
-@@ -59,6 +67,7 @@ pub const Backend = union(Kind) {
+@@ -60,6 +68,7 @@ pub const Backend = union(Kind) {
      ) !void {
          switch (self.*) {
              .exec => |*exec| try exec.focusGained(td, focused),
@@ -474,7 +484,7 @@ index ae0e200..f1d35d2 100644
          }
      }
  
-@@ -69,6 +78,7 @@ pub const Backend = union(Kind) {
+@@ -70,6 +79,7 @@ pub const Backend = union(Kind) {
      ) !void {
          switch (self.*) {
              .exec => |*exec| try exec.resize(grid_size, screen_size),
@@ -482,7 +492,7 @@ index ae0e200..f1d35d2 100644
          }
      }
  
-@@ -81,6 +91,7 @@ pub const Backend = union(Kind) {
+@@ -82,6 +92,7 @@ pub const Backend = union(Kind) {
      ) !void {
          switch (self.*) {
              .exec => |*exec| try exec.queueWrite(alloc, td, data, linefeed),
@@ -490,7 +500,7 @@ index ae0e200..f1d35d2 100644
          }
      }
  
-@@ -98,6 +109,12 @@ pub const Backend = union(Kind) {
+@@ -99,6 +110,12 @@ pub const Backend = union(Kind) {
                  exit_code,
                  runtime_ms,
              ),
@@ -502,8 +512,16 @@ index ae0e200..f1d35d2 100644
 +            ),
          }
      }
+ 
+@@ -108,6 +125,7 @@ pub const Backend = union(Kind) {
+     pub fn getProcessInfo(self: *Backend, comptime info: ProcessInfo) ?ProcessInfo.Type(info) {
+         return switch (self.*) {
+             .exec => |*exec| exec.getProcessInfo(info),
++            .host_managed => null,
+         };
+     }
  };
-@@ -105,10 +122,12 @@ pub const Backend = union(Kind) {
+@@ -115,10 +133,12 @@ pub const Backend = union(Kind) {
  /// Termio thread data. See termio.ThreadData for docs.
  pub const ThreadData = union(Kind) {
      exec: termio.Exec.ThreadData,

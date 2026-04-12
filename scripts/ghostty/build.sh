@@ -82,7 +82,17 @@ fi
 
 if [ -n "$GHOSTTY_REF" ]; then
     echo "[*] checking out ghostty ref: $GHOSTTY_REF"
-    git -C "$SOURCE_DIR" fetch --tags origin
+    git -C "$SOURCE_DIR" fetch --tags --force origin
+
+    if [ "$SOURCE_DIR" = "$DEFAULT_SOURCE_DIR" ]; then
+        git -C "$SOURCE_DIR" reset --hard HEAD
+        git -C "$SOURCE_DIR" clean -fd
+    elif [ -n "$(git -C "$SOURCE_DIR" status --porcelain)" ]; then
+        echo "[!] source checkout has local changes: $SOURCE_DIR"
+        echo "[!] refusing to checkout a different ref in a user-provided source directory"
+        exit 1
+    fi
+
     git -C "$SOURCE_DIR" checkout "$GHOSTTY_REF"
 else
     echo "[!] no pinned ghostty ref configured; using the current state of $SOURCE_DIR"

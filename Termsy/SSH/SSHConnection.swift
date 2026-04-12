@@ -8,6 +8,7 @@ import NIOCore
 import NIOFoundationCompat
 @preconcurrency import NIOSSH
 import NIOTransportServices
+import TermsyGhosttyCore
 
 struct TerminalWindowSize: Sendable, Equatable {
 	var columns: Int
@@ -57,6 +58,14 @@ enum ShellTitleIntegration {
 		let environment: [String: String]
 		let cleanupDirectory: URL?
 	}
+
+	static let termProgram = "ghostty"
+
+	static let termProgramVersion: String = {
+		let info = ghostty_info()
+		guard let version = info.version else { return "" }
+		return String(cString: version)
+	}()
 
 	static func localLaunch(shellPath: String, environment: [String: String]) throws -> LocalLaunch? {
 		guard let shell = Shell(shellPath: shellPath) else { return nil }
@@ -289,6 +298,25 @@ enum ShellTitleIntegration {
 	"""#
 
 	private static let remoteBootstrapScript: String = {
+		let termProgramVersionExport = if termProgramVersion.isEmpty {
+			""
+		} else {
+			"export TERM_PROGRAM_VERSION=\(shellQuoted(termProgramVersion))\n"
+		}
+
+		let terminfoBootstrapScript = """
+		if infocmp xterm-ghostty >/dev/null 2>&1; then
+		  export TERM=xterm-ghostty
+		elif command -v tic >/dev/null 2>&1; then
+		  mkdir -p ~/.terminfo 2>/dev/null || true
+		  if cat <<'__TERMSY_GHOSTTY_TERMINFO__' | tic -x - >/dev/null 2>&1; then
+		""" + GhosttyTerminfo.source + """
+		__TERMSY_GHOSTTY_TERMINFO__
+		    export TERM=xterm-ghostty
+		  fi
+		fi
+		"""
+
 		let cacheRootScript = #"""
 		shell_path=${SHELL:-}
 		if [ -z "$shell_path" ] && [ -n "${USER:-}" ] && [ -r /etc/passwd ]; then
@@ -305,12 +333,13 @@ enum ShellTitleIntegration {
 		  fi
 		fi
 		cache_root="$cache_root/termsy-shell-title"
-		export TERM_PROGRAM=Termsy
+		export TERM_PROGRAM=ghostty
 		export COLORTERM=truecolor
-		"""#
+		"""# + termProgramVersionExport
 
 		return """
 		\(cacheRootScript)
+		\(terminfoBootstrapScript)
 		case "$shell_name" in
 		  bash)
 		    bash_dir="$cache_root/bash"
