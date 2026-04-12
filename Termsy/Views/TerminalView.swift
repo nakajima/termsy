@@ -46,6 +46,13 @@
 		private(set) var isDisplayActive = false
 		private var currentTheme = TerminalTheme.current.appTheme
 		private var armedSoftwareModifiers: UIKeyModifierFlags = []
+		private var showsSoftwareKeyboardAccessory = false {
+			didSet {
+				guard oldValue != showsSoftwareKeyboardAccessory else { return }
+				guard isFirstResponder else { return }
+				reloadInputViews()
+			}
+		}
 		private let keyboardAccessoryBar = TerminalKeyboardAccessoryView(theme: TerminalTheme.current.appTheme)
 		private var firstResponderTask: Task<Void, Never>?
 		private let momentumVelocityThreshold: CGFloat = 50
@@ -152,6 +159,18 @@
 
 		override init(frame: CGRect) {
 			super.init(frame: frame)
+			NotificationCenter.default.addObserver(
+				self,
+				selector: #selector(handleKeyboardWillChangeFrame(_:)),
+				name: UIResponder.keyboardWillChangeFrameNotification,
+				object: nil
+			)
+			NotificationCenter.default.addObserver(
+				self,
+				selector: #selector(handleKeyboardWillHide(_:)),
+				name: UIResponder.keyboardWillHideNotification,
+				object: nil
+			)
 			keyboardAccessoryBar.onAction = { [weak self] action in
 				self?.handleKeyboardAccessoryAction(action)
 			}
@@ -991,7 +1010,9 @@
 
 		// MARK: - First Responder
 
-		override var inputAccessoryView: UIView? { keyboardAccessoryBar }
+		override var inputAccessoryView: UIView? {
+			showsSoftwareKeyboardAccessory ? keyboardAccessoryBar : nil
+		}
 		override var canBecomeFirstResponder: Bool { true }
 		var hasText: Bool { true }
 
@@ -1052,6 +1073,31 @@
 				return
 			}
 			sendSoftwareSpecialKey(macKeycode: 0x0033) // Backspace
+		}
+
+		@objc private func handleKeyboardWillChangeFrame(_ notification: Notification) {
+			guard isLocalKeyboardNotification(notification) else { return }
+			guard let endFrameValue = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue
+			else {
+				return
+			}
+			showsSoftwareKeyboardAccessory = isSoftwareKeyboardVisible(endFrameValue.cgRectValue)
+		}
+
+		@objc private func handleKeyboardWillHide(_ notification: Notification) {
+			guard isLocalKeyboardNotification(notification) else { return }
+			showsSoftwareKeyboardAccessory = false
+		}
+
+		private func isLocalKeyboardNotification(_ notification: Notification) -> Bool {
+			(notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool) ?? true
+		}
+
+		private func isSoftwareKeyboardVisible(_ keyboardFrame: CGRect) -> Bool {
+			guard !keyboardFrame.isEmpty, let window else { return false }
+			let frameInWindow = window.convert(keyboardFrame, from: nil)
+			let intersection = window.bounds.intersection(frameInWindow)
+			return !intersection.isNull && intersection.height > 0
 		}
 
 		private func handleKeyboardAccessoryAction(_ action: TerminalKeyboardAccessoryView.Action) {
