@@ -133,6 +133,10 @@ class ViewCoordinator {
 			selectedTab.requestReconnect()
 			return
 		}
+		if selectedTab.hasRecoverableBackgroundDisconnectError {
+			selectedTab.requestReconnect()
+			return
+		}
 		guard selectedTab.isConnected else { return }
 		guard !selectedTab.connectionIsActive else { return }
 		selectedTab.requestReconnect()
@@ -373,6 +377,12 @@ class TerminalTab: Identifiable {
 		return isConnected || (connectionError == nil && !needsPassword)
 	}
 
+	var hasRecoverableBackgroundDisconnectError: Bool {
+		guard case .remote = endpoint else { return false }
+		guard !isConnected, wasConnectedWhenAppResignedActive, let connectionError else { return false }
+		return isRecoverableBackgroundDisconnectMessage(connectionError)
+	}
+
 	func connect() async {
 		connectionError = nil
 		logConnectionEvent("Connect requested")
@@ -412,6 +422,7 @@ class TerminalTab: Identifiable {
 				return
 			}
 			isConnected = true
+			isRestoring = false
 			self.session?.lastConnectedAt = Date()
 			clearAppInactiveState()
 			logConnectionEvent("Attempt \(attempt): connection established")
@@ -421,10 +432,12 @@ class TerminalTab: Identifiable {
 			startTmuxIfNeeded(using: sshSession, attempt: attempt)
 		} catch SSHConnectionError.authenticationFailed {
 			guard self.sshSession === sshSession else { return }
+			isRestoring = false
 			logConnectionEvent("Attempt \(attempt): authentication failed; prompting for password")
 			needsPassword = true
 		} catch {
 			guard self.sshSession === sshSession else { return }
+			isRestoring = false
 			logConnectionEvent("Attempt \(attempt): connection failed: \(error)")
 			connectionError = "\(error)"
 		}
@@ -436,8 +449,10 @@ class TerminalTab: Identifiable {
 			do {
 				try localShellSession.start()
 				isConnected = true
+				isRestoring = false
 				clearAppInactiveState()
 			} catch {
+				isRestoring = false
 				print("[LocalShell] failed to start: \(error)")
 				connectionError = error.localizedDescription
 			}
@@ -523,6 +538,7 @@ class TerminalTab: Identifiable {
 				return
 			}
 			isConnected = true
+			isRestoring = false
 			self.session?.lastConnectedAt = Date()
 			clearAppInactiveState()
 			Keychain.setPassword(password, for: session)
@@ -533,6 +549,7 @@ class TerminalTab: Identifiable {
 			startTmuxIfNeeded(using: sshSession, attempt: attempt)
 		} catch {
 			guard self.sshSession === sshSession else { return }
+			isRestoring = false
 			logConnectionEvent("Attempt \(attempt): password retry failed: \(error)")
 			connectionError = "\(error)"
 		}
@@ -636,16 +653,43 @@ class TerminalTab: Identifiable {
 		clearAppInactiveState()
 		connectionError = nil
 		needsPassword = false
-		isRestoring = false
+		isRestoring = true
 		disconnect()
 		resetTerminalView()
 	}
 
+	private func isRecoverableBackgroundDisconnectMessage(_ message: String) -> Bool {
+		let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+		guard !normalized.isEmpty else { return false }
+		let keywords = [
+			"tcpshutdown",
+			"tcp shutdown",
+			"timeout",
+			"timed out",
+			"nwtcpconnection",
+			"network connection was lost",
+			"network is down",
+			"not connected",
+			"socket is not connected",
+			"connection reset",
+			"broken pipe",
+			"connection abort",
+			"connection aborted",
+			"software caused connection abort",
+			"connection closed unexpectedly",
+			"host is down",
+			"econnreset",
+			"enotconn",
+			"etimedout",
+			"econnaborted",
+			"posixerror",
+		]
+		return keywords.contains { normalized.contains($0) }
+	}
+
 	private func shouldAutoReconnect(for message: String) -> Bool {
 		guard case .remote = endpoint else { return false }
-		let isTcpShutdown = message.localizedCaseInsensitiveContains("tcpShutdown")
-			|| message.localizedCaseInsensitiveContains("tcp shutdown")
-		guard isTcpShutdown else { return false }
+		guard isRecoverableBackgroundDisconnectMessage(message) else { return false }
 		if !ApplicationActivity.isActive {
 			return wasConnectedWhenAppResignedActive
 		}

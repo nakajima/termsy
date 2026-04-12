@@ -93,10 +93,8 @@ struct ContentView: View {
 					switch phase {
 					case .active:
 						coordinator.appDidBecomeActive()
-					case .background:
+					case .background, .inactive:
 						coordinator.appWillResignActive()
-					case .inactive:
-						break
 					@unknown default:
 						break
 					}

@@ -43,6 +43,7 @@
 		private var connectTask: Task<Void, Never>?
 		private var activeConnectTaskID: UUID?
 		private var connectionWatchdogTask: Task<Void, Never>?
+		private let activationReconnectDelayNanoseconds: UInt64 = 750_000_000
 
 		init(terminalTab: TerminalTab, theme: AppTheme) {
 			self.terminalTab = terminalTab
@@ -112,10 +113,13 @@
 		}
 
 		private func connectIfNeeded() {
+			startConnectTask(after: 0)
+		}
+
+		private func startConnectTask(after delayNanoseconds: UInt64) {
 			guard !terminalTab.isConnected,
 			      terminalTab.connectionError == nil,
 			      !terminalTab.needsPassword,
-			      !terminalTab.isRestoring,
 			      activeConnectTaskID == nil,
 			      !terminalTab.connectionIsActive
 			else { return }
@@ -130,6 +134,10 @@
 						self.connectTask = nil
 						self.updateOverlay()
 					}
+				}
+				if delayNanoseconds > 0 {
+					try? await Task.sleep(nanoseconds: delayNanoseconds)
+					guard !Task.isCancelled else { return }
 				}
 				await self.terminalTab.connect()
 				self.syncTerminalSizeToSession()
@@ -236,7 +244,7 @@
 			terminalTab.prepareForReconnectAfterBackgroundLoss()
 			terminalView = nil
 			setupTerminal()
-			connectIfNeeded()
+			startConnectTask(after: activationReconnectDelayNanoseconds)
 		}
 
 		deinit {
