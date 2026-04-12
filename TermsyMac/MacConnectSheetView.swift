@@ -120,13 +120,11 @@
 
 			do {
 				try dbContext.writer.write { db in
-					if var existingSession = try Session.filter({
-						$0.hostname == session.hostname
-//					&&
-//					$0.username == session.username &&
-//					$0.tmuxSessionName == session.tmuxSessionName &&
-//					$0.port == session.port
-					}).fetchOne(db) {
+					if var existingSession = try Session.existing(session, in: db) {
+						existingSession.hostname = session.hostname
+						existingSession.username = session.username
+						existingSession.tmuxSessionName = session.tmuxSessionName
+						existingSession.port = session.port
 						existingSession.autoconnect = session.autoconnect
 						try existingSession.update(db)
 						session = existingSession

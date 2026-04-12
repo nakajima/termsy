@@ -13,6 +13,10 @@ enum Keychain {
 		"session:\(session.id ?? 0)"
 	}
 
+	private nonisolated static func normalizedTargetAccount(for session: Session) -> String {
+		"target:\(session.normalizedTargetKey)"
+	}
+
 	private nonisolated static func legacyAccount(for session: Session) -> String {
 		let base = legacyAccountWithoutTmux(for: session)
 		guard let tmuxSessionName = session.tmuxSessionName?
@@ -31,6 +35,12 @@ enum Keychain {
 
 	nonisolated static func password(for session: Session) -> String? {
 		if let password = readPassword(account: account(for: session)) {
+			upsertPassword(password, account: normalizedTargetAccount(for: session))
+			return password
+		}
+
+		if let password = readPassword(account: normalizedTargetAccount(for: session)) {
+			upsertPassword(password, account: account(for: session))
 			return password
 		}
 
@@ -41,7 +51,7 @@ enum Keychain {
 			return legacyPassword
 		}
 
-		guard session.normalizedTmuxSessionName == nil,
+		guard session.normalizedTmuxSessionName == "-",
 		      let legacyPassword = readPassword(account: legacyAccountWithoutTmux(for: session))
 		else {
 			return nil
@@ -54,10 +64,12 @@ enum Keychain {
 
 	nonisolated static func setPassword(_ password: String, for session: Session) {
 		upsertPassword(password, account: account(for: session))
+		upsertPassword(password, account: normalizedTargetAccount(for: session))
 	}
 
 	nonisolated static func removePassword(for session: Session) {
 		removePassword(account: account(for: session))
+		removePassword(account: normalizedTargetAccount(for: session))
 		removePassword(account: legacyAccount(for: session))
 		removePassword(account: legacyAccountWithoutTmux(for: session))
 	}

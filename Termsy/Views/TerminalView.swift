@@ -13,7 +13,7 @@
 	import UIKit
 
 	@MainActor
-	final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate {
+	final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate, UIGestureRecognizerDelegate {
 		private(set) nonisolated(unsafe) var surface: ghostty_surface_t?
 		private var hostManagedSurface: HostManagedSurface?
 		private var ghosttySurfaceUserdata: GhosttySurfaceUserdata?
@@ -29,10 +29,14 @@
 		private var lastMouseLocation: CGPoint?
 		private var lastIndirectPointerHoverLocation: CGPoint?
 		private var activePointerButton: ghostty_input_mouse_button_e?
+		private weak var directTapRecognizer: UITapGestureRecognizer?
 		private weak var touchScrollRecognizer: UIPanGestureRecognizer?
+		private weak var directSelectionRecognizer: UILongPressGestureRecognizer?
 		private weak var indirectScrollRecognizer: UIPanGestureRecognizer?
 		private weak var indirectPointerHoverRecognizer: UIHoverGestureRecognizer?
 		private var lastScrollLocation: CGPoint?
+		private var isDirectSelectionActive = false
+		private var suppressContextMenuUntil = Date.distantPast
 		private var momentumVelocity = CGPoint.zero
 		private var momentumInputKind: TerminalScrollSettings.InputKind?
 		private var smoothScrollAccumulatedOffsetY: CGFloat = 0
@@ -93,10 +97,22 @@
 			isMultipleTouchEnabled = false
 			clipsToBounds = true
 
+			let directTapRecognizer = UITapGestureRecognizer(
+				target: self, action: #selector(handleDirectTap(_:))
+			)
+			directTapRecognizer.allowedTouchTypes = [
+				NSNumber(value: UITouch.TouchType.direct.rawValue),
+			]
+			directTapRecognizer.cancelsTouchesInView = false
+			directTapRecognizer.delaysTouchesBegan = false
+			directTapRecognizer.delegate = self
+			addGestureRecognizer(directTapRecognizer)
+			self.directTapRecognizer = directTapRecognizer
+
 			let touchScrollRecognizer = UIPanGestureRecognizer(
 				target: self, action: #selector(handleScroll(_:))
 			)
-			touchScrollRecognizer.minimumNumberOfTouches = 2
+			touchScrollRecognizer.minimumNumberOfTouches = 1
 			touchScrollRecognizer.maximumNumberOfTouches = 2
 			touchScrollRecognizer.allowedTouchTypes = [
 				NSNumber(value: UITouch.TouchType.direct.rawValue),
@@ -104,8 +120,26 @@
 			touchScrollRecognizer.cancelsTouchesInView = false
 			touchScrollRecognizer.delaysTouchesBegan = false
 			touchScrollRecognizer.delaysTouchesEnded = false
+			touchScrollRecognizer.delegate = self
 			addGestureRecognizer(touchScrollRecognizer)
 			self.touchScrollRecognizer = touchScrollRecognizer
+
+			let directSelectionRecognizer = UILongPressGestureRecognizer(
+				target: self, action: #selector(handleDirectSelection(_:))
+			)
+			directSelectionRecognizer.allowedTouchTypes = [
+				NSNumber(value: UITouch.TouchType.direct.rawValue),
+			]
+			directSelectionRecognizer.numberOfTouchesRequired = 1
+			directSelectionRecognizer.minimumPressDuration = 0.35
+			directSelectionRecognizer.allowableMovement = 8
+			directSelectionRecognizer.cancelsTouchesInView = false
+			directSelectionRecognizer.delaysTouchesBegan = false
+			directSelectionRecognizer.delaysTouchesEnded = false
+			directSelectionRecognizer.delegate = self
+			directTapRecognizer.require(toFail: directSelectionRecognizer)
+			addGestureRecognizer(directSelectionRecognizer)
+			self.directSelectionRecognizer = directSelectionRecognizer
 
 			if #available(iOS 13.4, *) {
 				let indirectScrollRecognizer = UIPanGestureRecognizer(
@@ -139,7 +173,7 @@
 		required init?(coder _: NSCoder) { fatalError() }
 
 		deinit {
-			ClipboardAccessAuthorization.clear(for: self)
+			ClipboardAccessAuthorization.clear(forPointer: Unmanaged.passUnretained(self).toOpaque())
 		}
 
 		func applyTheme(_ theme: AppTheme) {
@@ -190,6 +224,7 @@
 
 		func stop() {
 			cancelFirstResponderRequest()
+			releaseDirectSelectionIfNeeded()
 			stopMomentumScrolling()
 			snapSmoothScrollPresentationToTerminal()
 			stopDisplayLink()
@@ -433,6 +468,7 @@
 		private func stopDisplayActivity() {
 			cancelFirstResponderRequest()
 			resignFirstResponder()
+			releaseDirectSelectionIfNeeded()
 			stopMomentumScrolling()
 			snapSmoothScrollPresentationToTerminal()
 			stopDisplayLink()
@@ -548,32 +584,25 @@
 
 		override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
 			super.touchesBegan(touches, with: event)
-			guard let surface, let touch = touches.first else {
+			guard let surface,
+			      let touch = touches.first(where: { $0.type == .indirectPointer })
+			else {
 				return
 			}
 
 			requestFirstResponder()
 			cancelActiveScrollAnimationForInteraction()
 
-			if touch.type == .indirectPointer {
-				let pos = touch.location(in: self)
-				sendMousePosition(pos)
-				let button = pointerButton(from: event)
-				activePointerButton = button
-				ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, button, GHOSTTY_MODS_NONE)
-				return
-			}
-
 			let pos = touch.location(in: self)
 			sendMousePosition(pos)
-			ghostty_surface_mouse_button(
-				surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE
-			)
+			let button = pointerButton(from: event)
+			activePointerButton = button
+			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, button, GHOSTTY_MODS_NONE)
 		}
 
 		override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
 			super.touchesMoved(touches, with: event)
-			guard let touch = touches.first else {
+			guard let touch = touches.first(where: { $0.type == .indirectPointer }) else {
 				return
 			}
 			sendMousePosition(touch.location(in: self))
@@ -581,29 +610,23 @@
 
 		override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
 			super.touchesEnded(touches, with: event)
-			guard let surface, let touch = touches.first else {
+			guard let surface,
+			      let touch = touches.first(where: { $0.type == .indirectPointer })
+			else {
 				return
 			}
 			sendMousePosition(touch.location(in: self))
-
-			if touch.type == .indirectPointer {
-				let button = activePointerButton ?? pointerButton(from: event)
-				activePointerButton = nil
-				ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, button, GHOSTTY_MODS_NONE)
-				return
-			}
-
-			ghostty_surface_mouse_button(
-				surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE
-			)
+			let button = activePointerButton ?? pointerButton(from: event)
+			activePointerButton = nil
+			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, button, GHOSTTY_MODS_NONE)
 		}
 
 		override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
 			super.touchesCancelled(touches, with: event)
-			guard let surface else {
+			guard let surface, activePointerButton != nil else {
 				return
 			}
-			let button = activePointerButton ?? GHOSTTY_MOUSE_LEFT
+			let button = activePointerButton ?? pointerButton(from: event)
 			activePointerButton = nil
 			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, button, GHOSTTY_MODS_NONE)
 		}
@@ -639,9 +662,74 @@
 			}
 		}
 
+		@objc private func handleDirectTap(_ recognizer: UITapGestureRecognizer) {
+			guard recognizer.state == .ended,
+			      let surface,
+			      activePointerButton == nil,
+			      !isDirectSelectionActive
+			else {
+				return
+			}
+
+			requestFirstResponder()
+			cancelActiveScrollAnimationForInteraction()
+			let location = recognizer.location(in: self)
+			sendMousePosition(location)
+			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+		}
+
+		@objc private func handleDirectSelection(_ recognizer: UILongPressGestureRecognizer) {
+			guard surface != nil else { return }
+			guard activePointerButton == nil else { return }
+			let location = recognizer.location(in: self)
+
+			switch recognizer.state {
+			case .began:
+				requestFirstResponder()
+				cancelActiveScrollAnimationForInteraction()
+				suppressContextMenuUntil = Date().addingTimeInterval(0.75)
+				beginDirectSelection(at: location)
+
+			case .changed:
+				guard isDirectSelectionActive else { return }
+				sendMousePosition(location)
+
+			case .ended:
+				suppressContextMenuUntil = Date().addingTimeInterval(0.35)
+				releaseDirectSelectionIfNeeded(at: location)
+
+			case .cancelled, .failed:
+				releaseDirectSelectionIfNeeded(at: location)
+
+			default:
+				break
+			}
+		}
+
+		private func beginDirectSelection(at location: CGPoint) {
+			guard let surface else { return }
+			sendMousePosition(location)
+			guard !isDirectSelectionActive else { return }
+			isDirectSelectionActive = true
+			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+		}
+
+		private func releaseDirectSelectionIfNeeded(at location: CGPoint? = nil) {
+			guard isDirectSelectionActive else { return }
+			if let location {
+				sendMousePosition(location)
+			}
+			if let surface {
+				ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+			}
+			isDirectSelectionActive = false
+		}
+
 		@objc private func handleScroll(_ recognizer: UIPanGestureRecognizer) {
 			guard surface != nil else { return }
 			guard activePointerButton == nil else { return }
+			guard !(recognizer === touchScrollRecognizer && isDirectSelectionActive) else { return }
 			let inputKind: TerminalScrollSettings.InputKind =
 				recognizer === indirectScrollRecognizer ? .indirectPointer : .touch
 			let location = inputKind == .indirectPointer
@@ -815,6 +903,19 @@
 				remainder += cellHeight
 			}
 			return remainder
+		}
+
+		override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+			if gestureRecognizer === touchScrollRecognizer {
+				return !isDirectSelectionActive && activePointerButton == nil
+			}
+			if gestureRecognizer === directSelectionRecognizer {
+				return activePointerButton == nil
+			}
+			if gestureRecognizer === directTapRecognizer {
+				return activePointerButton == nil && !isDirectSelectionActive
+			}
+			return true
 		}
 
 		// MARK: - First Responder
@@ -1004,6 +1105,12 @@
 			configurationForMenuAtLocation _: CGPoint
 		) -> UIContextMenuConfiguration? {
 			guard surface != nil else { return nil }
+			guard Date() >= suppressContextMenuUntil else { return nil }
+			if let directSelectionRecognizer,
+			   (directSelectionRecognizer.state == .began || directSelectionRecognizer.state == .changed)
+			{
+				return nil
+			}
 			return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
 				self?.makeClipboardContextMenu()
 			}
@@ -1342,7 +1449,10 @@
 		}
 
 		static func clear(for view: TerminalView) {
-			let pointer = Unmanaged.passUnretained(view).toOpaque()
+			clear(forPointer: Unmanaged.passUnretained(view).toOpaque())
+		}
+
+		static func clear(forPointer pointer: UnsafeMutableRawPointer) {
 			lock.lock()
 			pendingUserInitiatedPastes.removeValue(forKey: pointer)
 			lock.unlock()

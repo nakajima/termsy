@@ -54,11 +54,7 @@ extension Session {
 	}
 
 	static func existing(_ other: Session, in db: Database) throws -> Session? {
-		try Session.filter { $0.hostname == other.hostname }
-			.filter { $0.tmuxSessionName == other.tmuxSessionName }
-			.filter { $0.username == other.username }
-			.filter { $0.port == other.port }
-			.fetchOne(db)
+		try Session.fetchAll(db).first { $0.normalizedTargetKey == other.normalizedTargetKey }
 	}
 
 	var normalizedHostname: String {
@@ -70,7 +66,9 @@ extension Session {
 	}
 
 	var normalizedTmuxSessionName: String {
-		tmuxSessionName.map { $0.lowercased() } ?? "-"
+		guard let tmuxSessionName else { return "-" }
+		let trimmed = tmuxSessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+		return trimmed.isEmpty ? "-" : trimmed.lowercased()
 	}
 
 	var normalizedTargetKey: String {
