@@ -16,6 +16,7 @@ struct Session: Codable, FetchableRecord, MutablePersistableRecord, Identifiable
 	var username: String
 	var tmuxSessionName: String?
 	var customTitle: String?
+	var tabOrder: Int?
 	var autoconnect: Bool = true
 	var port: Int = 22
 	var createdAt: Date
@@ -31,6 +32,7 @@ extension Session {
 		static let username = Column(CodingKeys.username)
 		static let tmuxSessionName = Column(CodingKeys.tmuxSessionName)
 		static let customTitle = Column(CodingKeys.customTitle)
+		static let tabOrder = Column(CodingKeys.tabOrder)
 		static let autoconnect = Column(CodingKeys.autoconnect)
 		static let port = Column(CodingKeys.port)
 		static let createdAt = Column(CodingKeys.createdAt)
@@ -39,7 +41,7 @@ extension Session {
 
 	init(
 		hostname: String, username: String, tmuxSessionName: String?, port: Int, autoconnect: Bool,
-		customTitle: String? = nil
+		customTitle: String? = nil, tabOrder: Int? = nil
 	) {
 		let now = Date()
 		self.id = nil
@@ -47,6 +49,7 @@ extension Session {
 		self.username = username
 		self.tmuxSessionName = tmuxSessionName
 		self.customTitle = customTitle
+		self.tabOrder = tabOrder
 		self.port = port
 		self.autoconnect = autoconnect
 		self.createdAt = now

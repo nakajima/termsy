@@ -42,6 +42,12 @@ struct DB {
 			}
 		}
 
+		migrator.registerMigration("AddSessionTabOrder") { db in
+			try db.alter(table: "session") { t in
+				t.add(column: "tabOrder", .integer)
+			}
+		}
+
 		try migrator.migrate(queue)
 	}
 }

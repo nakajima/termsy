@@ -90,29 +90,67 @@ struct ContentView: View {
 		}
 		#else
 		.onChange(of: scenePhase, initial: true) { _, phase in
-					switch phase {
-					case .active:
-						coordinator.appDidBecomeActive()
-					case .background, .inactive:
-						coordinator.appWillResignActive()
-					@unknown default:
-						break
-					}
-				}
+			switch phase {
+			case .active:
+				coordinator.appDidBecomeActive()
+			case .background, .inactive:
+				coordinator.appWillResignActive()
+			@unknown default:
+				break
+			}
+		}
+		.onChange(of: coordinator.tabs.map(\.id), initial: false) { _, _ in
+			persistTabOrder()
+		}
 		#endif
-				.task {
-					guard !didAutoconnect else { return }
-					didAutoconnect = true
+		.task {
+			guard !didAutoconnect else { return }
+			didAutoconnect = true
 
-					let sessions = try? dbContext.reader.read { db in
-						try Session.filter{$0.autoconnect == true}.fetchAll(db)
-					}
+			let sessions = try? dbContext.reader.read { db in
+				try Session.filter { $0.autoconnect == true }.fetchAll(db)
+			}
 
-					for session in sessions ?? [] {
-						coordinator.openTab(for: session)
-					}
-				}
+			for session in orderedAutoconnectSessions(sessions ?? []) {
+				coordinator.openTab(for: session)
+			}
+		}
 	}
+
+	private func orderedAutoconnectSessions(_ sessions: [Session]) -> [Session] {
+		sessions.sorted { lhs, rhs in
+			let lhsOrder = lhs.tabOrder ?? Int.max
+			let rhsOrder = rhs.tabOrder ?? Int.max
+			if lhsOrder != rhsOrder {
+				return lhsOrder < rhsOrder
+			}
+			if lhs.createdAt != rhs.createdAt {
+				return lhs.createdAt < rhs.createdAt
+			}
+			return lhs.normalizedTargetKey < rhs.normalizedTargetKey
+		}
+	}
+
+	#if !os(macOS)
+	private func persistTabOrder() {
+		let orderedSessions = coordinator.tabs.enumerated().compactMap { index, tab -> Session? in
+			guard var session = tab.session, session.id != nil else { return nil }
+			session.tabOrder = index
+			return session
+		}
+		guard !orderedSessions.isEmpty else { return }
+
+		do {
+			try dbContext.writer.write { db in
+				for session in orderedSessions {
+					try session.update(db)
+				}
+			}
+		} catch {
+			print("[DB] failed to persist tab order: \(error)")
+		}
+	}
+	#endif
 }
 
 // MARK: - Terminal Container
