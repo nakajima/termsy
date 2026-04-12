@@ -44,6 +44,9 @@
 		private var smoothScrollPresentationOffsetY: CGFloat = 0
 		private var smoothScrollSuppressedUntilNextScrollGesture = false
 		private(set) var isDisplayActive = false
+		private var currentTheme = TerminalTheme.current.appTheme
+		private var armedSoftwareModifiers: UIKeyModifierFlags = []
+		private let keyboardAccessoryBar = TerminalKeyboardAccessoryView(theme: TerminalTheme.current.appTheme)
 		private var firstResponderTask: Task<Void, Never>?
 		private let momentumVelocityThreshold: CGFloat = 50
 		private let momentumDecelerationPerFrame: CGFloat = 0.92
@@ -76,6 +79,63 @@
 		/// Called when Escape should dismiss auxiliary app UI instead of reaching the terminal.
 		var onDismissAuxiliaryUIRequest: (() -> Bool)?
 
+		var autocapitalizationType: UITextAutocapitalizationType {
+			get { .none }
+			set {}
+		}
+
+		var autocorrectionType: UITextAutocorrectionType {
+			get { .no }
+			set {}
+		}
+
+		var spellCheckingType: UITextSpellCheckingType {
+			get { .no }
+			set {}
+		}
+
+		var smartQuotesType: UITextSmartQuotesType {
+			get { .no }
+			set {}
+		}
+
+		var smartDashesType: UITextSmartDashesType {
+			get { .no }
+			set {}
+		}
+
+		var smartInsertDeleteType: UITextSmartInsertDeleteType {
+			get { .no }
+			set {}
+		}
+
+		@available(iOS 17.0, *)
+		var inlinePredictionType: UITextInlinePredictionType {
+			get { .no }
+			set {}
+		}
+
+		var keyboardType: UIKeyboardType {
+			get { .asciiCapable }
+			set {}
+		}
+
+		var returnKeyType: UIReturnKeyType {
+			get { .default }
+			set {}
+		}
+
+		var enablesReturnKeyAutomatically: Bool {
+			get { false }
+			set {}
+		}
+
+		@available(iOS 18.0, *)
+		var writingToolsBehavior: UIWritingToolsBehavior {
+			get { .none }
+			set {}
+		}
+
 		private enum ClipboardConfirmationAction {
 			case read(state: UnsafeMutableRawPointer, request: ghostty_clipboard_request_e)
 			case write
@@ -92,6 +152,13 @@
 
 		override init(frame: CGRect) {
 			super.init(frame: frame)
+			keyboardAccessoryBar.onAction = { [weak self] action in
+				self?.handleKeyboardAccessoryAction(action)
+			}
+			keyboardAccessoryBar.updateArmedModifiers([])
+			inputAssistantItem.leadingBarButtonGroups = []
+			inputAssistantItem.trailingBarButtonGroups = []
+			inputAssistantItem.allowsHidingShortcuts = false
 			applyTheme(TerminalTheme.current.appTheme)
 			isUserInteractionEnabled = false
 			isMultipleTouchEnabled = false
@@ -177,7 +244,9 @@
 		}
 
 		func applyTheme(_ theme: AppTheme) {
+			currentTheme = theme
 			backgroundColor = theme.backgroundUIColor
+			keyboardAccessoryBar.applyTheme(theme)
 		}
 
 		func start() {
@@ -224,6 +293,7 @@
 
 		func stop() {
 			cancelFirstResponderRequest()
+			clearArmedSoftwareModifiers()
 			releaseDirectSelectionIfNeeded()
 			stopMomentumScrolling()
 			snapSmoothScrollPresentationToTerminal()
@@ -468,6 +538,7 @@
 		private func stopDisplayActivity() {
 			cancelFirstResponderRequest()
 			resignFirstResponder()
+			clearArmedSoftwareModifiers()
 			releaseDirectSelectionIfNeeded()
 			stopMomentumScrolling()
 			snapSmoothScrollPresentationToTerminal()
@@ -920,6 +991,7 @@
 
 		// MARK: - First Responder
 
+		override var inputAccessoryView: UIView? { keyboardAccessoryBar }
 		override var canBecomeFirstResponder: Bool { true }
 		var hasText: Bool { true }
 
@@ -951,30 +1023,134 @@
 		// MARK: - UIKeyInput
 
 		func insertText(_ text: String) {
-			guard let surface else { return }
+			guard surface != nil else { return }
 			guard activeHardwareKeyCodes.isEmpty else {
 				return
 			}
-			// Software keyboard path — send text directly.
+
+			switch text {
+			case "\n", "\r":
+				sendSoftwareSpecialKey(macKeycode: 0x0024) // Return
+			case "\t":
+				sendSoftwareSpecialKey(macKeycode: 0x0030) // Tab
+			case "\u{1B}":
+				sendSoftwareSpecialKey(macKeycode: 0x0035) // Escape
+			default:
+				guard !armedSoftwareModifiers.isEmpty else {
+					sendSoftwarePlainText(text)
+					return
+				}
+				for character in text {
+					sendSoftwareModifiedCharacter(character)
+				}
+			}
+		}
+
+		func deleteBackward() {
+			guard surface != nil else { return }
+			guard activeHardwareKeyCodes.isEmpty else {
+				return
+			}
+			sendSoftwareSpecialKey(macKeycode: 0x0033) // Backspace
+		}
+
+		private func handleKeyboardAccessoryAction(_ action: TerminalKeyboardAccessoryView.Action) {
+			requestFirstResponder()
+			switch action {
+			case .control:
+				toggleArmedSoftwareModifier(.control)
+			case .alternate:
+				toggleArmedSoftwareModifier(.alternate)
+			case .escape:
+				sendSoftwareSpecialKey(macKeycode: 0x0035)
+			case .tab:
+				sendSoftwareSpecialKey(macKeycode: 0x0030)
+			case .leftArrow:
+				sendSoftwareSpecialKey(macKeycode: 0x007B)
+			case .downArrow:
+				sendSoftwareSpecialKey(macKeycode: 0x007D)
+			case .upArrow:
+				sendSoftwareSpecialKey(macKeycode: 0x007E)
+			case .rightArrow:
+				sendSoftwareSpecialKey(macKeycode: 0x007C)
+			}
+		}
+
+		private func toggleArmedSoftwareModifier(_ modifier: UIKeyModifierFlags) {
+			if armedSoftwareModifiers.contains(modifier) {
+				armedSoftwareModifiers.remove(modifier)
+			} else {
+				armedSoftwareModifiers.insert(modifier)
+			}
+			keyboardAccessoryBar.updateArmedModifiers(armedSoftwareModifiers)
+		}
+
+		private func clearArmedSoftwareModifiers() {
+			guard !armedSoftwareModifiers.isEmpty else { return }
+			armedSoftwareModifiers = []
+			keyboardAccessoryBar.updateArmedModifiers(armedSoftwareModifiers)
+		}
+
+		private func sendSoftwarePlainText(_ text: String) {
+			guard let surface else { return }
 			text.withCString { ptr in
 				ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
 			}
 		}
 
-		func deleteBackward() {
-			guard let surface else { return }
-			guard activeHardwareKeyCodes.isEmpty else {
+		private func sendSoftwareModifiedCharacter(_ character: Character) {
+			guard let descriptor = softwareKeyDescriptor(for: character) else {
+				sendSoftwarePlainText(String(character))
+				clearArmedSoftwareModifiers()
 				return
 			}
-			// Software keyboard backspace: use mac virtual keycode 0x33
+			sendSoftwareKey(
+				macKeycode: descriptor.macKeycode,
+				unshiftedCodepoint: descriptor.unshiftedCodepoint,
+				additionalModifiers: descriptor.additionalModifiers,
+				text: String(character)
+			)
+		}
+
+		private func sendSoftwareSpecialKey(macKeycode: UInt32) {
+			sendSoftwareKey(macKeycode: macKeycode, unshiftedCodepoint: 0, additionalModifiers: [], text: nil)
+		}
+
+		private func sendSoftwareKey(
+			macKeycode: UInt32,
+			unshiftedCodepoint: UInt32,
+			additionalModifiers: UIKeyModifierFlags,
+			text: String?
+		) {
+			guard let surface else { return }
+			let oneShotModifiers = armedSoftwareModifiers
+			let allModifiers = oneShotModifiers.union(additionalModifiers)
+			let ghosttyModifiers = ghosttyMods(from: allModifiers)
+
 			var event = ghostty_input_key_s()
 			event.action = GHOSTTY_ACTION_PRESS
-			event.keycode = 0x0033 // mac vkeycode for Backspace
-			event.mods = GHOSTTY_MODS_NONE
-			event.consumed_mods = GHOSTTY_MODS_NONE
-			event.text = nil // control key — let ghostty encode it
+			event.keycode = macKeycode
+			event.mods = ghosttyModifiers
+			event.consumed_mods = ghostty_input_mods_e(
+				rawValue: ghosttyModifiers.rawValue & ~(GHOSTTY_MODS_CTRL.rawValue | GHOSTTY_MODS_SUPER.rawValue)
+			)
+			event.unshifted_codepoint = unshiftedCodepoint
 			event.composing = false
-			ghostty_surface_key(surface, event)
+
+			let suppressText = allModifiers.intersection([.control, .alternate, .command]) != []
+			if let text, !suppressText {
+				text.withCString { ptr in
+					event.text = ptr
+					ghostty_surface_key(surface, event)
+				}
+			} else {
+				event.text = nil
+				ghostty_surface_key(surface, event)
+			}
+
+			if !oneShotModifiers.isEmpty {
+				clearArmedSoftwareModifiers()
+			}
 		}
 
 		// MARK: - Hardware Keyboard
@@ -1277,6 +1453,51 @@
 
 		// MARK: - Key Mapping
 
+		private struct SoftwareKeyDescriptor {
+			let macKeycode: UInt32
+			let unshiftedCodepoint: UInt32
+			let additionalModifiers: UIKeyModifierFlags
+		}
+
+		private func softwareKeyDescriptor(for character: Character) -> SoftwareKeyDescriptor? {
+			guard let scalar = character.unicodeScalars.first,
+			      character.unicodeScalars.count == 1
+			else { return nil }
+
+			if let keycode = Self.softwareKeyboardBaseKeycodes[character] {
+				return SoftwareKeyDescriptor(
+					macKeycode: keycode,
+					unshiftedCodepoint: scalar.value,
+					additionalModifiers: []
+				)
+			}
+
+			if scalar.value >= 65, scalar.value <= 90 {
+				let lowerScalar = UnicodeScalar(scalar.value + 32)!
+				let lowerCharacter = Character(lowerScalar)
+				if let keycode = Self.softwareKeyboardBaseKeycodes[lowerCharacter] {
+					return SoftwareKeyDescriptor(
+						macKeycode: keycode,
+						unshiftedCodepoint: lowerScalar.value,
+						additionalModifiers: [.shift]
+					)
+				}
+			}
+
+			if let baseCharacter = Self.shiftedSoftwareKeyboardBaseCharacters[character],
+			   let keycode = Self.softwareKeyboardBaseKeycodes[baseCharacter],
+			   let baseScalar = baseCharacter.unicodeScalars.first
+			{
+				return SoftwareKeyDescriptor(
+					macKeycode: keycode,
+					unshiftedCodepoint: baseScalar.value,
+					additionalModifiers: [.shift]
+				)
+			}
+
+			return nil
+		}
+
 		private func ghosttyMods(from flags: UIKeyModifierFlags) -> ghostty_input_mods_e {
 			var raw: UInt32 = 0
 			if flags.contains(.shift) { raw |= GHOSTTY_MODS_SHIFT.rawValue }
@@ -1291,6 +1512,81 @@
 			let usage = UInt16(key.keyCode.rawValue)
 			return Self.hidToMacKeycode[usage] ?? 0xFFFF
 		}
+
+		private nonisolated static let softwareKeyboardBaseKeycodes: [Character: UInt32] = [
+			"a": 0x0000,
+			"s": 0x0001,
+			"d": 0x0002,
+			"f": 0x0003,
+			"h": 0x0004,
+			"g": 0x0005,
+			"z": 0x0006,
+			"x": 0x0007,
+			"c": 0x0008,
+			"v": 0x0009,
+			"b": 0x000B,
+			"q": 0x000C,
+			"w": 0x000D,
+			"e": 0x000E,
+			"r": 0x000F,
+			"y": 0x0010,
+			"t": 0x0011,
+			"1": 0x0012,
+			"2": 0x0013,
+			"3": 0x0014,
+			"4": 0x0015,
+			"6": 0x0016,
+			"5": 0x0017,
+			"=": 0x0018,
+			"9": 0x0019,
+			"7": 0x001A,
+			"-": 0x001B,
+			"8": 0x001C,
+			"0": 0x001D,
+			"]": 0x001E,
+			"o": 0x001F,
+			"u": 0x0020,
+			"[": 0x0021,
+			"i": 0x0022,
+			"p": 0x0023,
+			"l": 0x0025,
+			"j": 0x0026,
+			"'": 0x0027,
+			"k": 0x0028,
+			";": 0x0029,
+			"\\": 0x002A,
+			",": 0x002B,
+			"/": 0x002C,
+			"n": 0x002D,
+			"m": 0x002E,
+			".": 0x002F,
+			" ": 0x0031,
+			"`": 0x0032,
+		]
+
+		private nonisolated static let shiftedSoftwareKeyboardBaseCharacters: [Character: Character] = [
+			"!": "1",
+			"@": "2",
+			"#": "3",
+			"$": "4",
+			"%": "5",
+			"^": "6",
+			"&": "7",
+			"*": "8",
+			"(": "9",
+			")": "0",
+			"_": "-",
+			"+": "=",
+			"{": "[",
+			"}": "]",
+			"|": "\\",
+			":": ";",
+			"\"": "'",
+			"<": ",",
+			">": ".",
+			"?": "/",
+			"~": "`",
+		]
 
 		// HID usage page → macOS virtual keycode, from ghostty's keycodes.zig (mac column).
 		// Format: HID usage : mac vkeycode
@@ -1422,19 +1718,153 @@
 		]
 	}
 
-	enum ClipboardAccessAuthorization {
-		private static let lock = NSLock()
-		private static var pendingUserInitiatedPastes = [UnsafeMutableRawPointer: Date]()
-		private static let lifetime: TimeInterval = 2
+	private final class TerminalKeyboardAccessoryView: UIView {
+		enum Action: CaseIterable {
+			case escape
+			case control
+			case alternate
+			case tab
+			case leftArrow
+			case downArrow
+			case upArrow
+			case rightArrow
 
-		static func noteUserInitiatedPaste(for view: TerminalView) {
+			var title: String {
+				switch self {
+				case .escape: "Esc"
+				case .control: "Ctrl"
+				case .alternate: "Alt"
+				case .tab: "Tab"
+				case .leftArrow: "←"
+				case .downArrow: "↓"
+				case .upArrow: "↑"
+				case .rightArrow: "→"
+				}
+			}
+		}
+
+		var onAction: ((Action) -> Void)?
+
+		private var theme: AppTheme
+		private let scrollView = UIScrollView()
+		private let stackView = UIStackView()
+		private var buttons = [Action: UIButton]()
+		private var armedModifiers: UIKeyModifierFlags = []
+
+		init(theme: AppTheme) {
+			self.theme = theme
+			super.init(frame: .zero)
+			setup()
+			applyTheme(theme)
+		}
+
+		@available(*, unavailable)
+		required init?(coder _: NSCoder) { fatalError() }
+
+		override var intrinsicContentSize: CGSize {
+			CGSize(width: UIView.noIntrinsicMetric, height: 52)
+		}
+
+		func applyTheme(_ theme: AppTheme) {
+			self.theme = theme
+			backgroundColor = theme.elevatedBackgroundUIColor
+			layer.borderColor = theme.dividerUIColor.cgColor
+			layer.borderWidth = 1
+			for (action, button) in buttons {
+				updateButtonAppearance(button, action: action)
+			}
+		}
+
+		func updateArmedModifiers(_ modifiers: UIKeyModifierFlags) {
+			armedModifiers = modifiers
+			for (action, button) in buttons {
+				updateButtonAppearance(button, action: action)
+			}
+		}
+
+		private func setup() {
+			autoresizingMask = [.flexibleHeight]
+
+			scrollView.translatesAutoresizingMaskIntoConstraints = false
+			scrollView.showsHorizontalScrollIndicator = false
+			addSubview(scrollView)
+
+			stackView.translatesAutoresizingMaskIntoConstraints = false
+			stackView.axis = .horizontal
+			stackView.alignment = .fill
+			stackView.spacing = 6
+			scrollView.addSubview(stackView)
+
+			for action in Action.allCases {
+				let button = UIButton(type: .system)
+				var configuration = UIButton.Configuration.plain()
+				configuration.title = action.title
+				configuration.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
+				button.configuration = configuration
+				button.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+				button.layer.cornerCurve = .continuous
+				button.layer.cornerRadius = 10
+				button.layer.borderWidth = 1
+				button.addAction(UIAction { [weak self] _ in
+					self?.onAction?(action)
+				}, for: .touchUpInside)
+				button.translatesAutoresizingMaskIntoConstraints = false
+				button.heightAnchor.constraint(equalToConstant: 36).isActive = true
+				button.widthAnchor.constraint(greaterThanOrEqualToConstant: action == .escape || action == .tab ? 48 : 40).isActive = true
+				stackView.addArrangedSubview(button)
+				buttons[action] = button
+			}
+
+			NSLayoutConstraint.activate([
+				scrollView.topAnchor.constraint(equalTo: topAnchor),
+				scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+				scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+				scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+				stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 8),
+				stackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -8),
+				stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 10),
+				stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -10),
+				stackView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor, constant: -16),
+			])
+		}
+
+		private func updateButtonAppearance(_ button: UIButton, action: Action) {
+			let isArmedModifier: Bool = switch action {
+			case .control:
+				armedModifiers.contains(.control)
+			case .alternate:
+				armedModifiers.contains(.alternate)
+			default:
+				false
+			}
+			button.backgroundColor = isArmedModifier
+				? theme.selectedBackgroundUIColor
+				: theme.cardBackgroundUIColor
+			button.layer.borderColor = (isArmedModifier
+				? theme.accentUIColor.withAlphaComponent(0.6)
+				: theme.dividerUIColor).cgColor
+			var configuration = button.configuration ?? UIButton.Configuration.plain()
+			configuration.baseForegroundColor = isArmedModifier
+				? theme.primaryTextUIColor
+				: theme.secondaryTextUIColor
+			button.configuration = configuration
+		}
+	}
+
+	enum ClipboardAccessAuthorization {
+		nonisolated private static let lock = NSLock()
+		nonisolated(unsafe) private static var pendingUserInitiatedPastes = [UnsafeMutableRawPointer: Date]()
+		nonisolated private static let lifetime: TimeInterval = 2
+
+		nonisolated static func noteUserInitiatedPaste(for view: TerminalView) {
 			let pointer = Unmanaged.passUnretained(view).toOpaque()
 			lock.lock()
 			pendingUserInitiatedPastes[pointer] = Date().addingTimeInterval(lifetime)
 			lock.unlock()
 		}
 
-		static func consumeUserInitiatedPaste(for pointer: UnsafeMutableRawPointer) -> Bool {
+		nonisolated static func consumeUserInitiatedPaste(for pointer: UnsafeMutableRawPointer) -> Bool {
 			lock.lock()
 			defer { lock.unlock() }
 
@@ -1448,11 +1878,11 @@
 			return true
 		}
 
-		static func clear(for view: TerminalView) {
+		nonisolated static func clear(for view: TerminalView) {
 			clear(forPointer: Unmanaged.passUnretained(view).toOpaque())
 		}
 
-		static func clear(forPointer pointer: UnsafeMutableRawPointer) {
+		nonisolated static func clear(forPointer pointer: UnsafeMutableRawPointer) {
 			lock.lock()
 			pendingUserInitiatedPastes.removeValue(forKey: pointer)
 			lock.unlock()
