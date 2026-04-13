@@ -1156,7 +1156,13 @@
 			guard !keyboardFrame.isEmpty, let window else { return false }
 			let frameInWindow = window.convert(keyboardFrame, from: nil)
 			let intersection = window.bounds.intersection(frameInWindow)
-			return !intersection.isNull && intersection.height > 0
+			guard !intersection.isNull else { return false }
+
+			// When the software keyboard is dismissed but the terminal stays first responder,
+			// UIKit can still report the accessory bar's frame here. Treat accessory-only
+			// overlap as hidden so the custom bar disappears with the software keyboard.
+			let accessoryOnlyHeight = keyboardAccessoryBar.intrinsicContentSize.height + window.safeAreaInsets.bottom
+			return intersection.height > accessoryOnlyHeight + 1
 		}
 
 		private func handleKeyboardAccessoryAction(_ action: TerminalKeyboardAccessoryView.Action) {
