@@ -17,6 +17,12 @@ struct TerminalWindowSize: Sendable, Equatable {
 	var pixelHeight: Int
 }
 
+struct SSHCommandResult: Sendable {
+	let output: String
+	let exitStatus: Int?
+	let exitSignal: String?
+}
+
 enum SSHConnectionError: Error, LocalizedError, CustomStringConvertible {
 	case notConnected
 	case invalidChannelType
@@ -131,6 +137,24 @@ enum ShellTitleIntegration {
 
 	static var remoteBootstrapCommand: String {
 		let script = remoteBootstrapScript
+		return "/bin/sh -lc \(shellQuoted(script))"
+	}
+
+	static var remoteTerminfoInstallCommand: String {
+		let script = """
+		ready=0
+		if command -v infocmp >/dev/null 2>&1 && infocmp xterm-ghostty >/dev/null 2>&1; then
+		  ready=1
+		elif command -v tic >/dev/null 2>&1; then
+		  mkdir -p ~/.terminfo 2>/dev/null || true
+		  if cat <<'__TERMSY_GHOSTTY_TERMINFO__' | tic -x - >/dev/null 2>&1; then
+		\(GhosttyTerminfo.source)
+		__TERMSY_GHOSTTY_TERMINFO__
+		    ready=1
+		  fi
+		fi
+		printf 'TERMSY_XTERM_GHOSTTY_READY=%s\n' "$ready"
+		"""
 		return "/bin/sh -lc \(shellQuoted(script))"
 	}
 
@@ -594,6 +618,39 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		}
 	}
 
+	func runDetachedCommand(_ command: String) async throws -> SSHCommandResult {
+		guard let channel else { throw SSHConnectionError.notConnected }
+		log("running detached command")
+		return try await withTimeout(
+			channel.eventLoop.flatSubmit {
+				self.log("creating detached session channel...")
+				let sshHandler = try! channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
+				let childChannelPromise = channel.eventLoop.makePromise(of: Channel.self)
+				let resultPromise = channel.eventLoop.makePromise(of: SSHCommandResult.self)
+				let resultHandler = SSHDetachedCommandHandler(resultPromise: resultPromise)
+
+				sshHandler.createChannel(childChannelPromise) { childChannel, channelType in
+					self.log("detached child channel init, type=\(channelType)")
+					guard channelType == .session else {
+						return childChannel.eventLoop.makeFailedFuture(SSHConnectionError.invalidChannelType)
+					}
+					return childChannel.pipeline.addHandler(resultHandler)
+				}
+
+				return childChannelPromise.futureResult.flatMap { childChannel in
+					self.log("detached exec request started")
+					let execReq = SSHChannelRequestEvent.ExecRequest(command: command, wantReply: true)
+					return childChannel.triggerUserOutboundEvent(execReq).flatMap {
+						resultPromise.futureResult
+					}
+				}
+			},
+			on: channel.eventLoop,
+			timeout: Self.sessionStartupTimeout,
+			error: .timedOut("running a remote setup command")
+		).get()
+	}
+
 	private func withTimeout<T>(
 		_ future: EventLoopFuture<T>,
 		on eventLoop: EventLoop,
@@ -742,6 +799,68 @@ private final nonisolated class SSHChannelDataHandler: ChannelInboundHandler {
 			return
 		}
 		onData(bytes)
+	}
+}
+
+private final nonisolated class SSHDetachedCommandHandler: ChannelInboundHandler {
+	typealias InboundIn = SSHChannelData
+
+	private let resultPromise: EventLoopPromise<SSHCommandResult>
+	private var output = Data()
+	private var exitStatus: Int?
+	private var exitSignal: SSHChannelRequestEvent.ExitSignal?
+	private var caughtError: Error?
+	private var isResolved = false
+
+	init(resultPromise: EventLoopPromise<SSHCommandResult>) {
+		self.resultPromise = resultPromise
+	}
+
+	func channelRead(context _: ChannelHandlerContext, data: NIOAny) {
+		let channelData = unwrapInboundIn(data)
+		guard case var .byteBuffer(buffer) = channelData.data,
+		      let bytes = buffer.readData(length: buffer.readableBytes)
+		else {
+			return
+		}
+		output.append(bytes)
+	}
+
+	func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+		switch event {
+		case let event as SSHChannelRequestEvent.ExitStatus:
+			exitStatus = event.exitStatus
+		case let event as SSHChannelRequestEvent.ExitSignal:
+			exitSignal = event
+		default:
+			break
+		}
+		context.fireUserInboundEventTriggered(event)
+	}
+
+	func errorCaught(context: ChannelHandlerContext, error: any Error) {
+		caughtError = error
+		context.close(mode: .all, promise: nil)
+	}
+
+	func channelInactive(context: ChannelHandlerContext) {
+		guard !isResolved else {
+			context.fireChannelInactive()
+			return
+		}
+		isResolved = true
+		if let caughtError {
+			resultPromise.fail(caughtError)
+		} else {
+			let signalDescription = exitSignal.map { signal in
+				signal.errorMessage.isEmpty ? signal.signalName : "\(signal.signalName): \(signal.errorMessage)"
+			}
+			let outputText = String(decoding: output, as: UTF8.self)
+			resultPromise.succeed(
+				SSHCommandResult(output: outputText, exitStatus: exitStatus, exitSignal: signalDescription)
+			)
+		}
+		context.fireChannelInactive()
 	}
 }
 

@@ -429,7 +429,7 @@ class TerminalTab: Identifiable {
 			if let session = self.session {
 				onConnectionEstablished?(session)
 			}
-			startTmuxIfNeeded(using: sshSession, attempt: attempt)
+			startRemotePostConnectSetup(using: sshSession, attempt: attempt)
 		} catch SSHConnectionError.authenticationFailed {
 			guard self.sshSession === sshSession else { return }
 			isRestoring = false
@@ -459,22 +459,68 @@ class TerminalTab: Identifiable {
 		}
 	#endif
 
-	private func startTmuxIfNeeded(using sshSession: SSHTerminalSession, attempt: Int) {
-		guard let session,
-		      let rawName = session.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
-		      !rawName.isEmpty
-		else { return }
-
-		let escapedName = shellQuoted(rawName)
-		let command = Data("tmux new-session -A -s \(escapedName)\r".utf8)
+	private func startRemotePostConnectSetup(using sshSession: SSHTerminalSession, attempt: Int) {
+		let rawTmuxSessionName = (session?.tmuxSessionName)?
+			.trimmingCharacters(in: .whitespacesAndNewlines)
+		let tmuxSessionName = rawTmuxSessionName.flatMap { $0.isEmpty ? nil : $0 }
 		tmuxStartupTask?.cancel()
-		logConnectionEvent("Attempt \(attempt): scheduling tmux attach for \(rawName)")
+		if let tmuxSessionName {
+			logConnectionEvent("Attempt \(attempt): scheduling remote shell setup and tmux attach for \(tmuxSessionName)")
+		} else {
+			logConnectionEvent("Attempt \(attempt): scheduling remote shell setup")
+		}
 		tmuxStartupTask = Task { @MainActor [weak self, weak sshSession] in
 			try? await Task.sleep(nanoseconds: 150_000_000)
 			guard let self, let sshSession, self.isConnected, self.sshSession === sshSession else { return }
+
+			var hasGhosttyTerminfo = false
+			do {
+				self.logConnectionEvent("Attempt \(attempt): checking/installing remote xterm-ghostty terminfo")
+				let result = try await sshSession.connection.runDetachedCommand(
+					ShellTitleIntegration.remoteTerminfoInstallCommand
+				)
+				hasGhosttyTerminfo = self.remoteGhosttyTerminfoReady(from: result.output)
+				let logOutput = self.remoteGhosttyTerminfoLogOutput(from: result.output)
+				if let exitSignal = result.exitSignal {
+					self.logConnectionEvent("Attempt \(attempt): remote terminfo setup exited with signal \(exitSignal)")
+				} else if let exitStatus = result.exitStatus, exitStatus != 0 {
+					self.logConnectionEvent("Attempt \(attempt): remote terminfo setup exited with status \(exitStatus)")
+				}
+				if !logOutput.isEmpty {
+					self.logConnectionEvent("Attempt \(attempt): remote terminfo setup output: \(logOutput)")
+				}
+				self.logConnectionEvent(
+					hasGhosttyTerminfo
+						? "Attempt \(attempt): remote xterm-ghostty terminfo ready"
+						: "Attempt \(attempt): remote xterm-ghostty terminfo unavailable; continuing with xterm-256color"
+				)
+			} catch {
+				self.logConnectionEvent("Attempt \(attempt): remote terminfo setup failed: \(error)")
+			}
+
+			guard self.isConnected, self.sshSession === sshSession else { return }
+			guard let tmuxSessionName else { return }
+			let escapedName = self.shellQuoted(tmuxSessionName)
+			let commandPrefix = hasGhosttyTerminfo ? "env TERM=xterm-ghostty " : ""
+			let command = Data("\(commandPrefix)tmux new-session -A -s \(escapedName)\r".utf8)
 			self.logConnectionEvent("Attempt \(attempt): sending tmux attach command")
 			sshSession.connection.send(command)
 		}
+	}
+
+	private func remoteGhosttyTerminfoReady(from output: String) -> Bool {
+		output
+			.split(whereSeparator: \.isNewline)
+			.contains { $0 == "TERMSY_XTERM_GHOSTTY_READY=1" }
+	}
+
+	private func remoteGhosttyTerminfoLogOutput(from output: String) -> String {
+		output
+			.split(whereSeparator: \.isNewline)
+			.filter { !$0.hasPrefix("TERMSY_XTERM_GHOSTTY_READY=") }
+			.map(String.init)
+			.joined(separator: "\n")
+			.trimmingCharacters(in: .whitespacesAndNewlines)
 	}
 
 	private func shellQuoted(_ value: String) -> String {
@@ -546,7 +592,7 @@ class TerminalTab: Identifiable {
 			if let session = self.session {
 				onConnectionEstablished?(session)
 			}
-			startTmuxIfNeeded(using: sshSession, attempt: attempt)
+			startRemotePostConnectSetup(using: sshSession, attempt: attempt)
 		} catch {
 			guard self.sshSession === sshSession else { return }
 			isRestoring = false
