@@ -203,6 +203,19 @@ enum ShellTitleIntegration {
 	  printf '\e]2;%s\a' "$title"
 	}
 
+	__termsy_normalize_command_title() {
+	  local title=$1
+	  case "$title" in
+	    "env TERM=xterm-ghostty "*)
+	      title=${title#env TERM=xterm-ghostty }
+	      ;;
+	    "TERM=xterm-ghostty "*)
+	      title=${title#TERM=xterm-ghostty }
+	      ;;
+	  esac
+	  printf '%s' "$title"
+	}
+
 	__termsy_prompt_title() {
 	  __termsy_in_prompt_command=1
 	  __termsy_preexec_seen=0
@@ -215,7 +228,7 @@ enum ShellTitleIntegration {
 	  [[ "${__termsy_in_prompt_command-0}" == 1 ]] && return
 	  [[ "${__termsy_preexec_seen-0}" == 1 ]] && return
 	  __termsy_preexec_seen=1
-	  __termsy_set_title "$1"
+	  __termsy_set_title "$(__termsy_normalize_command_title "$1")"
 	}
 
 	if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
@@ -241,13 +254,23 @@ enum ShellTitleIntegration {
 	    printf '\e]2;%s\a' "$sanitized"
 	end
 
+	function __termsy_normalize_command_title -a title
+	    if string match -q 'env TERM=xterm-ghostty *' -- "$title"
+	        string replace -r '^env TERM=xterm-ghostty ' '' -- "$title"
+	    else if string match -q 'TERM=xterm-ghostty *' -- "$title"
+	        string replace -r '^TERM=xterm-ghostty ' '' -- "$title"
+	    else
+	        printf '%s' "$title"
+	    end
+	end
+
 	function __termsy_prompt_title --on-event fish_prompt
 	    __termsy_set_title (prompt_pwd)
 	end
 
 	function __termsy_command_title --on-event fish_preexec -a commandline
 	    if test -n "$commandline"
-	        __termsy_set_title "$commandline"
+	        __termsy_set_title (__termsy_normalize_command_title "$commandline")
 	    end
 	end
 
@@ -297,6 +320,20 @@ enum ShellTitleIntegration {
 	  print -rn -- $'\e]2;'${title}$'\a'
 	}
 
+	_termsy_normalize_command_title() {
+	  emulate -L zsh
+	  local title=$1
+	  case "$title" in
+	    ("env TERM=xterm-ghostty "*)
+	      title=${title#env TERM=xterm-ghostty }
+	      ;;
+	    ("TERM=xterm-ghostty "*)
+	      title=${title#TERM=xterm-ghostty }
+	      ;;
+	  esac
+	  print -rn -- "$title"
+	}
+
 	_termsy_prompt_title() {
 	  emulate -L zsh
 	  local path="${PWD/#$HOME/~}"
@@ -305,7 +342,7 @@ enum ShellTitleIntegration {
 
 	_termsy_preexec_title() {
 	  emulate -L zsh
-	  _termsy_set_title "$1"
+	  _termsy_set_title "$(_termsy_normalize_command_title "$1")"
 	}
 
 	autoload -Uz add-zsh-hook 2>/dev/null
