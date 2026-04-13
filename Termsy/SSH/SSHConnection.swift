@@ -305,15 +305,8 @@ enum ShellTitleIntegration {
 		}
 
 		let terminfoBootstrapScript = """
-		if infocmp xterm-ghostty >/dev/null 2>&1; then
+		if command -v infocmp >/dev/null 2>&1 && infocmp xterm-ghostty >/dev/null 2>&1; then
 		  export TERM=xterm-ghostty
-		elif command -v tic >/dev/null 2>&1; then
-		  mkdir -p ~/.terminfo 2>/dev/null || true
-		  if cat <<'__TERMSY_GHOSTTY_TERMINFO__' | tic -x - >/dev/null 2>&1; then
-		""" + GhosttyTerminfo.source + """
-		__TERMSY_GHOSTTY_TERMINFO__
-		    export TERM=xterm-ghostty
-		  fi
 		fi
 		"""
 
