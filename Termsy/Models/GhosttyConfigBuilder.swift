@@ -21,7 +21,7 @@ enum GhosttyConfigBuilder {
 				?? TerminalBackgroundSettings.defaultOpacity
 		)
 		var lines = [
-			"font-size = \(Int(TerminalFontSettings.defaultSize))",
+			"font-size = \(Int(TerminalFontSettings.size))",
 			"cursor-style = \(cursorStyle)",
 			"cursor-style-blink = \(cursorBlink)",
 			"background-opacity = \(backgroundOpacity.formatted(.number.precision(.fractionLength(0 ... 3))))",

@@ -32,6 +32,7 @@
 		private weak var directTapRecognizer: UITapGestureRecognizer?
 		private weak var touchScrollRecognizer: UIPanGestureRecognizer?
 		private weak var directSelectionRecognizer: UILongPressGestureRecognizer?
+		private weak var pinchResizeRecognizer: UIPinchGestureRecognizer?
 		private weak var indirectScrollRecognizer: UIPanGestureRecognizer?
 		private weak var indirectPointerHoverRecognizer: UIHoverGestureRecognizer?
 		private var lastScrollLocation: CGPoint?
@@ -43,6 +44,8 @@
 		private var smoothScrollTargetOffsetY: CGFloat = 0
 		private var smoothScrollPresentationOffsetY: CGFloat = 0
 		private var smoothScrollSuppressedUntilNextScrollGesture = false
+		private var pinchBaselineFontSize: Float?
+		private var pinchAppliedFontSize: Float?
 		private(set) var isDisplayActive = false
 		private var currentTheme = TerminalTheme.current.appTheme
 		private var armedSoftwareModifiers: UIKeyModifierFlags = []
@@ -180,7 +183,8 @@
 			inputAssistantItem.allowsHidingShortcuts = false
 			applyTheme(TerminalTheme.current.appTheme)
 			isUserInteractionEnabled = false
-			isMultipleTouchEnabled = false
+			let supportsPinchTextResize = UIDevice.current.userInterfaceIdiom == .phone
+			isMultipleTouchEnabled = supportsPinchTextResize
 			clipsToBounds = true
 
 			let directTapRecognizer = UITapGestureRecognizer(
@@ -199,7 +203,7 @@
 				target: self, action: #selector(handleScroll(_:))
 			)
 			touchScrollRecognizer.minimumNumberOfTouches = 1
-			touchScrollRecognizer.maximumNumberOfTouches = 2
+			touchScrollRecognizer.maximumNumberOfTouches = supportsPinchTextResize ? 1 : 2
 			touchScrollRecognizer.allowedTouchTypes = [
 				NSNumber(value: UITouch.TouchType.direct.rawValue),
 			]
@@ -209,6 +213,19 @@
 			touchScrollRecognizer.delegate = self
 			addGestureRecognizer(touchScrollRecognizer)
 			self.touchScrollRecognizer = touchScrollRecognizer
+
+			if supportsPinchTextResize {
+				let pinchResizeRecognizer = UIPinchGestureRecognizer(
+					target: self, action: #selector(handlePinchTextResize(_:))
+				)
+				pinchResizeRecognizer.allowedTouchTypes = [
+					NSNumber(value: UITouch.TouchType.direct.rawValue),
+				]
+				pinchResizeRecognizer.cancelsTouchesInView = false
+				pinchResizeRecognizer.delegate = self
+				addGestureRecognizer(pinchResizeRecognizer)
+				self.pinchResizeRecognizer = pinchResizeRecognizer
+			}
 
 			let directSelectionRecognizer = UILongPressGestureRecognizer(
 				target: self, action: #selector(handleDirectSelection(_:))
@@ -298,7 +315,7 @@
 					app: app,
 					surfaceUserdata: ghosttySurfaceUserdata?.opaquePointer,
 					scaleFactor: Double(scale),
-					fontSize: TerminalFontSettings.defaultSize
+					fontSize: TerminalFontSettings.size
 				) { cfg in
 					cfg.platform_tag = GHOSTTY_PLATFORM_IOS
 					cfg.platform = ghostty_platform_u(
@@ -325,6 +342,8 @@
 			lastIndirectPointerHoverLocation = nil
 			lastScrollLocation = nil
 			activePointerButton = nil
+			pinchBaselineFontSize = nil
+			pinchAppliedFontSize = nil
 			denyOutstandingClipboardReadConfirmations()
 			if let surface {
 				ghostty_surface_set_focus(surface, false)
@@ -568,6 +587,8 @@
 			lastScrollLocation = nil
 			lastIndirectPointerHoverLocation = nil
 			activePointerButton = nil
+			pinchBaselineFontSize = nil
+			pinchAppliedFontSize = nil
 		}
 
 		// MARK: - Layout & Sublayers
@@ -816,6 +837,41 @@
 			isDirectSelectionActive = false
 		}
 
+		@objc private func handlePinchTextResize(_ recognizer: UIPinchGestureRecognizer) {
+			guard surface != nil else { return }
+			guard activePointerButton == nil else { return }
+
+			switch recognizer.state {
+			case .began:
+				guard !isDirectSelectionActive else { return }
+				requestFirstResponder()
+				cancelActiveScrollAnimationForInteraction()
+				let currentSize = TerminalFontSettings.size
+				pinchBaselineFontSize = currentSize
+				pinchAppliedFontSize = currentSize
+
+			case .changed:
+				guard !isDirectSelectionActive,
+				      let baselineSize = pinchBaselineFontSize
+				else {
+					return
+				}
+				let nextSize = TerminalFontSettings.clampedSize(baselineSize * Float(recognizer.scale))
+				guard pinchAppliedFontSize != nextSize else { return }
+				pinchAppliedFontSize = nextSize
+				TerminalFontSettings.persistSize(nextSize)
+				GhosttyApp.shared.reloadConfig()
+				syncSize()
+
+			case .ended, .cancelled, .failed:
+				pinchBaselineFontSize = nil
+				pinchAppliedFontSize = nil
+
+			default:
+				break
+			}
+		}
+
 		@objc private func handleScroll(_ recognizer: UIPanGestureRecognizer) {
 			guard surface != nil else { return }
 			guard activePointerButton == nil else { return }
@@ -998,6 +1054,9 @@
 		override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
 			if gestureRecognizer === touchScrollRecognizer {
 				return !isDirectSelectionActive && activePointerButton == nil
+			}
+			if gestureRecognizer === pinchResizeRecognizer {
+				return activePointerButton == nil && !isDirectSelectionActive
 			}
 			if gestureRecognizer === directSelectionRecognizer {
 				return activePointerButton == nil

@@ -31,6 +31,10 @@
 			MacTerminalWindowManager.shared.openInitialWindowIfNeeded()
 		}
 
+		func applicationWillTerminate(_: Notification) {
+			MacTerminalWindowManager.shared.persistWindowLayoutNow()
+		}
+
 		func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
 			if !flag {
 				MacTerminalWindowManager.shared.openLocalShellWindow()

@@ -88,7 +88,7 @@
 					app: app,
 					surfaceUserdata: ghosttySurfaceUserdata?.opaquePointer,
 					scaleFactor: Double(scale),
-					fontSize: TerminalFontSettings.defaultSize
+					fontSize: TerminalFontSettings.size
 				) { cfg in
 					cfg.platform_tag = GHOSTTY_PLATFORM_MACOS
 					cfg.platform = ghostty_platform_u(

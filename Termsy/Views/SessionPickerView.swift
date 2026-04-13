@@ -41,7 +41,11 @@ struct SessionPickerView: View {
 				List {
 					#if os(macOS)
 						Section("Local") {
-							localShellRow
+							LocalShellRow(
+								isSelected: selectedItemID == .localShell,
+								onOpen: openLocalShell,
+								onSelect: { selectedItemID = .localShell }
+							)
 						}
 					#endif
 
@@ -55,7 +59,11 @@ struct SessionPickerView: View {
 					}
 
 					Section {
-						newSessionRow
+						NewSessionRow(
+							isSelected: selectedItemID == .newSession,
+							onOpen: openNewSession,
+							onSelect: { selectedItemID = .newSession }
+						)
 					}
 				}
 				.scrollContentBackground(.hidden)
@@ -134,46 +142,52 @@ struct SessionPickerView: View {
 	}
 
 	#if os(macOS)
-		private var localShellRow: some View {
-			let isSelected = selectedItemID == .localShell
+		fileprivate struct LocalShellRow: View {
+			@Environment(\.appTheme) private var theme
+			let isSelected: Bool
+			var onOpen: () -> Void
+			var onSelect: () -> Void
 
-			return Button {
-				openLocalShell()
+			var body: some View {
+				Button {
+					onOpen()
+				} label: {
+					Label("Local Shell", systemImage: "terminal")
+						.font(.body)
+						.foregroundStyle(isSelected ? theme.primaryText : theme.accent)
+						.frame(maxWidth: .infinity, alignment: .leading)
+						.contentShape(Rectangle())
+				}
+				.buttonStyle(.plain)
+				.keyboardShortcut("l", modifiers: .command)
+				.listRowBackground(isSelected ? theme.selectedBackground : theme.cardBackground)
+				.id(PickerItemID.localShell)
+				.onTapGesture(perform: onSelect)
+			}
+		}
+	#endif
+
+	fileprivate struct NewSessionRow: View {
+		@Environment(\.appTheme) private var theme
+		let isSelected: Bool
+		var onOpen: () -> Void
+		var onSelect: () -> Void
+
+		var body: some View {
+			Button {
+				onOpen()
 			} label: {
-				Label("Local Shell", systemImage: "terminal")
+				Label("New Session", systemImage: "plus.circle")
 					.font(.body)
 					.foregroundStyle(isSelected ? theme.primaryText : theme.accent)
 					.frame(maxWidth: .infinity, alignment: .leading)
 					.contentShape(Rectangle())
 			}
 			.buttonStyle(.plain)
-			.keyboardShortcut("l", modifiers: .command)
+			.keyboardShortcut("t", modifiers: .command)
 			.listRowBackground(isSelected ? theme.selectedBackground : theme.cardBackground)
-			.id(PickerItemID.localShell)
-			.onTapGesture {
-				selectedItemID = .localShell
-			}
-		}
-	#endif
-
-	private var newSessionRow: some View {
-		let isSelected = selectedItemID == .newSession
-
-		return Button {
-			openNewSession()
-		} label: {
-			Label("New Session", systemImage: "plus.circle")
-				.font(.body)
-				.foregroundStyle(isSelected ? theme.primaryText : theme.accent)
-				.frame(maxWidth: .infinity, alignment: .leading)
-				.contentShape(Rectangle())
-		}
-		.buttonStyle(.plain)
-		.keyboardShortcut("t", modifiers: .command)
-		.listRowBackground(isSelected ? theme.selectedBackground : theme.cardBackground)
-		.id(PickerItemID.newSession)
-		.onTapGesture {
-			selectedItemID = .newSession
+			.id(PickerItemID.newSession)
+			.onTapGesture(perform: onSelect)
 		}
 	}
 
@@ -400,3 +414,27 @@ struct SessionPickerView: View {
 		.environment(coordinator)
 		.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 }
+
+#Preview("New Session Row") {
+	SessionPickerView.NewSessionRow(
+		isSelected: true,
+		onOpen: {},
+		onSelect: {}
+	)
+	.padding()
+	.background(TerminalTheme.mocha.appTheme.background)
+	.environment(\.appTheme, TerminalTheme.mocha.appTheme)
+}
+
+#if os(macOS)
+#Preview("Local Shell Row") {
+	SessionPickerView.LocalShellRow(
+		isSelected: true,
+		onOpen: {},
+		onSelect: {}
+	)
+	.padding()
+	.background(TerminalTheme.mocha.appTheme.background)
+	.environment(\.appTheme, TerminalTheme.mocha.appTheme)
+}
+#endif

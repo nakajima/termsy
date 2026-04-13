@@ -61,9 +61,12 @@ struct TerminalOverlay: View {
 		}
 		.safeAreaInset(edge: .bottom) {
 			if showsConnectionLogToggle {
-				connectionLogPanel
-					.padding(.horizontal)
-					.padding(.bottom)
+				ConnectionLogPanel(
+					connectionLogText: tab.connectionLogText,
+					isShowingConnectionLog: $isShowingConnectionLog
+				)
+				.padding(.horizontal)
+				.padding(.bottom)
 			}
 		}
 		.allowsHitTesting(!tab.isConnected || tab.connectionError != nil || tab.isRestoring)
@@ -95,8 +98,14 @@ struct TerminalOverlay: View {
 		!tab.isConnected || tab.connectionError != nil || tab.isRestoring
 	}
 
-	@ViewBuilder
-	private var connectionLogPanel: some View {
+}
+
+private struct ConnectionLogPanel: View {
+	@Environment(\.appTheme) private var theme
+	let connectionLogText: String
+	@Binding var isShowingConnectionLog: Bool
+
+	var body: some View {
 		VStack(alignment: .leading, spacing: 8) {
 			Button {
 				isShowingConnectionLog.toggle()
@@ -113,7 +122,7 @@ struct TerminalOverlay: View {
 
 			if isShowingConnectionLog {
 				ScrollView {
-					Text(tab.connectionLogText.isEmpty ? "No connection events yet." : tab.connectionLogText)
+					Text(connectionLogText.isEmpty ? "No connection events yet." : connectionLogText)
 						.frame(maxWidth: .infinity, alignment: .leading)
 						.font(.system(.caption2, design: .monospaced))
 						.foregroundStyle(theme.secondaryText)
@@ -129,6 +138,16 @@ struct TerminalOverlay: View {
 				.stroke(theme.divider, lineWidth: 1)
 		}
 	}
+}
+
+#Preview("Connection Log Panel") {
+	ConnectionLogPanel(
+		connectionLogText: "[SSH] Connecting to example.local\n[SSH] Host key verified\n[SSH] Waiting for password",
+		isShowingConnectionLog: .constant(true)
+	)
+	.padding()
+	.background(TerminalTheme.mocha.appTheme.background)
+	.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 }
 
 #Preview("Terminal Overlay Error") {

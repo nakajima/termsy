@@ -7,19 +7,32 @@
 	@MainActor
 	final class MacTerminalWindowController: NSWindowController, NSWindowDelegate {
 		let id = UUID()
+		let sceneID: UUID
 		let source: MacTerminalTab.Source
 		let terminal: MacTerminalTab
+
+		var persistedSceneValue: MacTerminalSceneValue {
+			switch source {
+			case .localShell:
+				return MacTerminalSceneValue(id: sceneID, kind: .localShell, customTitle: terminal.customTitle)
+			case let .ssh(session):
+				var updatedSession = session
+				updatedSession.customTitle = terminal.customTitle
+				return MacTerminalSceneValue(id: sceneID, kind: .ssh(updatedSession), customTitle: terminal.customTitle)
+			}
+		}
 
 		private let db: DB
 		private weak var manager: MacTerminalWindowManager?
 		private var bypassesCloseConfirmation = false
 		private var isShowingCloseConfirmation = false
 
-		init(source: MacTerminalTab.Source, db: DB, manager: MacTerminalWindowManager) {
-			self.source = source
+		init(sceneValue: MacTerminalSceneValue, db: DB, manager: MacTerminalWindowManager) {
+			self.sceneID = sceneValue.id
+			self.source = sceneValue.terminalSource
 			self.db = db
 			self.manager = manager
-			self.terminal = MacTerminalTab(source: source)
+			self.terminal = MacTerminalTab(source: sceneValue.terminalSource)
 
 			let window = TermsyTerminalWindow(
 				contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
@@ -33,6 +46,8 @@
 			window.contentMinSize = NSSize(width: 700, height: 450)
 
 			super.init(window: window)
+
+			terminal.rename(to: sceneValue.customTitle)
 
 			terminal.onRequestClose = { [weak self] in
 				self?.requestClose()
@@ -114,6 +129,7 @@
 
 		private func persistRename(_ title: String?) {
 			terminal.rename(to: title)
+			defer { manager?.windowLayoutDidChange() }
 			guard case let .ssh(session) = source else { return }
 
 			var updatedSession = session
@@ -213,10 +229,19 @@
 		func windowDidBecomeKey(_: Notification) {
 			terminal.setDisplayActive(true)
 			requestTerminalFocus()
+			manager?.windowLayoutDidChange()
 		}
 
 		func windowDidResignKey(_: Notification) {
 			terminal.setDisplayActive(false)
+		}
+
+		func windowDidMove(_: Notification) {
+			manager?.windowLayoutDidChange()
+		}
+
+		func windowDidResize(_: Notification) {
+			manager?.windowLayoutDidChange()
 		}
 
 		func windowWillClose(_: Notification) {

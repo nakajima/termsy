@@ -29,25 +29,38 @@ struct TermsyApp: App {
 		TerminalTheme(rawValue: selectedTheme) ?? .mocha
 	}
 
-	private var rootView: some View {
+	@SceneBuilder
+	var body: some Scene {
+		#if os(macOS)
+			Window("Termsy", id: "main") {
+				AppRootView(db: db, coordinator: coordinator, theme: theme)
+			}
+		#else
+			WindowGroup {
+				AppRootView(db: db, coordinator: coordinator, theme: theme)
+			}
+		#endif
+	}
+}
+
+private struct AppRootView: View {
+	let db: DB
+	let coordinator: ViewCoordinator
+	let theme: TerminalTheme
+
+	var body: some View {
 		ContentView()
-			.databaseContext(.readWrite { self.db.queue })
+			.databaseContext(.readWrite { db.queue })
 			.environment(coordinator)
 			.environment(\.appTheme, theme.appTheme)
 			.preferredColorScheme(theme.appTheme.colorScheme)
 			.tint(theme.appTheme.accent)
 	}
+}
 
-	@SceneBuilder
-	var body: some Scene {
-		#if os(macOS)
-			Window("Termsy", id: "main") {
-				rootView
-			}
-		#else
-			WindowGroup {
-				rootView
-			}
-		#endif
-	}
+#Preview {
+	let db = DB.memory()
+	try? db.migrate()
+	let coordinator = ViewCoordinator()
+	return AppRootView(db: db, coordinator: coordinator, theme: .mocha)
 }
