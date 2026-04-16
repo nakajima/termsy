@@ -14,6 +14,11 @@
 
 	@MainActor
 	final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate, UIGestureRecognizerDelegate {
+		enum PresentationMode {
+			case interactive
+			case passivePreview
+		}
+
 		private(set) nonisolated(unsafe) var surface: ghostty_surface_t?
 		private var hostManagedSurface: HostManagedSurface?
 		private var ghosttySurfaceUserdata: GhosttySurfaceUserdata?
@@ -48,6 +53,7 @@
 		private var pinchAppliedFontSize: Float?
 		private(set) var isDisplayActive = false
 		private var currentTheme = TerminalTheme.current.appTheme
+		private var presentationMode: PresentationMode = .interactive
 		private var armedSoftwareModifiers: UIKeyModifierFlags = []
 		private var showsSoftwareKeyboardAccessory = false {
 			didSet {
@@ -283,6 +289,19 @@
 			currentTheme = theme
 			backgroundColor = theme.backgroundUIColor
 			keyboardAccessoryBar.applyTheme(theme)
+		}
+
+		func setPresentationMode(_ mode: PresentationMode) {
+			guard presentationMode != mode else { return }
+			presentationMode = mode
+			showsSoftwareKeyboardAccessory = false
+			if mode != .interactive {
+				cancelFirstResponderRequest()
+				if isFirstResponder {
+					resignFirstResponder()
+				}
+			}
+			applyDisplayActivity()
 		}
 
 		func start() {
@@ -545,10 +564,10 @@
 		}
 
 		private var shouldHoldFirstResponder: Bool {
-			isDisplayActive && window != nil && surface != nil
+			presentationMode == .interactive && isDisplayActive && window != nil && surface != nil
 		}
 
-		private func requestFirstResponder(retryCount: Int = 4) {
+		private func requestFirstResponder(retryCount: Int = 20) {
 			cancelFirstResponderRequest()
 			guard shouldHoldFirstResponder else { return }
 			if isFirstResponder { return }
@@ -563,6 +582,9 @@
 					guard !Task.isCancelled else { return }
 					guard self.shouldHoldFirstResponder else { return }
 					if self.isFirstResponder { return }
+					// New tabs often become active while a sheet/panel dismissal animation
+					// is still finishing. Keep retrying long enough for UIKit to release
+					// first responder from the transient UI and hand it back to the terminal.
 					_ = self.becomeFirstResponder()
 				}
 			}
@@ -1070,9 +1092,10 @@
 		// MARK: - First Responder
 
 		override var inputAccessoryView: UIView? {
-			showsSoftwareKeyboardAccessory ? keyboardAccessoryBar : nil
+			guard presentationMode == .interactive else { return nil }
+			return showsSoftwareKeyboardAccessory ? keyboardAccessoryBar : nil
 		}
-		override var canBecomeFirstResponder: Bool { true }
+		override var canBecomeFirstResponder: Bool { presentationMode == .interactive }
 		var hasText: Bool { true }
 
 		override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {

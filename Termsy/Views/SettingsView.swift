@@ -191,12 +191,14 @@ struct SettingsView: View {
 			}
 			.scrollContentBackground(.hidden)
 			.background(theme.background)
+			.accessibilityIdentifier("screen.settings")
 			.navigationTitle("Settings")
 			.termsyInlineNavigationTitle()
 			.toolbar {
 				#if !os(macOS)
 					ToolbarItem(placement: .termsyPrimaryAction) {
 						Button("Done") { dismiss() }
+							.accessibilityIdentifier("action.done")
 					}
 				#endif
 			}

@@ -99,6 +99,7 @@
 			}
 			terminalView = tv
 			syncTerminalSizeToSession()
+			terminalTab.renderPendingPreviewIfNeeded()
 			updateOverlay()
 		}
 
@@ -113,6 +114,7 @@
 		}
 
 		private func connectIfNeeded() {
+			terminalTab.renderPendingPreviewIfNeeded()
 			startConnectTask(after: 0)
 		}
 

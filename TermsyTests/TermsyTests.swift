@@ -5,6 +5,7 @@
 //  Created by Pat Nakajima on 4/2/26.
 //
 
+import Foundation
 import GRDB
 @testable import Termsy
 import Testing
@@ -81,6 +82,14 @@ struct TermsyTests {
 		#expect(tab.displayTitle == "htop")
 	}
 
+	@Test func screenshotTerminalTranscriptUsesCRLFLineEndings() {
+		let transcript = AppStoreScreenshotFixtures.terminalTranscript
+		let transcriptWithoutCRLF = transcript.replacingOccurrences(of: "\r\n", with: "")
+
+		#expect(transcript.contains("\r\n"))
+		#expect(!transcriptWithoutCRLF.contains("\n"))
+	}
+
 	@Test func sessionCustomTitlePersists() throws {
 		let db = DB.memory()
 		try db.migrate()
@@ -122,13 +131,13 @@ struct TermsyTests {
 
 		try db.queue.write { database in
 			try apiSession.save(database)
-			#expect(try Session.activeExactDuplicate(of: workerSession, in: database) == nil)
+			#expect(try Session.existing(workerSession, in: database) == nil)
 
 			try workerSession.save(database)
-			let sessions = try Session.activeOrdered().fetchAll(database)
+			let sessions = try Session.fetchAll(database)
 
 			#expect(sessions.count == 2)
-			#expect(Set(sessions.compactMap(\.normalizedTmuxSessionName)) == Set(["api", "worker"]))
+			#expect(Set(sessions.map(\.normalizedTmuxSessionName)) == Set(["api", "worker"]))
 		}
 	}
 
@@ -153,8 +162,8 @@ struct TermsyTests {
 
 		try db.queue.write { database in
 			try original.save(database)
-			let existing = try Session.activeExactDuplicate(of: duplicate, in: database)
-			#expect(existing?.uuid == original.uuid)
+			let existing = try Session.existing(duplicate, in: database)
+			#expect(existing?.id == original.id)
 		}
 	}
 }

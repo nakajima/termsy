@@ -11,7 +11,7 @@
 enum WhatsNewGenerated {
 	static let current = WhatsNewContent(
 		title: "What's New",
-		summary: "A quick summary of the latest improvements in Termsy.",
+		summary: "A quick summary of the latest improvements in Teletype.",
 		changes: [
 			"Refactor What's New display with optional empty state handling",
 			"bump",

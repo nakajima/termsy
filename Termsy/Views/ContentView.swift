@@ -13,6 +13,8 @@ import SwiftUI
 #endif
 
 struct ContentView: View {
+	let launchConfiguration: AppLaunchConfiguration
+
 	@Environment(ViewCoordinator.self) var coordinator
 	@Environment(\.databaseContext) private var dbContext
 	@Environment(\.appTheme) private var theme
@@ -107,6 +109,11 @@ struct ContentView: View {
 			guard !didAutoconnect else { return }
 			didAutoconnect = true
 
+			if launchConfiguration.isScreenshotMode {
+				applyScreenshotScenarioIfNeeded()
+				return
+			}
+
 			let sessions = try? dbContext.reader.read { db in
 				try Session.filter { $0.autoconnect == true }.fetchAll(db)
 			}
@@ -115,6 +122,52 @@ struct ContentView: View {
 				coordinator.openTab(for: session)
 			}
 		}
+	}
+
+	private func applyScreenshotScenarioIfNeeded() {
+		guard let scenario = launchConfiguration.screenshotScenario else { return }
+		let seededSessions = (try? dbContext.reader.read { db in
+			try Session.fetchAll(db)
+		}) ?? []
+		guard !seededSessions.isEmpty else { return }
+
+		coordinator.path = NavigationPath()
+		coordinator.dismissPresentedUI()
+		coordinator.tabs = []
+		coordinator.selectedTabID = nil
+
+		switch scenario {
+		case .savedSessions:
+			announceScreenshotReadiness("saved-sessions")
+		case .newSession:
+			coordinator.isShowingConnectView = true
+			announceScreenshotReadiness("new-session")
+		case .settings:
+			coordinator.isShowingSettings = true
+			announceScreenshotReadiness("settings")
+		case .terminal:
+			openScreenshotTerminal(using: seededSessions)
+		case .sessionPicker:
+			openScreenshotTerminal(using: seededSessions)
+			coordinator.isShowingSessionPicker = true
+			announceScreenshotReadiness("session-picker")
+		}
+	}
+
+	private func announceScreenshotReadiness(_ label: String) {
+		guard launchConfiguration.isScreenshotMode else { return }
+		print("[Screenshots] ready \(label)")
+	}
+
+	private func openScreenshotTerminal(using sessions: [Session]) {
+		for session in sessions {
+			coordinator.openTab(for: session)
+		}
+		guard let primarySession = sessions.first(where: { $0.hostname == AppStoreScreenshotFixtures.primaryHostname }) ?? sessions.first,
+		      let primaryTab = coordinator.tabs.first(where: { $0.session?.normalizedTargetKey == primarySession.normalizedTargetKey })
+		else { return }
+		coordinator.selectTab(primaryTab.id)
+		primaryTab.preparePassivePreview(transcript: AppStoreScreenshotFixtures.terminalTranscript)
 	}
 
 	private func orderedAutoconnectSessions(_ sessions: [Session]) -> [Session] {
@@ -174,6 +227,7 @@ private struct TerminalContainer: View {
 			}
 		}
 		.frame(maxWidth: .infinity, maxHeight: .infinity)
+		.accessibilityIdentifier("screen.terminal")
 	}
 
 	private func markSessionConnected(_ session: Session) {
@@ -256,7 +310,7 @@ private struct TabKeyboardShortcuts: View {
 	let db = DB.memory()
 	try? db.migrate()
 	let coordinator = ViewCoordinator()
-	return ContentView()
+	return ContentView(launchConfiguration: AppLaunchConfiguration(environment: [:]))
 		.databaseContext(.readWrite { db.queue })
 		.environment(coordinator)
 		.environment(\.appTheme, TerminalTheme.mocha.appTheme)

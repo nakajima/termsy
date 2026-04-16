@@ -70,7 +70,8 @@ struct SessionListView: View {
 		}
 		.scrollContentBackground(.hidden)
 		.background(theme.background)
-		.navigationTitle("Termsy")
+		.navigationTitle("Teletype")
+		.accessibilityIdentifier("screen.savedSessions")
 		.toolbar {
 			#if os(macOS)
 				ToolbarItemGroup(placement: .termsyPrimaryAction) {
@@ -95,6 +96,7 @@ struct SessionListView: View {
 					} label: {
 						Label("New Session", systemImage: "plus")
 					}
+					.accessibilityIdentifier("action.newSession")
 					.keyboardShortcut("t", modifiers: .command)
 				}
 			#endif

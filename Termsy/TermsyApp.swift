@@ -17,27 +17,44 @@ struct TermsyApp: App {
 	@State private var coordinator = ViewCoordinator()
 
 	let db: DB
+	private let launchConfiguration: AppLaunchConfiguration
 
 	init() {
-		self.db = DB.path(URL.documentsDirectory.appending(path: "termsy.db").path)
+		let launchConfiguration = AppLaunchConfiguration.current
+		self.launchConfiguration = launchConfiguration
+		self.db = DB.path(launchConfiguration.databasePath)
+		launchConfiguration.preparePersistentStateIfNeeded(using: db)
 		#if os(macOS)
 			NSWindow.allowsAutomaticWindowTabbing = false
 		#endif
 	}
 
 	private var theme: TerminalTheme {
-		TerminalTheme(rawValue: selectedTheme) ?? .mocha
+		if launchConfiguration.isScreenshotMode {
+			return .mocha
+		}
+		return TerminalTheme(rawValue: selectedTheme) ?? .mocha
 	}
 
 	@SceneBuilder
 	var body: some Scene {
 		#if os(macOS)
-			Window("Termsy", id: "main") {
-				AppRootView(db: db, coordinator: coordinator, theme: theme)
+			Window("Teletype", id: "main") {
+				AppRootView(
+					db: db,
+					coordinator: coordinator,
+					theme: theme,
+					launchConfiguration: launchConfiguration
+				)
 			}
 		#else
 			WindowGroup {
-				AppRootView(db: db, coordinator: coordinator, theme: theme)
+				AppRootView(
+					db: db,
+					coordinator: coordinator,
+					theme: theme,
+					launchConfiguration: launchConfiguration
+				)
 			}
 		#endif
 	}
@@ -47,9 +64,10 @@ private struct AppRootView: View {
 	let db: DB
 	let coordinator: ViewCoordinator
 	let theme: TerminalTheme
+	let launchConfiguration: AppLaunchConfiguration
 
 	var body: some View {
-		ContentView()
+		ContentView(launchConfiguration: launchConfiguration)
 			.databaseContext(.readWrite { db.queue })
 			.environment(coordinator)
 			.environment(\.appTheme, theme.appTheme)
@@ -62,5 +80,10 @@ private struct AppRootView: View {
 	let db = DB.memory()
 	try? db.migrate()
 	let coordinator = ViewCoordinator()
-	return AppRootView(db: db, coordinator: coordinator, theme: .mocha)
+	return AppRootView(
+		db: db,
+		coordinator: coordinator,
+		theme: .mocha,
+		launchConfiguration: AppLaunchConfiguration(environment: [:])
+	)
 }

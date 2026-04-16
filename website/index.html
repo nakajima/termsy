@@ -1,14 +1,21 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>teletype: a terminal app</title>
+	<head>
+		<!-- bleep boop i am computer -->
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>teletype: a terminal app</title>
 		<style>
 			* {
+				box-sizing: border-box;
 				font-family: monospace;
-				background: #101010;
+				background: #0d0e0e;
 				color: #cfcfcf;
+			}
+
+			body {
+				margin: 0;
+				padding: 1rem;
 			}
 
 			a {
@@ -16,36 +23,60 @@
 			}
 
 			main {
-				max-width: 440px;
-				margin: auto;
+				width: min(100%, 440px);
+				margin: 0 auto;
 				gap: 2rem;
 				display: flex;
 				flex-direction: column;
 			}
 
-			li, dt, dd {
+			li,
+			dt,
+			dd,
+			figure {
 				margin: 0;
 				padding: 0;
 			}
 
-			dl, ul, p {
+			dl,
+			ul,
+			p {
 				padding: 0;
-				margin: 1rem 0;
+				margin: 1rem 0 0 0;
+			}
+
+			ul {
+				list-style: none;
 			}
 
 			li {
-				list-style-type: "* ";
+				position: relative;
+				padding-left: 1.25rem;
+			}
+
+			li::before {
+				content: "*";
+				position: absolute;
+				left: 0;
+				top: 0;
+				color: white;
+			}
+
+			p,
+			li,
+			dd {
+				line-height: 1.5;
 			}
 
 			h1 span {
 				color: white;
 			}
 
-			h1, h2, h3 {
-				font-size: 2rem;
+			h1,
+			h2,
+			h3 {
+				font-size: clamp(1.5rem, 6vw, 2rem);
 				margin: 0;
-				background: #1a1a1f;
-				display: inline-block;
 			}
 
 			dt {
@@ -55,38 +86,76 @@
 			dd {
 				margin-bottom: 1rem;
 			}
+
+			img[src="/teletypeicon.png"] {
+				width: min(100%, 120px);
+				margin: 1rem auto;
+				display: block;
+				border-radius: 2rem;
+			}
+
+			figure img {
+				width: min(100%, 440px);
+				margin: 0 auto;
+				display: block;
+				border-radius: 2rem;
+			}
+
+			figure figcaption {
+				text-decoration: none;
+				text-align: center;
+				display: block;
+			}
 		</style>
-  </head>
-  <body>
+	</head>
+	<body>
 		<main>
-		<section>
-    <h1><span>teletype </span>is a terminal app.</h1>
-    <p>
-      there's not much more to say. it's the terminal app that i want to use and i'm putting it in the app store so i don't need to worry about testflight builds expiring. i made this website in it so we've got that going for us.
-    </p>
-		</section>
-		<section>
-		<h2>features</h2>
-		<p>very few!</p>
-		<ul>
-			<li>auth is Tailscale SSH or passwords if u must.</li>
-			<li><a href="https://catppuccin.com">catppuccin</a> themes.</li>
-			<li>uses <a href="https://libghostty.tip.ghostty.org">libghostty</a> under the hood.</li>
-			<li><a href="https://github.com/nakajima/termsy">open-source</a>-<abbr title="I couldn't decide on a license but go nuts.">ish</abbr></li>
-			<li>free!</li>
-		</ul>
-		</section>
-		<section>
-			<h3>faq (probably)</h3>
-		<dl>
-		<dt>privacy?</dt>
-		<dd>i shan't collect any data whatsoever</dd> 
-		<dt>contact?</dt>
-		<dd>no thx!</dd>
-		<dt>ai?</dt>
-		<dd>not as such</dd>
-		</dl>
-		</section>
+			<img src="/teletypeicon.png" alt="App icon">
+			<section>
+				<h1><span>teletype </span>is a terminal app.</h1>
+				<p>
+					it only works with ssh. no local shell. no mosh. no telnet. no punch cards (it's on the <a
+						href="#can-u-imagine">roadmap</a>).
+				</p>
+				<p>
+					there's not much more to say. it's the terminal app that i want to use and i'm putting it in the app store so
+					i don't need to worry about testflight builds expiring. i made this website in it so we've got that going for
+					us.
+				</p>
+			</section>
+
+			<figure>
+				<a href="/screeno.png" target="_blank"></a>
+				<img src="/screeno.png" alt="Screenshot of the app">
+				</a>
+				<figcaption>it's a terminal app.</figcaption>
+			</figure>
+
+			<section>
+				<h2>features</h2>
+				<p>very few!</p>
+				<ul>
+					<li>auth is Tailscale SSH or passwords if u must.</li>
+					<li><a href="https://catppuccin.com">catppuccin</a> themes.</li>
+					<li>uses <a href="https://libghostty.tip.ghostty.org">libghostty</a> under the hood.</li>
+					<li><a href="https://github.com/nakajima/termsy">open-source</a>-<abbr
+							title="I couldn't decide on a license but go nuts.">ish</abbr></li>
+					<li>free!</li>
+				</ul>
+			</section>
+			<section>
+				<h3>faq (probably)</h3>
+				<dl>
+					<dt>privacy?</dt>
+					<dd>i shan't collect any data whatsoever</dd>
+					<dt>contact?</dt>
+					<dd>no thx!</dd>
+					<dt>ai?</dt>
+					<dd>not as such</dd>
+					<dt>updates?</dt>
+					<dd>we'll see!</dd>
+				</dl>
+			</section>
 		</main>
-  </body>
+	</body>
 </html>

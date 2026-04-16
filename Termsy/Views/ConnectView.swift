@@ -47,6 +47,7 @@ struct ConnectView: View {
 			Section("Host Details") {
 				HStack {
 					TextField("Username", text: $username)
+						.accessibilityIdentifier("field.username")
 						.textContentType(.username)
 						.autocorrectionDisabled()
 						.textInputAutocapitalization(.never)
@@ -56,6 +57,7 @@ struct ConnectView: View {
 					Text("@")
 						.foregroundStyle(theme.secondaryText)
 					TextField("Host", text: $host)
+						.accessibilityIdentifier("field.host")
 						.textContentType(.URL)
 						.autocorrectionDisabled()
 						.textInputAutocapitalization(.never)
@@ -70,6 +72,7 @@ struct ConnectView: View {
 				footer: Text("Will be started using `tmux new-session -A -s`")
 			) {
 				TextField("Tmux Session Name", text: $tmuxSessionName)
+					.accessibilityIdentifier("field.tmuxSessionName")
 					.textContentType(.username)
 					.autocorrectionDisabled()
 					.textInputAutocapitalization(.never)
@@ -80,14 +83,17 @@ struct ConnectView: View {
 			}
 			Section {
 				Toggle("Autoconnect to this session", isOn: $autoconnect)
+					.accessibilityIdentifier("toggle.autoconnect")
 					.tint(theme.accent)
 					.listRowBackground(theme.cardBackground)
 			}
 			Section {
 				Button("Connect") {
+					
 					connect()
 				}
 				.animation(.easeInOut, value: host)
+				.accessibilityIdentifier("action.connect")
 				.disabled(!canConnect)
 				.keyboardShortcut(.defaultAction)
 				.listRowBackground(canConnect ? theme.accent : theme.controlBackground)
@@ -101,6 +107,7 @@ struct ConnectView: View {
 		}
 		.scrollContentBackground(.hidden)
 		.background(theme.background)
+		.accessibilityIdentifier("screen.newSession")
 		.navigationTitle("New Session")
 		.termsyInlineNavigationTitle()
 		.toolbar {

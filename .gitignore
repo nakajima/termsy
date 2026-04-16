@@ -1,2 +1,3 @@
-build/ghostty/
 Packages/TermsyGhostty/BinaryTarget/*.zip
+build
+.wrangler

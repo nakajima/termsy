@@ -111,7 +111,7 @@ class ViewCoordinator {
 		appIsActive = false
 		ApplicationActivity.isActive = false
 		if tabs.contains(where: \.shouldRequestBackgroundExecution) {
-			_ = ApplicationActivity.beginBackgroundExecution(name: "Termsy SSH")
+			_ = ApplicationActivity.beginBackgroundExecution(name: "Teletype SSH")
 		}
 		for tab in tabs {
 			tab.noteAppWillResignActive()
@@ -256,6 +256,8 @@ class TerminalTab: Identifiable {
 	var reportedTitle = ""
 	var connectionLog: [String] = []
 
+	@ObservationIgnored private var pendingPreviewTranscript: String?
+	@ObservationIgnored private var isPassivePreview = false
 	@ObservationIgnored private var wasConnectedWhenAppResignedActive = false
 	@ObservationIgnored private var shouldReconnectOnActivation = false
 	@ObservationIgnored private(set) var isDisplayActive = false
@@ -356,14 +358,17 @@ class TerminalTab: Identifiable {
 	}
 
 	var connectionIsActive: Bool {
+		if isPassivePreview {
+			return true
+		}
 		switch endpoint {
 		case .remote:
-			sshSession.connection.isActive
+			return sshSession.connection.isActive
 		case .localShell:
 			#if os(macOS)
-				localShellSession?.isActive ?? false
+				return localShellSession?.isActive ?? false
 			#else
-				false
+				return false
 			#endif
 		}
 	}
@@ -373,6 +378,7 @@ class TerminalTab: Identifiable {
 	}
 
 	var shouldRequestBackgroundExecution: Bool {
+		guard !isPassivePreview else { return false }
 		guard case .remote = endpoint else { return false }
 		return isConnected || (connectionError == nil && !needsPassword)
 	}
@@ -384,6 +390,10 @@ class TerminalTab: Identifiable {
 	}
 
 	func connect() async {
+		if isPassivePreview {
+			renderPendingPreviewIfNeeded()
+			return
+		}
 		connectionError = nil
 		logConnectionEvent("Connect requested")
 		switch endpoint {
@@ -464,11 +474,13 @@ class TerminalTab: Identifiable {
 			.trimmingCharacters(in: .whitespacesAndNewlines)
 		let tmuxSessionName = rawTmuxSessionName.flatMap { $0.isEmpty ? nil : $0 }
 		tmuxStartupTask?.cancel()
-		if let tmuxSessionName {
-			logConnectionEvent("Attempt \(attempt): scheduling remote shell setup and tmux attach for \(tmuxSessionName)")
-		} else {
-			logConnectionEvent("Attempt \(attempt): scheduling remote shell setup")
+		guard let tmuxSessionName else {
+			logConnectionEvent("Attempt \(attempt): no tmux session configured; leaving remote shell as-is")
+			tmuxStartupTask = nil
+			return
 		}
+
+		logConnectionEvent("Attempt \(attempt): scheduling tmux attach for \(tmuxSessionName)")
 		tmuxStartupTask = Task { @MainActor [weak self, weak sshSession] in
 			try? await Task.sleep(nanoseconds: 150_000_000)
 			guard let self, let sshSession, self.isConnected, self.sshSession === sshSession else { return }
@@ -499,7 +511,6 @@ class TerminalTab: Identifiable {
 			}
 
 			guard self.isConnected, self.sshSession === sshSession else { return }
-			guard let tmuxSessionName else { return }
 			let escapedName = self.shellQuoted(tmuxSessionName)
 			let commandPrefix = hasGhosttyTerminfo ? "env TERM=xterm-ghostty " : ""
 			let command = Data("\(commandPrefix)tmux new-session -A -s \(escapedName)\r".utf8)
@@ -602,6 +613,11 @@ class TerminalTab: Identifiable {
 	}
 
 	func disconnect() {
+		if isPassivePreview {
+			isConnected = false
+			pendingPreviewTranscript = nil
+			return
+		}
 		isConnected = false
 		tmuxStartupTask?.cancel()
 		tmuxStartupTask = nil
@@ -627,12 +643,38 @@ class TerminalTab: Identifiable {
 		terminalView.stop()
 		terminalView.removeFromSuperview()
 		terminalView = TerminalView(frame: .zero)
+		if isPassivePreview {
+			terminalView.setPresentationMode(.passivePreview)
+		}
 		configureTerminalView()
 		terminalView.setDisplayActive(isDisplayActive)
 	}
 
 	func applyTheme(_ theme: AppTheme) {
 		terminalView.applyTheme(theme)
+	}
+
+	func preparePassivePreview(transcript: String) {
+		isPassivePreview = true
+		pendingPreviewTranscript = transcript
+		isConnected = true
+		connectionError = nil
+		needsPassword = false
+		isRestoring = false
+		terminalView.setPresentationMode(.passivePreview)
+		clearAppInactiveState()
+		connectionLog = [
+			"[Demo] Loaded canned transcript for preview",
+			"[Demo] Session target: \(detailText)",
+		]
+	}
+
+	func renderPendingPreviewIfNeeded() {
+		guard isPassivePreview, let transcript = pendingPreviewTranscript else { return }
+		terminalView.start()
+		terminalView.feedData(Data(transcript.utf8))
+		pendingPreviewTranscript = nil
+		print("[Screenshots] ready terminal")
 	}
 
 	func setDisplayActive(_ isActive: Bool) {
@@ -695,6 +737,7 @@ class TerminalTab: Identifiable {
 	}
 
 	func prepareForReconnectAfterBackgroundLoss() {
+		guard !isPassivePreview else { return }
 		logConnectionEvent("Preparing for reconnect after background loss")
 		clearAppInactiveState()
 		connectionError = nil

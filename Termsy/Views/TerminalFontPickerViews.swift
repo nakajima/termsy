@@ -98,7 +98,7 @@
 				   !SystemFontCatalog.isMonospacedSystemFamily(fontFamily)
 				{
 					onSelectionMessage(
-						"“\(fontFamily)” is a built-in system font. Termsy keeps built-in choices limited to monospaced families, so pick it from the System Monospaced Fonts list or choose a custom installed font here."
+						"“\(fontFamily)” is a built-in system font. Teletype keeps built-in choices limited to monospaced families, so pick it from the System Monospaced Fonts list or choose a custom installed font here."
 					)
 					onDismiss()
 					return
@@ -108,7 +108,7 @@
 					DispatchQueue.main.async {
 						if CFArrayGetCount(unresolved) > 0 {
 							self.onSelectionMessage(
-								"Termsy couldn’t make “\(fontFamily)” available yet. Try selecting it again from Installed / Custom Fonts."
+								"Teletype couldn’t make “\(fontFamily)” available yet. Try selecting it again from Installed / Custom Fonts."
 							)
 						} else {
 							self.selectedFontFamily.wrappedValue = fontFamily

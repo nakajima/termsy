@@ -6,12 +6,8 @@
     {
       "layers" : [
         {
-          "blend-mode" : "normal",
-          "fill" : "none",
-          "glass" : false,
-          "hidden" : false,
-          "image-name" : "termsyicon.png",
-          "name" : "termsyicon"
+          "image-name" : "teletypeicon.png",
+          "name" : "teletypeicon"
         }
       ],
       "shadow" : {

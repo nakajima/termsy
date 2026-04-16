@@ -24,7 +24,7 @@ struct WhatsNewView: View {
 			Section {
 				VStack(alignment: .leading, spacing: 12) {
 					HStack(alignment: .firstTextBaseline) {
-						Text("Termsy")
+						Text("Teletype")
 							.font(.headline)
 							.foregroundStyle(theme.primaryText)
 
@@ -75,7 +75,7 @@ struct WhatsNewView: View {
 		WhatsNewView(
 			content: WhatsNewContent(
 				title: "What's New",
-				summary: "A quick summary of the latest improvements in Termsy.",
+				summary: "A quick summary of the latest improvements in Teletype.",
 				changes: [
 					"Fix tab resume behavior when returning to the app.",
 					"Improve touch scrolling and pointer input in terminal sessions.",

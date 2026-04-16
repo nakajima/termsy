@@ -24,6 +24,7 @@ struct SessionPickerPanelOverlay: View {
 					}
 
 				SessionPickerView()
+					.accessibilityIdentifier("screen.sessionPicker")
 					.frame(width: panelWidth)
 					.frame(maxHeight: .infinity)
 					.background(theme.background)
