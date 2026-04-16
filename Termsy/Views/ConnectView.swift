@@ -19,6 +19,7 @@ struct ConnectView: View {
 	private enum Field: Hashable {
 		case username
 		case host
+		case port
 		case tmuxSessionName
 	}
 
@@ -30,7 +31,7 @@ struct ConnectView: View {
 	@Environment(ViewCoordinator.self) var coordinator
 
 	@State private var host = ""
-	@State private var port = "22"
+	@State private var port = ""
 	@AppStorage("lastUsername") private var username = ""
 	@State private var tmuxSessionName = ""
 	@State private var errorMessage: String? = nil
@@ -46,7 +47,7 @@ struct ConnectView: View {
 		Form {
 			Section("Host Details") {
 				HStack {
-					TextField("Username", text: $username)
+					TextField("username", text: $username)
 						.accessibilityIdentifier("field.username")
 						.textContentType(.username)
 						.autocorrectionDisabled()
@@ -56,12 +57,21 @@ struct ConnectView: View {
 						.foregroundStyle(theme.primaryText)
 					Text("@")
 						.foregroundStyle(theme.secondaryText)
-					TextField("Host", text: $host)
+					TextField("hostname", text: $host)
 						.accessibilityIdentifier("field.host")
 						.textContentType(.URL)
 						.autocorrectionDisabled()
 						.textInputAutocapitalization(.never)
 						.focused($focusedField, equals: .host)
+						.submitLabel(.next)
+						.foregroundStyle(theme.primaryText)
+					Text("-p")
+						.foregroundStyle(theme.secondaryText)
+					TextField("22", text: $port)
+						.accessibilityIdentifier("field.port")
+						.autocorrectionDisabled()
+						.keyboardType(.numberPad)
+						.focused($focusedField, equals: .port)
 						.submitLabel(.next)
 						.foregroundStyle(theme.primaryText)
 				}
@@ -132,6 +142,8 @@ struct ConnectView: View {
 			focusedField = .host
 		case .host:
 			focusedField = .tmuxSessionName
+		case .port:
+			focusedField = .port
 		case .tmuxSessionName, .none:
 			connect()
 		}
