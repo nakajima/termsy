@@ -4,7 +4,6 @@
 <dict>
 	<key>com.apple.developer.user-fonts</key>
 	<array>
-		<string>font-enumeration</string>
 		<string>app-usage</string>
 	</array>
 </dict>
