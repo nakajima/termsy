@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>teletype: a terminal app</title>
+		<style>
+			* {
+				font-family: monospace;
+				background: #101010;
+				color: #cfcfcf;
+			}
+
+			a {
+				color: white;
+			}
+
+			main {
+				max-width: 440px;
+				margin: auto;
+				gap: 2rem;
+				display: flex;
+				flex-direction: column;
+			}
+
+			li, dt, dd {
+				margin: 0;
+				padding: 0;
+			}
+
+			dl, ul, p {
+				padding: 0;
+				margin: 1rem 0;
+			}
+
+			li {
+				list-style-type: "* ";
+			}
+
+			h1 span {
+				color: white;
+			}
+
+			h1, h2, h3 {
+				font-size: 2rem;
+				margin: 0;
+				background: #1a1a1f;
+				display: inline-block;
+			}
+
+			dt {
+				color: #8f8f8f;
+			}
+
+			dd {
+				margin-bottom: 1rem;
+			}
+		</style>
+  </head>
+  <body>
+		<main>
+		<section>
+    <h1><span>teletype </span>is a terminal app.</h1>
+    <p>
+      there's not much more to say. it's the terminal app that i want to use and i'm putting it in the app store so i don't need to worry about testflight builds expiring. i made this website in it so we've got that going for us.
+    </p>
+		</section>
+		<section>
+		<h2>features</h2>
+		<p>very few!</p>
+		<ul>
+			<li>auth is Tailscale SSH or passwords if u must.</li>
+			<li><a href="https://catppuccin.com">catppuccin</a> themes.</li>
+			<li>uses <a href="https://libghostty.tip.ghostty.org">libghostty</a> under the hood.</li>
+			<li><a href="https://github.com/nakajima/termsy">open-source</a>-<abbr title="I couldn't decide on a license but go nuts.">ish</abbr></li>
+			<li>free!</li>
+		</ul>
+		</section>
+		<section>
+			<h3>faq (probably)</h3>
+		<dl>
+		<dt>privacy?</dt>
+		<dd>i shan't collect any data whatsoever</dd> 
+		<dt>contact?</dt>
+		<dd>no thx!</dd>
+		<dt>ai?</dt>
+		<dd>not as such</dd>
+		</dl>
+		</section>
+		</main>
+  </body>
+</html>
