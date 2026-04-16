@@ -22,6 +22,8 @@ SCENARIOS=(
 
 IPHONE_DEVICE="iPhone 17 Pro Max"
 IPAD_DEVICE="iPad Air 13-inch (M3)"
+IPHONE_UPLOAD_WIDTH=1284
+IPHONE_UPLOAD_HEIGHT=2778
 
 mkdir -p "$FINAL_DIR" "$LOGS_DIR" "$IPAD_XCRESULT_DIR"
 rm -rf "$FINAL_DIR"/* "$LOGS_DIR"/* "$IPAD_XCRESULT_DIR"/*
@@ -150,6 +152,67 @@ try png.write(to: output)
 ' "$input_path" "$output_path"
 }
 
+prepare_iphone_png() {
+  local input_path="$1"
+  local output_path="$2"
+  local portrait_width="$3"
+  local portrait_height="$4"
+  swift -e 'import AppKit
+let input = URL(fileURLWithPath: CommandLine.arguments[1])
+let output = URL(fileURLWithPath: CommandLine.arguments[2])
+let portraitWidth = CGFloat(Int(CommandLine.arguments[3])!)
+let portraitHeight = CGFloat(Int(CommandLine.arguments[4])!)
+guard let image = NSImage(contentsOf: input),
+      let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+    fputs("Failed to load image at \(input.path)\n", stderr)
+    exit(1)
+}
+let sourceSize = CGSize(width: cgImage.width, height: cgImage.height)
+let targetSize = sourceSize.width > sourceSize.height
+    ? CGSize(width: portraitHeight, height: portraitWidth)
+    : CGSize(width: portraitWidth, height: portraitHeight)
+let scale = max(targetSize.width / sourceSize.width, targetSize.height / sourceSize.height)
+let scaledSize = CGSize(width: sourceSize.width * scale, height: sourceSize.height * scale)
+let drawRect = CGRect(
+    x: (targetSize.width - scaledSize.width) / 2,
+    y: (targetSize.height - scaledSize.height) / 2,
+    width: scaledSize.width,
+    height: scaledSize.height
+)
+guard let bitmap = NSBitmapImageRep(
+    bitmapDataPlanes: nil,
+    pixelsWide: Int(targetSize.width),
+    pixelsHigh: Int(targetSize.height),
+    bitsPerSample: 8,
+    samplesPerPixel: 4,
+    hasAlpha: true,
+    isPlanar: false,
+    colorSpaceName: .deviceRGB,
+    bytesPerRow: 0,
+    bitsPerPixel: 0
+) else {
+    fputs("Failed to create bitmap for \(output.path)\n", stderr)
+    exit(1)
+}
+guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+    fputs("Failed to create graphics context for \(output.path)\n", stderr)
+    exit(1)
+}
+NSGraphicsContext.saveGraphicsState()
+NSGraphicsContext.current = context
+context.imageInterpolation = .high
+NSColor.black.setFill()
+NSRect(origin: .zero, size: targetSize).fill()
+NSImage(cgImage: cgImage, size: sourceSize).draw(in: drawRect)
+NSGraphicsContext.restoreGraphicsState()
+guard let png = bitmap.representation(using: .png, properties: [:]) else {
+    fputs("Failed to encode PNG for \(output.path)\n", stderr)
+    exit(1)
+}
+try png.write(to: output)
+' "$input_path" "$output_path" "$portrait_width" "$portrait_height"
+}
+
 export_ipad_attachment() {
   local result_bundle="$1"
   local expected_name="$2"
@@ -199,9 +262,16 @@ sleep 2
 screenshot_index=1
 for scenario in "${SCENARIOS[@]}"; do
   printf -v ordered_name "%s-%02d-%s.png" "iphone" "$screenshot_index" "$scenario"
+  raw_capture_path="${RESULTS_DIR}/raw-${ordered_name}"
   echo "==> Capturing ${ordered_name}"
   launch_for_iphone_screenshot "$iphone_udid" "$scenario"
-  capture_screenshot "$iphone_udid" "${FINAL_DIR}/${ordered_name}"
+  capture_screenshot "$iphone_udid" "$raw_capture_path"
+  prepare_iphone_png \
+    "$raw_capture_path" \
+    "${FINAL_DIR}/${ordered_name}" \
+    "$IPHONE_UPLOAD_WIDTH" \
+    "$IPHONE_UPLOAD_HEIGHT"
+  rm -f "$raw_capture_path"
   screenshot_index=$((screenshot_index + 1))
 done
 
