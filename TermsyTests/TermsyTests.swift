@@ -110,6 +110,28 @@ struct TermsyTests {
 		}
 	}
 
+	@Test func sessionWorkspaceStatePersists() throws {
+		let db = DB.memory()
+		try db.migrate()
+
+		var session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		session.tabOrder = 2
+		session.isOpen = true
+
+		try db.queue.write { database in
+			try session.save(database)
+			let savedSession = try Session.fetchOne(database, key: session.id)
+			#expect(savedSession?.tabOrder == 2)
+			#expect(savedSession?.isOpen == true)
+		}
+	}
+
 	@Test func sameHostDifferentTmuxNamesPersistAsSeparateSessions() throws {
 		let db = DB.memory()
 		try db.migrate()

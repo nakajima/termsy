@@ -35,7 +35,6 @@ struct ConnectView: View {
 	@AppStorage("lastUsername") private var username = ""
 	@State private var tmuxSessionName = ""
 	@State private var errorMessage: String? = nil
-	@State private var autoconnect: Bool = true
 
 	@FocusState private var focusedField: Field?
 
@@ -89,12 +88,6 @@ struct ConnectView: View {
 					.focused($focusedField, equals: .tmuxSessionName)
 					.submitLabel(canConnect ? .go : .done)
 					.foregroundStyle(theme.primaryText)
-					.listRowBackground(theme.cardBackground)
-			}
-			Section {
-				Toggle("Autoconnect to this session", isOn: $autoconnect)
-					.accessibilityIdentifier("toggle.autoconnect")
-					.tint(theme.accent)
 					.listRowBackground(theme.cardBackground)
 			}
 			Section {
@@ -158,7 +151,7 @@ struct ConnectView: View {
 			tmuxSessionName: tmuxSessionName.trimmingCharacters(
 				in: .whitespacesAndNewlines) == "" ? nil : tmuxSessionName,
 			port: Int(port) ?? 22,
-			autoconnect: autoconnect
+			autoconnect: false
 		)
 
 		do {
@@ -168,7 +161,6 @@ struct ConnectView: View {
 					existingSession.username = session.username
 					existingSession.tmuxSessionName = session.tmuxSessionName
 					existingSession.port = session.port
-					existingSession.autoconnect = session.autoconnect
 					try existingSession.update(db)
 					session = existingSession
 				} else {

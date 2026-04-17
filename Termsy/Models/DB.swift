@@ -48,6 +48,12 @@ struct DB {
 			}
 		}
 
+		migrator.registerMigration("AddSessionIsOpen") { db in
+			try db.alter(table: "session") { t in
+				t.add(column: "isOpen", .boolean).notNull().defaults(to: false)
+			}
+		}
+
 		try migrator.migrate(queue)
 	}
 }

@@ -12,6 +12,10 @@ import SwiftUI
 	import AppKit
 #endif
 
+private enum WorkspacePersistence {
+	static let selectedSessionIDKey = "workspace.selectedSessionID"
+}
+
 struct ContentView: View {
 	let launchConfiguration: AppLaunchConfiguration
 
@@ -102,7 +106,10 @@ struct ContentView: View {
 			}
 		}
 		.onChange(of: coordinator.tabs.map(\.id), initial: false) { _, _ in
-			persistTabOrder()
+			persistWorkspaceState()
+		}
+		.onChange(of: coordinator.selectedTabID, initial: false) { _, _ in
+			persistWorkspaceState()
 		}
 		#endif
 		.task {
@@ -115,12 +122,14 @@ struct ContentView: View {
 			}
 
 			let sessions = try? dbContext.reader.read { db in
-				try Session.filter { $0.autoconnect == true }.fetchAll(db)
+				try Session.filter { $0.isOpen == true }.fetchAll(db)
 			}
 
-			for session in orderedAutoconnectSessions(sessions ?? []) {
+			for session in orderedWorkspaceSessions(sessions ?? []) {
 				coordinator.openTab(for: session)
 			}
+
+			restoreSelectedTabIfPossible()
 		}
 	}
 
@@ -183,7 +192,7 @@ struct ContentView: View {
 		coordinator.selectTab(primaryTab.id)
 	}
 
-	private func orderedAutoconnectSessions(_ sessions: [Session]) -> [Session] {
+	private func orderedWorkspaceSessions(_ sessions: [Session]) -> [Session] {
 		sessions.sorted { lhs, rhs in
 			let lhsOrder = lhs.tabOrder ?? Int.max
 			let rhsOrder = rhs.tabOrder ?? Int.max
@@ -197,23 +206,48 @@ struct ContentView: View {
 		}
 	}
 
-	#if !os(macOS)
-	private func persistTabOrder() {
-		let orderedSessions = coordinator.tabs.enumerated().compactMap { index, tab -> Session? in
-			guard var session = tab.session, session.id != nil else { return nil }
-			session.tabOrder = index
-			return session
+	private func restoreSelectedTabIfPossible() {
+		guard let selectedSessionID = persistedSelectedSessionID else { return }
+		guard let selectedTab = coordinator.tabs.first(where: { $0.session?.id == selectedSessionID }) else {
+			persistedSelectedSessionID = nil
+			return
 		}
-		guard !orderedSessions.isEmpty else { return }
+		coordinator.selectTab(selectedTab.id)
+	}
+
+	private var persistedSelectedSessionID: Int64? {
+		get {
+			(UserDefaults.standard.object(forKey: WorkspacePersistence.selectedSessionIDKey) as? NSNumber)?.int64Value
+		}
+		nonmutating set {
+			if let newValue {
+				UserDefaults.standard.set(NSNumber(value: newValue), forKey: WorkspacePersistence.selectedSessionIDKey)
+			} else {
+				UserDefaults.standard.removeObject(forKey: WorkspacePersistence.selectedSessionIDKey)
+			}
+		}
+	}
+
+	#if !os(macOS)
+	private func persistWorkspaceState() {
+		let openSessions = coordinator.tabs.enumerated().compactMap { index, tab -> (sessionID: Int64, tabOrder: Int)? in
+			guard let sessionID = tab.session?.id else { return nil }
+			return (sessionID: sessionID, tabOrder: index)
+		}
 
 		do {
 			try dbContext.writer.write { db in
-				for session in orderedSessions {
-					try session.update(db)
+				try db.execute(sql: "UPDATE session SET isOpen = 0, tabOrder = NULL")
+				for openSession in openSessions {
+					try db.execute(
+						sql: "UPDATE session SET isOpen = 1, tabOrder = ? WHERE id = ?",
+						arguments: [openSession.tabOrder, openSession.sessionID]
+					)
 				}
 			}
+			persistedSelectedSessionID = coordinator.selectedTab?.session?.id
 		} catch {
-			print("[DB] failed to persist tab order: \(error)")
+			print("[DB] failed to persist workspace state: \(error)")
 		}
 	}
 	#endif
