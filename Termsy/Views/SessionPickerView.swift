@@ -115,7 +115,7 @@ struct SessionPickerView: View {
 		} label: {
 			HStack {
 				VStack(alignment: .leading, spacing: 2) {
-					Text("\(session.username)@\(session.hostname)")
+					Text(session.displayTarget)
 						.font(.body)
 						.foregroundStyle(theme.primaryText)
 					if let tmux = session.tmuxSessionName, !tmux.isEmpty {

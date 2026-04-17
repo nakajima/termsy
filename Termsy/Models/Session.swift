@@ -74,6 +74,12 @@ extension Session {
 		return trimmed.isEmpty ? "-" : trimmed.lowercased()
 	}
 
+	var displayTarget: String {
+		let baseTitle = "\(username)@\(hostname)"
+		guard port != 22 else { return baseTitle }
+		return "\(baseTitle):\(port)"
+	}
+
 	var normalizedTargetKey: String {
 		"\(normalizedUsername)@\(normalizedHostname):\(port)#\(normalizedTmuxSessionName)"
 	}

@@ -458,6 +458,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	private var pendingTerminalSize = TerminalWindowSize(columns: 80, rows: 24, pixelWidth: 0, pixelHeight: 0)
 
 	private let onData: @Sendable (Data) -> Void
+	private var hasReceivedData = false
 	private let onClose: @Sendable (CloseReason) -> Void
 	private let onEvent: @Sendable (String) -> Void
 
@@ -519,7 +520,10 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		log("startShell \(size.columns)x\(size.rows) px=\(size.pixelWidth)x\(size.pixelHeight)")
 		guard let channel else { throw SSHConnectionError.notConnected }
 
-		let onData = self.onData
+		let onData: @Sendable (Data) -> Void = { [weak self] data in
+			self?.hasReceivedData = true
+			self?.onData(data)
+		}
 		let onClose = self.onClose
 
 		do {
@@ -589,17 +593,29 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 			log("PTY allocated")
 
 			if let startupCommand {
+				// Try ExecRequest first for shell title integration.
+				// Some servers (like sshui-based ones) don't handle exec properly,
+				// so we fall back to ShellRequest if no data arrives.
+				hasReceivedData = false
 				let execReq = SSHChannelRequestEvent.ExecRequest(command: startupCommand, wantReply: true)
-				do {
-					try await withTimeout(
-						childChannel.triggerUserOutboundEvent(execReq),
-						on: childChannel.eventLoop,
-						timeout: Self.channelRequestTimeout,
-						error: .timedOut("starting the remote shell")
-					).get()
-					log("remote shell bootstrap started")
-				} catch {
-					log("remote shell bootstrap failed, falling back to plain shell: \(error)")
+				try await withTimeout(
+					childChannel.triggerUserOutboundEvent(execReq),
+					on: childChannel.eventLoop,
+					timeout: Self.channelRequestTimeout,
+					error: .timedOut("starting the remote shell")
+				).get()
+				log("exec request sent, waiting for data...")
+				resize(pendingTerminalSize)
+
+				// Wait briefly for the server to respond
+				try await Task.sleep(nanoseconds: 500_000_000) // 500ms
+
+				if hasReceivedData {
+					log("exec request worked, data received")
+				} else {
+					// Server accepted exec but didn't send data - likely doesn't
+					// handle exec properly. Try ShellRequest on same channel.
+					log("no data after exec, sending ShellRequest on same channel")
 					let shellReq = SSHChannelRequestEvent.ShellRequest(wantReply: true)
 					try await withTimeout(
 						childChannel.triggerUserOutboundEvent(shellReq),
@@ -607,7 +623,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 						timeout: Self.channelRequestTimeout,
 						error: .timedOut("starting the remote shell")
 					).get()
-					log("shell started")
+					log("shell started (fallback)")
 				}
 			} else {
 				let shellReq = SSHChannelRequestEvent.ShellRequest(wantReply: true)
@@ -618,8 +634,8 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 					error: .timedOut("starting the remote shell")
 				).get()
 				log("shell started")
+				resize(pendingTerminalSize)
 			}
-			resize(pendingTerminalSize)
 		} catch {
 			disconnect()
 			throw error

@@ -51,7 +51,7 @@ struct SessionListView: View {
 						coordinator.openTab(for: session)
 					} label: {
 						VStack(alignment: .leading, spacing: 4) {
-							Text("\(session.username)@\(session.hostname)")
+							Text(session.displayTarget)
 								.font(.headline)
 								.foregroundStyle(theme.primaryText)
 							if let tmuxSessionName = session.tmuxSessionName, !tmuxSessionName.isEmpty {
@@ -132,14 +132,23 @@ struct SessionListView: View {
 	let db = DB.memory()
 	try? db.migrate()
 	try? db.queue.write { db in
-		var session = Session(
+		var defaultPortSession = Session(
 			hostname: "prod.example.com",
 			username: "pat",
 			tmuxSessionName: "api",
 			port: 22,
 			autoconnect: true
 		)
-		try session.save(db)
+		try defaultPortSession.save(db)
+
+		var customPortSession = Session(
+			hostname: "staging.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 2222,
+			autoconnect: false
+		)
+		try customPortSession.save(db)
 	}
 
 	let coordinator = ViewCoordinator()

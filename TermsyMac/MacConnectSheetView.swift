@@ -42,7 +42,7 @@
 									connectExisting(session)
 								} label: {
 									VStack(alignment: .leading, spacing: 3) {
-										Text("\(session.username)@\(session.hostname)")
+										Text(session.displayTarget)
 											.foregroundStyle(theme.primaryText)
 										if let tmuxSessionName = session.tmuxSessionName, !tmuxSessionName.isEmpty {
 											Text("tmux • \(tmuxSessionName)")
