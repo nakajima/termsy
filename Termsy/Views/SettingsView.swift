@@ -17,8 +17,6 @@ struct SettingsView: View {
 	@AppStorage(TerminalScrollSettings.smoothVisualScrollingEnabledKey) private var smoothVisualScrollingEnabled = TerminalScrollSettings.defaultSmoothVisualScrollingEnabled
 	@Environment(\.appTheme) private var theme
 	@Environment(\.dismiss) private var dismiss
-	@State private var isShowingInstalledFontPicker = false
-	@State private var fontSelectionMessage: String?
 
 	private var touchSensitivityLabel: String {
 		"\(touchScrollSensitivity.formatted(.number.precision(.fractionLength(2))))×"
@@ -77,13 +75,6 @@ struct SettingsView: View {
 					}
 					.listRowBackground(theme.cardBackground)
 
-					Button {
-						isShowingInstalledFontPicker = true
-					} label: {
-						Text("Installed / Custom Fonts…")
-							.foregroundStyle(theme.primaryText)
-					}
-					.listRowBackground(theme.cardBackground)
 
 					if TerminalFontSettings.normalizedFamily(terminalFontFamily) != nil {
 						Button("Use Default") {
@@ -95,7 +86,7 @@ struct SettingsView: View {
 				} header: {
 					Text("Font")
 				} footer: {
-					Text("System fonts stay limited to monospaced families. Use Installed / Custom Fonts for Fontcase or other provider fonts that may not advertise the monospace trait correctly on iOS.")
+					Text("Termsy uses monospaced fonts only.")
 				}
 
 				Section {
@@ -203,29 +194,6 @@ struct SettingsView: View {
 				#endif
 			}
 			.termsyNavigationBarAppearance(theme)
-		}
-		.sheet(isPresented: $isShowingInstalledFontPicker) {
-			InstalledTerminalFontPickerSheet(
-				selectedFontFamily: $terminalFontFamily,
-				onSelectionMessage: { message in
-					fontSelectionMessage = message
-				},
-				onDismiss: {
-					isShowingInstalledFontPicker = false
-				}
-			)
-		}
-		.alert("Font Selection", isPresented: .init(
-			get: { fontSelectionMessage != nil },
-			set: { isPresented in
-				if !isPresented {
-					fontSelectionMessage = nil
-				}
-			}
-		)) {
-			Button("OK", role: .cancel) {}
-		} message: {
-			Text(fontSelectionMessage ?? "")
 		}
 	}
 }

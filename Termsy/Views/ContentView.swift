@@ -146,11 +146,10 @@ struct ContentView: View {
 			coordinator.isShowingSettings = true
 			announceScreenshotReadiness("settings")
 		case .terminal:
-			openScreenshotTerminal(using: seededSessions)
+			openScreenshotTerminal(using: seededSessions, readinessLabel: "terminal")
 		case .sessionPicker:
-			openScreenshotTerminal(using: seededSessions)
+			openScreenshotTerminal(using: seededSessions, readinessLabel: "session-picker")
 			coordinator.isShowingSessionPicker = true
-			announceScreenshotReadiness("session-picker")
 		}
 	}
 
@@ -159,15 +158,29 @@ struct ContentView: View {
 		print("[Screenshots] ready \(label)")
 	}
 
-	private func openScreenshotTerminal(using sessions: [Session]) {
+	private func openScreenshotTerminal(using sessions: [Session], readinessLabel: String) {
+		guard let primarySession = sessions.first(where: { $0.hostname == AppStoreScreenshotFixtures.primaryHostname }) ?? sessions.first else {
+			return
+		}
+
 		for session in sessions {
 			coordinator.openTab(for: session)
+			guard session.normalizedTargetKey != primarySession.normalizedTargetKey,
+			      let tab = coordinator.tabs.first(where: { $0.session?.normalizedTargetKey == session.normalizedTargetKey })
+			else {
+				continue
+			}
+			tab.preparePassivePreview(transcript: "")
 		}
-		guard let primarySession = sessions.first(where: { $0.hostname == AppStoreScreenshotFixtures.primaryHostname }) ?? sessions.first,
-		      let primaryTab = coordinator.tabs.first(where: { $0.session?.normalizedTargetKey == primarySession.normalizedTargetKey })
-		else { return }
+
+		guard let primaryTab = coordinator.tabs.first(where: { $0.session?.normalizedTargetKey == primarySession.normalizedTargetKey }) else {
+			return
+		}
+		primaryTab.terminalView.setPresentationMode(.passivePreview)
+		primaryTab.onFirstRemoteOutput = {
+			announceScreenshotReadiness(readinessLabel)
+		}
 		coordinator.selectTab(primaryTab.id)
-		primaryTab.preparePassivePreview(transcript: AppStoreScreenshotFixtures.terminalTranscript)
 	}
 
 	private func orderedAutoconnectSessions(_ sessions: [Session]) -> [Session] {

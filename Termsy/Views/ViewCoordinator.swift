@@ -256,7 +256,9 @@ class TerminalTab: Identifiable {
 	var reportedTitle = ""
 	var connectionLog: [String] = []
 
+	@ObservationIgnored var onFirstRemoteOutput: (() -> Void)?
 	@ObservationIgnored private var pendingPreviewTranscript: String?
+	@ObservationIgnored private var pendingPreviewReadinessLabel: String?
 	@ObservationIgnored private var isPassivePreview = false
 	@ObservationIgnored private var wasConnectedWhenAppResignedActive = false
 	@ObservationIgnored private var shouldReconnectOnActivation = false
@@ -562,6 +564,10 @@ class TerminalTab: Identifiable {
 		let sshSession = sshSession ?? self.sshSession
 		sshSession.onRemoteOutput = { [weak self, weak sshSession] data in
 			guard let self, let sshSession, self.sshSession === sshSession else { return }
+			if let onFirstRemoteOutput = self.onFirstRemoteOutput {
+				self.onFirstRemoteOutput = nil
+				onFirstRemoteOutput()
+			}
 			self.terminalView.feedData(data)
 		}
 		sshSession.onClose = { [weak self, weak sshSession] reason in
@@ -654,9 +660,10 @@ class TerminalTab: Identifiable {
 		terminalView.applyTheme(theme)
 	}
 
-	func preparePassivePreview(transcript: String) {
+	func preparePassivePreview(transcript: String, screenshotReadyLabel: String? = nil) {
 		isPassivePreview = true
 		pendingPreviewTranscript = transcript
+		pendingPreviewReadinessLabel = screenshotReadyLabel
 		isConnected = true
 		connectionError = nil
 		needsPassword = false
@@ -674,7 +681,10 @@ class TerminalTab: Identifiable {
 		terminalView.start()
 		terminalView.feedData(Data(transcript.utf8))
 		pendingPreviewTranscript = nil
-		print("[Screenshots] ready terminal")
+		if let pendingPreviewReadinessLabel {
+			print("[Screenshots] ready \(pendingPreviewReadinessLabel)")
+			self.pendingPreviewReadinessLabel = nil
+		}
 	}
 
 	func setDisplayActive(_ isActive: Bool) {

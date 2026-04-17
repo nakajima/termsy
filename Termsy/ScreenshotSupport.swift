@@ -39,7 +39,7 @@ struct AppLaunchConfiguration {
 		UserDefaults.standard.set(TerminalTheme.mocha.rawValue, forKey: "terminalTheme")
 		UserDefaults.standard.set("block", forKey: "cursorStyle")
 		UserDefaults.standard.set(false, forKey: "cursorBlink")
-		UserDefaults.standard.set("luke", forKey: "lastUsername")
+		UserDefaults.standard.set("user", forKey: "lastUsername")
 		UserDefaults.standard.set("", forKey: TerminalFontSettings.familyKey)
 	}
 
@@ -59,16 +59,17 @@ struct AppLaunchConfiguration {
 }
 
 enum AppStoreScreenshotFixtures {
-	static let primaryHostname = "bandit.labs.overthewire.org"
+	static let primaryHostname = "my.teletype.computer"
 
 	static func sampleSessions() -> [Session] {
 		let baseDate = Date(timeIntervalSince1970: 1_776_000_000)
 		return [
 			configuredSession(
-				username: "bandi0",
-				hostname: "bandit.labs.overthewire.org",
-				port: 2220,
-				createdAt: baseDate
+				username: "user",
+				hostname: "my.teletype.computer",
+				port: 2222,
+				createdAt: baseDate,
+				customTitle: "user@my.teletype.computer -p 2222"
 			),
 			configuredSession(
 				username: "luke",
@@ -96,32 +97,32 @@ enum AppStoreScreenshotFixtures {
 		return normalizedTerminalPreviewTranscript("""
 		\(esc)[2J\(esc)[H\(esc)[35;1mTeletype demo session\(esc)[0m
 
-		bandi0@bandit:~$ cat ~/servers.txt
-		bandi0@bandit.labs.overthewire.org -p 2220
+		user@teletype:~$ cat ~/servers.txt
+		user@my.teletype.computer -p 2222
 		luke@starwarstel.net
 		nethack@alt.org
 		root@pimux
 
-		bandi0@bandit:~$ printf 'ssh -p 2220 bandi0@bandit.labs.overthewire.org\\n'
-		ssh -p 2220 bandi0@bandit.labs.overthewire.org
+		user@teletype:~$ printf 'ssh -p 2222 user@my.teletype.computer\\n'
+		ssh -p 2222 user@my.teletype.computer
 
-		bandi0@bandit:~$ ls --color=always
+		user@teletype:~$ ls --color=always
 		\(esc)[34mnotes\(esc)[0m  \(esc)[32mreadme\(esc)[0m  \(esc)[36mscripts\(esc)[0m
 
-		bandi0@bandit:~$ cat readme
-		Welcome to OverTheWire Bandit.
+		user@teletype:~$ cat readme
+		Welcome to Teletype.
 		Use the saved sessions on the left, open a new session with ⌘T,
 		and keep your favorite hosts one tap away.
 
-		bandi0@bandit:~$ echo $TERM
+		user@teletype:~$ echo $TERM
 		xterm-ghostty
 
-		bandi0@bandit:~$ _
+		user@teletype:~$ _
 		""")
 	}
 
 	private static func normalizedTerminalPreviewTranscript(_ transcript: String) -> String {
-		// Terminal output needs CRLF for a visual “new line”; a bare LF only moves the
+		// Terminal output needs CRLF for a visual "new line"; a bare LF only moves the
 		// cursor down and keeps the current column, which makes the canned preview text
 		// stair-step diagonally across the screenshot.
 		transcript
@@ -134,14 +135,16 @@ enum AppStoreScreenshotFixtures {
 		username: String,
 		hostname: String,
 		port: Int,
-		createdAt: Date
+		createdAt: Date,
+		customTitle: String? = nil
 	) -> Session {
 		var session = Session(
 			hostname: hostname,
 			username: username,
 			tmuxSessionName: nil,
 			port: port,
-			autoconnect: false
+			autoconnect: false,
+			customTitle: customTitle
 		)
 		session.createdAt = createdAt
 		session.lastConnectedAt = createdAt
