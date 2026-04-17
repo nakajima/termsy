@@ -590,6 +590,10 @@
 			}
 		}
 
+		func restoreKeyboardFocusIfNeeded(retryCount: Int = 20) {
+			requestFirstResponder(retryCount: retryCount)
+		}
+
 		private func cancelFirstResponderRequest() {
 			firstResponderTask?.cancel()
 			firstResponderTask = nil

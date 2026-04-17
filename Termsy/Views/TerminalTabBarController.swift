@@ -70,6 +70,7 @@
 			}
 			_ = terminalView?.syncSizeAndReadBack()
 			restoreConnectionIfNeeded()
+			terminalView?.restoreKeyboardFocusIfNeeded(retryCount: 30)
 		}
 
 		override func viewDidLayoutSubviews() {
@@ -182,6 +183,9 @@
 				view.addSubview(host.view)
 				host.didMove(toParent: self)
 				overlayHostController = host
+			}
+			if !overlayNeedsInteraction {
+				terminalView?.restoreKeyboardFocusIfNeeded(retryCount: 30)
 			}
 			updateConnectionWatchdog()
 		}
