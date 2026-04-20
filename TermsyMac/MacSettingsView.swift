@@ -13,8 +13,7 @@
 		@AppStorage(TerminalScrollSettings.indirectSensitivityKey) private var indirectScrollSensitivity = TerminalScrollSettings.defaultIndirectSensitivity
 		@AppStorage(TerminalScrollSettings.momentumScrollingEnabledKey) private var momentumScrollingEnabled = TerminalScrollSettings.defaultMomentumScrollingEnabled
 		@AppStorage(TerminalScrollSettings.smoothVisualScrollingEnabledKey) private var smoothVisualScrollingEnabled = TerminalScrollSettings.defaultSmoothVisualScrollingEnabled
-		@State private var isShowingInstalledFontPicker = false
-		@State private var fontSelectionMessage: String?
+		@StateObject private var fontPanelController = MacFontPanelController()
 
 		private var currentTheme: AppTheme {
 			(TerminalTheme(rawValue: selectedTheme) ?? .mocha).appTheme
@@ -66,8 +65,10 @@
 							Text("System Monospaced Fonts")
 						}
 
-						Button("Installed / Custom Fonts…") {
-							isShowingInstalledFontPicker = true
+						Button("Choose Font…") {
+							fontPanelController.present(selectedFontFamily: terminalFontFamily) { family in
+								terminalFontFamily = family
+							}
 						}
 
 						if TerminalFontSettings.normalizedFamily(terminalFontFamily) != nil {
@@ -78,7 +79,7 @@
 					} header: {
 						Text("Font")
 					} footer: {
-						Text("System fonts stay limited to monospaced families. Use Installed / Custom Fonts for anything else.")
+						Text("System Monospaced Fonts shows curated built-in choices. Choose Font opens the standard macOS font panel.")
 					}
 
 					Section("Background") {
@@ -164,30 +165,6 @@
 				.background(currentTheme.background)
 				.frame(minWidth: 520, minHeight: 420)
 				.navigationTitle("Settings")
-			}
-			.sheet(isPresented: $isShowingInstalledFontPicker) {
-				InstalledTerminalFontPickerSheet(
-					selectedFontFamily: $terminalFontFamily,
-					onSelectionMessage: { message in
-						fontSelectionMessage = message
-					},
-					onDismiss: {
-						isShowingInstalledFontPicker = false
-					}
-				)
-				.environment(\.appTheme, currentTheme)
-			}
-			.alert("Font Selection", isPresented: .init(
-				get: { fontSelectionMessage != nil },
-				set: { isPresented in
-					if !isPresented {
-						fontSelectionMessage = nil
-					}
-				}
-			)) {
-				Button("OK", role: .cancel) {}
-			} message: {
-				Text(fontSelectionMessage ?? "")
 			}
 		}
 	}

@@ -5,11 +5,20 @@
 //  Created by Pat Nakajima on 4/3/26.
 //
 
+import GRDB
+import GRDBQuery
 import Observation
 import SwiftUI
+#if canImport(UIKit)
+	import UIKit
+#endif
 
 @Observable @MainActor
 class ViewCoordinator {
+	private enum WorkspacePersistence {
+		static let selectedSessionIDKey = "workspace.selectedSessionID"
+	}
+
 	var path = NavigationPath()
 	var isShowingConnectView = false {
 		didSet { refreshDisplayActivity() }
@@ -28,6 +37,8 @@ class ViewCoordinator {
 	}
 
 	private var appIsActive = true
+	private var databaseContext: DatabaseContext?
+	private var isRestoringSavedWorkspace = false
 
 	/// All open terminal tabs.
 	var tabs: [TerminalTab] = []
@@ -37,6 +48,42 @@ class ViewCoordinator {
 
 	var selectedTab: TerminalTab? {
 		tabs.first { $0.id == selectedTabID }
+	}
+
+	func configureDatabaseContext(_ databaseContext: DatabaseContext) {
+		self.databaseContext = databaseContext
+	}
+
+	func restoreSavedWorkspace() {
+		guard tabs.isEmpty else { return }
+		guard let databaseContext else { return }
+
+		let sessions: [Session]
+		do {
+			sessions = try databaseContext.reader.read { db in
+				try Session.filter { $0.isOpen == true }.fetchAll(db)
+			}
+		} catch {
+			print("[DB] failed to read saved workspace state: \(error)")
+			return
+		}
+
+		isRestoringSavedWorkspace = true
+		defer {
+			isRestoringSavedWorkspace = false
+			persistWorkspaceStateIfPossible()
+		}
+
+		for session in orderedWorkspaceSessions(sessions) {
+			open(tab: TerminalTab(session: session), persistWorkspace: false)
+		}
+
+		guard let selectedSessionID = persistedSelectedSessionID else { return }
+		guard let selectedTab = tabs.first(where: { $0.session?.id == selectedSessionID }) else {
+			persistedSelectedSessionID = nil
+			return
+		}
+		selectTab(selectedTab.id, persistWorkspace: false)
 	}
 
 	func openTab(for session: Session) {
@@ -49,7 +96,7 @@ class ViewCoordinator {
 		}
 	#endif
 
-	private func open(tab: TerminalTab) {
+	private func open(tab: TerminalTab, persistWorkspace: Bool = true) {
 		let tabID = tab.id
 		tab.onRequestClose = { [weak self] in
 			self?.closeTab(tabID)
@@ -70,7 +117,10 @@ class ViewCoordinator {
 			self?.dismissPresentedUI() ?? false
 		}
 		tabs.append(tab)
-		selectTab(tab.id)
+		selectTab(tab.id, persistWorkspace: false)
+		if persistWorkspace {
+			persistWorkspaceStateIfPossible()
+		}
 	}
 
 	func openSettings() {
@@ -142,7 +192,7 @@ class ViewCoordinator {
 		selectedTab.requestReconnect()
 	}
 
-	func selectTab(_ id: UUID?) {
+	func selectTab(_ id: UUID?, persistWorkspace: Bool = true) {
 		let previousID = selectedTabID
 		selectedTabID = id
 
@@ -157,6 +207,9 @@ class ViewCoordinator {
 		}
 
 		refreshDisplayActivity()
+		if persistWorkspace {
+			persistWorkspaceStateIfPossible()
+		}
 	}
 
 	func selectTabNumber(_ number: Int) {
@@ -188,11 +241,13 @@ class ViewCoordinator {
 		if selectedTabID == id {
 			if tabs.isEmpty {
 				selectedTabID = nil
+				refreshDisplayActivity()
 			} else {
 				let newIndex = min(index, tabs.count - 1)
-				selectTab(tabs[newIndex].id)
+				selectTab(tabs[newIndex].id, persistWorkspace: false)
 			}
 		}
+		persistWorkspaceStateIfPossible()
 	}
 
 	func closeOtherTabs(_ id: UUID?) {
@@ -201,7 +256,13 @@ class ViewCoordinator {
 			tab.close()
 		}
 		tabs.removeAll { $0.id != id }
-		if let id { selectTab(id) }
+		if let id {
+			selectTab(id, persistWorkspace: false)
+		} else {
+			selectedTabID = nil
+			refreshDisplayActivity()
+		}
+		persistWorkspaceStateIfPossible()
 	}
 
 	func renameTab(_ id: UUID?, to title: String?) {
@@ -211,6 +272,7 @@ class ViewCoordinator {
 
 	func moveTab(from source: IndexSet, to destination: Int) {
 		tabs.move(fromOffsets: source, toOffset: destination)
+		persistWorkspaceStateIfPossible()
 	}
 
 	func reorderTabs(_ orderedIDs: [UUID]) {
@@ -221,6 +283,59 @@ class ViewCoordinator {
 			}
 		}
 		tabs = reordered
+		persistWorkspaceStateIfPossible()
+	}
+
+	private func orderedWorkspaceSessions(_ sessions: [Session]) -> [Session] {
+		sessions.sorted { lhs, rhs in
+			let lhsOrder = lhs.tabOrder ?? Int.max
+			let rhsOrder = rhs.tabOrder ?? Int.max
+			if lhsOrder != rhsOrder {
+				return lhsOrder < rhsOrder
+			}
+			if lhs.createdAt != rhs.createdAt {
+				return lhs.createdAt < rhs.createdAt
+			}
+			return lhs.normalizedTargetKey < rhs.normalizedTargetKey
+		}
+	}
+
+	private var persistedSelectedSessionID: Int64? {
+		get {
+			(UserDefaults.standard.object(forKey: WorkspacePersistence.selectedSessionIDKey) as? NSNumber)?.int64Value
+		}
+		set {
+			if let newValue {
+				UserDefaults.standard.set(NSNumber(value: newValue), forKey: WorkspacePersistence.selectedSessionIDKey)
+			} else {
+				UserDefaults.standard.removeObject(forKey: WorkspacePersistence.selectedSessionIDKey)
+			}
+		}
+	}
+
+	private func persistWorkspaceStateIfPossible() {
+		guard !isRestoringSavedWorkspace else { return }
+		guard let databaseContext else { return }
+
+		let openSessions = tabs.enumerated().compactMap { index, tab -> (sessionID: Int64, tabOrder: Int)? in
+			guard let sessionID = tab.session?.id else { return nil }
+			return (sessionID: sessionID, tabOrder: index)
+		}
+
+		do {
+			try databaseContext.writer.write { db in
+				try db.execute(sql: "UPDATE session SET isOpen = 0, tabOrder = NULL")
+				for openSession in openSessions {
+					try db.execute(
+						sql: "UPDATE session SET isOpen = 1, tabOrder = ? WHERE id = ?",
+						arguments: [openSession.tabOrder, openSession.sessionID]
+					)
+				}
+			}
+			persistedSelectedSessionID = selectedTab?.session?.id
+		} catch {
+			print("[DB] failed to persist workspace state: \(error)")
+		}
 	}
 
 	private func refreshDisplayActivity() {
@@ -255,6 +370,9 @@ class TerminalTab: Identifiable {
 	var onConnectionEstablished: ((Session) -> Void)?
 	var reportedTitle = ""
 	var connectionLog: [String] = []
+	#if canImport(UIKit)
+		var reconnectSnapshot: UIImage?
+	#endif
 
 	@ObservationIgnored var onFirstRemoteOutput: (() -> Void)?
 	@ObservationIgnored private var pendingPreviewTranscript: String?
@@ -434,7 +552,6 @@ class TerminalTab: Identifiable {
 				return
 			}
 			isConnected = true
-			isRestoring = false
 			self.session?.lastConnectedAt = Date()
 			clearAppInactiveState()
 			logConnectionEvent("Attempt \(attempt): connection established")
@@ -564,6 +681,12 @@ class TerminalTab: Identifiable {
 		let sshSession = sshSession ?? self.sshSession
 		sshSession.onRemoteOutput = { [weak self, weak sshSession] data in
 			guard let self, let sshSession, self.sshSession === sshSession else { return }
+			if self.isRestoring {
+				self.isRestoring = false
+				#if canImport(UIKit)
+					self.reconnectSnapshot = nil
+				#endif
+			}
 			if let onFirstRemoteOutput = self.onFirstRemoteOutput {
 				self.onFirstRemoteOutput = nil
 				onFirstRemoteOutput()
@@ -601,7 +724,6 @@ class TerminalTab: Identifiable {
 				return
 			}
 			isConnected = true
-			isRestoring = false
 			self.session?.lastConnectedAt = Date()
 			clearAppInactiveState()
 			Keychain.setPassword(password, for: session)
@@ -655,6 +777,12 @@ class TerminalTab: Identifiable {
 		configureTerminalView()
 		terminalView.setDisplayActive(isDisplayActive)
 	}
+
+	#if canImport(UIKit)
+		func updateReconnectSnapshot(_ image: UIImage?) {
+			reconnectSnapshot = image
+		}
+	#endif
 
 	func applyTheme(_ theme: AppTheme) {
 		terminalView.applyTheme(theme)
@@ -787,13 +915,31 @@ class TerminalTab: Identifiable {
 	}
 
 	private func shouldAutoReconnect(for message: String) -> Bool {
-		guard case .remote = endpoint else { return false }
 		guard isRecoverableBackgroundDisconnectMessage(message) else { return false }
+		return shouldReconnectAfterAppDeactivation
+	}
+
+	private var shouldReconnectAfterAppDeactivation: Bool {
+		guard case .remote = endpoint else { return false }
 		if !ApplicationActivity.isActive {
 			return wasConnectedWhenAppResignedActive
 		}
-		guard let deadline = backgroundReconnectGraceDeadline else { return false }
+		guard wasConnectedWhenAppResignedActive,
+		      let deadline = backgroundReconnectGraceDeadline
+		else {
+			return false
+		}
 		return Date() < deadline
+	}
+
+	private func scheduleReconnectAfterBackgroundLoss(logMessage: String) {
+		logConnectionEvent(logMessage)
+		connectionError = nil
+		if ApplicationActivity.isActive, terminalView.hasAttachedWindow {
+			onRequestReconnect?()
+		} else {
+			shouldReconnectOnActivation = true
+		}
 	}
 
 	func updateTerminalSize(_ size: TerminalWindowSize) {
@@ -913,19 +1059,21 @@ class TerminalTab: Identifiable {
 			clearAppInactiveState()
 		case .cleanExit:
 			logConnectionEvent("SSH session exited cleanly")
-			clearAppInactiveState()
-			terminalView.processExited()
-			onRequestClose?()
+			if shouldReconnectAfterAppDeactivation {
+				scheduleReconnectAfterBackgroundLoss(
+					logMessage: "Treating clean SSH exit as recoverable after app deactivation"
+				)
+			} else {
+				clearAppInactiveState()
+				terminalView.processExited()
+				onRequestClose?()
+			}
 		case let .error(message):
 			logConnectionEvent("SSH session closed with error: \(message)")
 			if shouldAutoReconnect(for: message) {
-				logConnectionEvent("Scheduling automatic reconnect after transport shutdown")
-				connectionError = nil
-				if ApplicationActivity.isActive, terminalView.hasAttachedWindow {
-					onRequestReconnect?()
-				} else {
-					shouldReconnectOnActivation = true
-				}
+				scheduleReconnectAfterBackgroundLoss(
+					logMessage: "Scheduling automatic reconnect after transport shutdown"
+				)
 			} else {
 				clearAppInactiveState()
 				connectionError = message

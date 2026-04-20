@@ -13,7 +13,7 @@ struct SessionsRequest: ValueObservationQueryable {
 	static var defaultValue: [Session] { [] }
 
 	func fetch(_ db: Database) throws -> [Session] {
-		try Session.fetchAll(db)
+		try Session.fetchSavedSessions(db)
 	}
 }
 
@@ -47,23 +47,7 @@ struct SessionListView: View {
 
 			Section(sessions.isEmpty ? "Saved Sessions" : "") {
 				ForEach(sessions, id: \.id) { session in
-					Button {
-						coordinator.openTab(for: session)
-					} label: {
-						VStack(alignment: .leading, spacing: 4) {
-							Text(session.displayTarget)
-								.font(.headline)
-								.foregroundStyle(theme.primaryText)
-							if let tmuxSessionName = session.tmuxSessionName, !tmuxSessionName.isEmpty {
-								Text("tmux • \(tmuxSessionName)")
-									.font(.caption)
-									.foregroundStyle(theme.secondaryText)
-							}
-						}
-						.frame(maxWidth: .infinity, alignment: .leading)
-						.padding(.vertical, 6)
-					}
-					.listRowBackground(theme.cardBackground)
+					sessionRow(for: session)
 				}
 				.onDelete(perform: deleteSessions)
 			}
@@ -110,6 +94,42 @@ struct SessionListView: View {
 		}
 	}
 
+	@ViewBuilder
+	private func sessionRow(for session: Session) -> some View {
+		Button {
+			coordinator.openTab(for: session)
+		} label: {
+			HStack(alignment: .top, spacing: 12) {
+				VStack(alignment: .leading, spacing: 5) {
+					Text(session.listTitle)
+						.font(.headline)
+						.foregroundStyle(theme.primaryText)
+						.lineLimit(1)
+					if let subtitle = session.listSubtitle {
+						Text(subtitle)
+							.font(.subheadline)
+							.foregroundStyle(theme.secondaryText)
+							.lineLimit(1)
+					}
+					HStack(spacing: 8) {
+						if let lastConnectedAt = session.lastConnectedAt {
+							Text(lastConnectedAt, style: .relative)
+								.monospacedDigit()
+						} else {
+							Text("Never connected")
+						}
+					}
+					.font(.caption)
+					.foregroundStyle(theme.tertiaryText)
+				}
+				Spacer(minLength: 0)
+			}
+			.frame(maxWidth: .infinity, alignment: .leading)
+			.padding(.vertical, 6)
+		}
+		.listRowBackground(theme.cardBackground)
+	}
+
 	@MainActor
 	private func deleteSessions(at offsets: IndexSet) {
 		let sessionsToDelete = offsets.map { sessions[$0] }
@@ -137,8 +157,10 @@ struct SessionListView: View {
 			username: "pat",
 			tmuxSessionName: "api",
 			port: 22,
-			autoconnect: true
+			autoconnect: true,
+			customTitle: "Production"
 		)
+		defaultPortSession.lastConnectedAt = .now
 		try defaultPortSession.save(db)
 
 		var customPortSession = Session(
@@ -148,6 +170,7 @@ struct SessionListView: View {
 			port: 2222,
 			autoconnect: false
 		)
+		customPortSession.createdAt = Date.now.addingTimeInterval(-86_400)
 		try customPortSession.save(db)
 	}
 

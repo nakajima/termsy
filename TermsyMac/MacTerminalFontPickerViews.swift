@@ -1,5 +1,6 @@
 #if os(macOS)
 	import AppKit
+	import Combine
 	import CoreText
 	import SwiftUI
 
@@ -35,51 +36,50 @@
 		}
 	}
 
-	struct InstalledTerminalFontPickerSheet: View {
-		@Binding var selectedFontFamily: String
-		let onSelectionMessage: (String) -> Void
-		let onDismiss: () -> Void
-		@Environment(\.appTheme) private var theme
-		@State private var searchText = ""
+	@MainActor
+	final class MacFontPanelController: NSObject, ObservableObject {
+		private var currentFontFamily: String?
+		private var onSelectFamily: ((String) -> Void)?
 
-		private var filteredFamilies: [String] {
-			let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-			guard !query.isEmpty else { return MacSystemFontCatalog.installedFamilies }
-			return MacSystemFontCatalog.installedFamilies.filter {
-				$0.localizedCaseInsensitiveContains(query)
-			}
+		func present(selectedFontFamily: String, onSelectFamily: @escaping (String) -> Void) {
+			self.currentFontFamily = TerminalFontSettings.normalizedFamily(selectedFontFamily)
+			self.onSelectFamily = onSelectFamily
+
+			let fontManager = NSFontManager.shared
+			let fontPanel = NSFontPanel.shared
+			let selectedFont = makeSelectedFont()
+
+			fontManager.target = self
+			fontManager.action = #selector(changeFont(_:))
+			fontManager.setSelectedFont(selectedFont, isMultiple: false)
+			fontPanel.setPanelFont(selectedFont, isMultiple: false)
+			fontManager.orderFrontFontPanel(nil)
+			NSApp.activate(ignoringOtherApps: true)
 		}
 
-		var body: some View {
-			NavigationStack {
-				List(filteredFamilies, id: \.self) { family in
-					Button {
-						selectedFontFamily = family
-						onDismiss()
-					} label: {
-						HStack {
-							Text(family)
-								.foregroundStyle(theme.primaryText)
-							Spacer()
-							if TerminalFontSettings.normalizedFamily(selectedFontFamily) == family {
-								Image(systemName: "checkmark")
-									.foregroundStyle(theme.accent)
-							}
-						}
-					}
-					.buttonStyle(.plain)
-					.listRowBackground(theme.cardBackground)
-				}
-				.searchable(text: $searchText)
-				.scrollContentBackground(.hidden)
-				.background(theme.background)
-				.navigationTitle("Installed Fonts")
-				.toolbar {
-					ToolbarItem(placement: .cancellationAction) {
-						Button("Done") { onDismiss() }
-					}
-				}
+		@objc
+		func changeFont(_ sender: Any?) {
+			let fontManager = (sender as? NSFontManager) ?? NSFontManager.shared
+			let updatedFont = fontManager.convert(makeSelectedFont())
+			guard let family = TerminalFontSettings.normalizedFamily(updatedFont.familyName) else {
+				return
 			}
+			currentFontFamily = family
+			onSelectFamily?(family)
+		}
+
+		private func makeSelectedFont() -> NSFont {
+			if let currentFontFamily,
+			   let font = NSFontManager.shared.font(withFamily: currentFontFamily, traits: [], weight: 5, size: 12)
+			{
+				return font
+			}
+
+			if let font = NSFont.userFixedPitchFont(ofSize: 12) {
+				return font
+			}
+
+			return NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
 		}
 	}
 

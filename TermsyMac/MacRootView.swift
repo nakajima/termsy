@@ -132,9 +132,9 @@
 
 		private func ensureBlurCompatibleOpacityIfNeeded() -> Bool {
 			let blurMode = TerminalBackgroundBlurSettings(rawValue: backgroundBlurMode) ?? .default
-			guard blurMode.requiresTransparency else { return false }
-			guard TerminalBackgroundSettings.normalizedOpacity(backgroundOpacity) >= 0.999 else { return false }
-			backgroundOpacity = TerminalBackgroundBlurSettings.recommendedOpacityWhenEnabled
+			let adjustedOpacity = TerminalBackgroundSettings.effectiveOpacity(backgroundOpacity, blurMode: blurMode)
+			guard adjustedOpacity != TerminalBackgroundSettings.normalizedOpacity(backgroundOpacity) else { return false }
+			backgroundOpacity = adjustedOpacity
 			return true
 		}
 

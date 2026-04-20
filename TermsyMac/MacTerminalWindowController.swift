@@ -60,7 +60,10 @@
 			}
 
 			window.delegate = self
-			window.contentViewController = NSHostingController(rootView: rootView())
+			let hostingController = NSHostingController(rootView: rootView())
+			hostingController.view.wantsLayer = true
+			hostingController.view.layer?.backgroundColor = NSColor.clear.cgColor
+			window.contentViewController = hostingController
 			applyWindowAppearance()
 			updateWindowTitle(terminal.windowTitle)
 		}
@@ -155,18 +158,15 @@
 
 		func applyWindowAppearance() {
 			guard let window else { return }
+			let defaults = UserDefaults.standard
 			let theme = TerminalTheme.current.appTheme
 			let blurMode = TerminalBackgroundBlurSettings(
-				rawValue: UserDefaults.standard.string(forKey: TerminalBackgroundBlurSettings.key) ?? ""
+				rawValue: defaults.string(forKey: TerminalBackgroundBlurSettings.key) ?? ""
 			) ?? .default
-			var opacity = TerminalBackgroundSettings.normalizedOpacity(
-				UserDefaults.standard.object(forKey: TerminalBackgroundSettings.opacityKey) as? Double
-					?? TerminalBackgroundSettings.defaultOpacity
+			let opacity = TerminalBackgroundSettings.effectiveOpacity(
+				TerminalBackgroundSettings.storedOpacity(defaults: defaults),
+				blurMode: blurMode
 			)
-			if blurMode.requiresTransparency, opacity >= 0.999 {
-				opacity = TerminalBackgroundBlurSettings.recommendedOpacityWhenEnabled
-				UserDefaults.standard.set(opacity, forKey: TerminalBackgroundSettings.opacityKey)
-			}
 			let backgroundColor = theme.backgroundUIColor.withAlphaComponent(CGFloat(opacity))
 
 			window.styleMask.remove(.fullSizeContentView)

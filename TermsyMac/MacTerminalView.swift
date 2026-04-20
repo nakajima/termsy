@@ -55,7 +55,8 @@
 		}
 
 		func applyTheme(_ theme: AppTheme) {
-			layer?.backgroundColor = theme.backgroundUIColor.cgColor
+			let opacity = TerminalBackgroundSettings.storedEffectiveOpacity()
+			layer?.backgroundColor = theme.backgroundUIColor.withAlphaComponent(CGFloat(opacity)).cgColor
 		}
 
 		func start() {

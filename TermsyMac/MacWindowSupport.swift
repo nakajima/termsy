@@ -282,14 +282,25 @@
 		func makeNSView(context _: Context) -> NSView {
 			let view = NSView()
 			DispatchQueue.main.async {
-				window = view.window
+				updateWindowIfNeeded(view.window)
 			}
 			return view
 		}
 
 		func updateNSView(_ nsView: NSView, context _: Context) {
 			DispatchQueue.main.async {
-				window = nsView.window
+				updateWindowIfNeeded(nsView.window)
+			}
+		}
+
+		private func updateWindowIfNeeded(_ newWindow: NSWindow?) {
+			switch (window, newWindow) {
+			case (nil, nil):
+				return
+			case let (currentWindow?, nextWindow?) where currentWindow === nextWindow:
+				return
+			default:
+				window = newWindow
 			}
 		}
 	}

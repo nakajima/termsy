@@ -63,6 +63,16 @@ extension Session {
 		try Session.fetchAll(db).first { $0.normalizedTargetKey == other.normalizedTargetKey }
 	}
 
+	static func fetchSavedSessions(_ db: Database) throws -> [Session] {
+		try Session
+			.order(
+				Columns.lastConnectedAt.desc,
+				Columns.createdAt.desc,
+				Columns.id.desc
+			)
+			.fetchAll(db)
+	}
+
 	var normalizedHostname: String {
 		hostname.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 	}
@@ -75,6 +85,27 @@ extension Session {
 		guard let tmuxSessionName else { return "-" }
 		let trimmed = tmuxSessionName.trimmingCharacters(in: .whitespacesAndNewlines)
 		return trimmed.isEmpty ? "-" : trimmed.lowercased()
+	}
+
+	var trimmedCustomTitle: String? {
+		guard let customTitle else { return nil }
+		let trimmed = customTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+		return trimmed.isEmpty ? nil : trimmed
+	}
+
+	var trimmedTmuxSessionName: String? {
+		guard let tmuxSessionName else { return nil }
+		let trimmed = tmuxSessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+		return trimmed.isEmpty ? nil : trimmed
+	}
+
+	var listTitle: String {
+		trimmedTmuxSessionName ?? trimmedCustomTitle ?? displayTarget
+	}
+
+	var listSubtitle: String? {
+		guard trimmedTmuxSessionName != nil || trimmedCustomTitle != nil else { return nil }
+		return displayTarget
 	}
 
 	var displayTarget: String {

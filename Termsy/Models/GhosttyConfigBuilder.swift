@@ -16,10 +16,7 @@ enum GhosttyConfigBuilder {
 	static func buildConfigText(theme: TerminalTheme) -> String {
 		let cursorStyle = UserDefaults.standard.string(forKey: "cursorStyle") ?? "block"
 		let cursorBlink = UserDefaults.standard.object(forKey: "cursorBlink") as? Bool ?? true
-		let backgroundOpacity = TerminalBackgroundSettings.normalizedOpacity(
-			UserDefaults.standard.object(forKey: TerminalBackgroundSettings.opacityKey) as? Double
-				?? TerminalBackgroundSettings.defaultOpacity
-		)
+		let backgroundOpacity = TerminalBackgroundSettings.storedEffectiveOpacity()
 		var lines = [
 			"font-size = \(Int(TerminalFontSettings.size))",
 			"cursor-style = \(cursorStyle)",

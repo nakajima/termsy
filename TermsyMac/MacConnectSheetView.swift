@@ -7,7 +7,7 @@
 		static var defaultValue: [Session] { [] }
 
 		func fetch(_ db: Database) throws -> [Session] {
-			try Session.order(Column("lastConnectedAt")).fetchAll(db)
+			try Session.fetchSavedSessions(db)
 		}
 	}
 
@@ -41,14 +41,29 @@
 								Button {
 									connectExisting(session)
 								} label: {
-									VStack(alignment: .leading, spacing: 3) {
-										Text(session.displayTarget)
-											.foregroundStyle(theme.primaryText)
-										if let tmuxSessionName = session.tmuxSessionName, !tmuxSessionName.isEmpty {
-											Text("tmux • \(tmuxSessionName)")
-												.font(.caption)
-												.foregroundStyle(theme.secondaryText)
+									HStack(alignment: .top, spacing: 12) {
+										VStack(alignment: .leading, spacing: 5) {
+											Text(session.listTitle)
+												.foregroundStyle(theme.primaryText)
+												.lineLimit(1)
+											if let subtitle = session.listSubtitle {
+												Text(subtitle)
+													.font(.caption)
+													.foregroundStyle(theme.secondaryText)
+													.lineLimit(1)
+											}
+											HStack(spacing: 8) {
+												if let lastConnectedAt = session.lastConnectedAt {
+													Text(lastConnectedAt, style: .relative)
+														.monospacedDigit()
+												} else {
+													Text("Never connected")
+												}
+											}
+											.font(.caption)
+											.foregroundStyle(theme.tertiaryText)
 										}
+										Spacer(minLength: 0)
 									}
 									.frame(maxWidth: .infinity, alignment: .leading)
 								}
@@ -99,7 +114,7 @@
 					}
 				}
 			}
-			.frame(minWidth: 460, minHeight: 420)
+			.frame(width: 460, height: 420)
 		}
 
 		private func connectExisting(_ session: Session) {
@@ -146,6 +161,28 @@
 	#Preview {
 		let db = DB.memory()
 		try? db.migrate()
+		try? db.queue.write { db in
+			var primarySession = Session(
+				hostname: "prod.example.com",
+				username: "pat",
+				tmuxSessionName: "api",
+				port: 22,
+				autoconnect: true,
+				customTitle: "Production"
+			)
+			primarySession.lastConnectedAt = .now
+			try primarySession.save(db)
+
+			var secondarySession = Session(
+				hostname: "staging.example.com",
+				username: "pat",
+				tmuxSessionName: nil,
+				port: 2222,
+				autoconnect: false
+			)
+			secondarySession.createdAt = Date.now.addingTimeInterval(-43_200)
+			try secondarySession.save(db)
+		}
 		return MacConnectSheetView { _ in }
 			.databaseContext(.readWrite { db.queue })
 			.environment(\.appTheme, TerminalTheme.mocha.appTheme)

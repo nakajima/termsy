@@ -425,6 +425,19 @@
 			window != nil
 		}
 
+		func captureSnapshot() -> UIImage? {
+			let snapshotBounds = bounds.integral
+			guard snapshotBounds.width > 0, snapshotBounds.height > 0 else { return nil }
+			let format = UIGraphicsImageRendererFormat.default()
+			format.scale = resolvedScale()
+			let renderer = UIGraphicsImageRenderer(bounds: snapshotBounds, format: format)
+			return renderer.image { context in
+				if !drawHierarchy(in: snapshotBounds, afterScreenUpdates: false) {
+					layer.render(in: context.cgContext)
+				}
+			}
+		}
+
 		func setDisplayActive(_ isActive: Bool) {
 			isDisplayActive = isActive
 			applyDisplayActivity()

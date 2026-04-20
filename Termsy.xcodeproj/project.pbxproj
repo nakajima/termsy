@@ -43,7 +43,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		40A863FA45E38E353C433157 /* TermsyMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TermsyMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		40A863FA45E38E353C433157 /* Teletype.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Teletype.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A6B5AC732F7F7BE9002ED882 /* Termsy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Termsy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A6B5AC802F7F7BEA002ED882 /* TermsyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TermsyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A6B5AC8A2F7F7BEA002ED882 /* TermsyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TermsyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -154,7 +154,7 @@
 			isa = PBXGroup;
 			children = (
 				A6B5AC732F7F7BE9002ED882 /* Termsy.app */,
-				40A863FA45E38E353C433157 /* TermsyMac.app */,
+				40A863FA45E38E353C433157 /* Teletype.app */,
 				A6B5AC802F7F7BEA002ED882 /* TermsyTests.xctest */,
 				A6B5AC8A2F7F7BEA002ED882 /* TermsyUITests.xctest */,
 			);
@@ -201,7 +201,7 @@
 				A6B5B2882F80ABBA002ED882 /* GRDBQuery */,
 			);
 			productName = TermsyMac;
-			productReference = 40A863FA45E38E353C433157 /* TermsyMac.app */;
+			productReference = 40A863FA45E38E353C433157 /* Teletype.app */;
 			productType = "com.apple.product-type.application";
 		};
 		A6B5AC722F7F7BE9002ED882 /* Termsy */ = {
@@ -751,7 +751,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = fm.folder.TermsyMac;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Teletype;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -784,7 +784,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = fm.folder.TermsyMac;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Teletype;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;

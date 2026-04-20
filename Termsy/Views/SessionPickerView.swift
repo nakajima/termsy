@@ -113,18 +113,30 @@ struct SessionPickerView: View {
 		Button {
 			openSession(session)
 		} label: {
-			HStack {
-				VStack(alignment: .leading, spacing: 2) {
-					Text(session.displayTarget)
-						.font(.body)
+			HStack(alignment: .top, spacing: 12) {
+				VStack(alignment: .leading, spacing: 5) {
+					Text(session.listTitle)
+						.font(.body.weight(.medium))
 						.foregroundStyle(theme.primaryText)
-					if let tmux = session.tmuxSessionName, !tmux.isEmpty {
-						Text("tmux • \(tmux)")
+						.lineLimit(1)
+					if let subtitle = session.listSubtitle {
+						Text(subtitle)
 							.font(.caption)
 							.foregroundStyle(theme.secondaryText)
+							.lineLimit(1)
 					}
+					HStack(spacing: 8) {
+						if let lastConnectedAt = session.lastConnectedAt {
+							Text(lastConnectedAt, style: .relative)
+								.monospacedDigit()
+						} else {
+							Text("Never connected")
+						}
+					}
+					.font(.caption)
+					.foregroundStyle(theme.tertiaryText)
 				}
-				Spacer()
+				Spacer(minLength: 0)
 				if isOpen {
 					Text("Open")
 						.font(.caption)
@@ -398,14 +410,26 @@ struct SessionPickerView: View {
 	let db = DB.memory()
 	try? db.migrate()
 	try? db.queue.write { db in
-		var session = Session(
+		var primarySession = Session(
 			hostname: "prod.example.com",
 			username: "pat",
 			tmuxSessionName: "api",
 			port: 22,
-			autoconnect: true
+			autoconnect: true,
+			customTitle: "Production"
 		)
-		try session.save(db)
+		primarySession.lastConnectedAt = .now
+		try primarySession.save(db)
+
+		var secondarySession = Session(
+			hostname: "staging.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 2222,
+			autoconnect: false
+		)
+		secondarySession.createdAt = Date.now.addingTimeInterval(-43_200)
+		try secondarySession.save(db)
 	}
 
 	let coordinator = ViewCoordinator()

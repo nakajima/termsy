@@ -7,6 +7,7 @@
 
 import Foundation
 import GRDB
+import GRDBQuery
 @testable import Termsy
 import Testing
 
@@ -132,6 +133,147 @@ struct TermsyTests {
 		}
 	}
 
+	@MainActor
+	@Test func coordinatorPersistsWorkspaceStateForOpenTabs() throws {
+		let db = DB.memory()
+		try db.migrate()
+		let coordinator = ViewCoordinator()
+		coordinator.configureDatabaseContext(.readWrite { db.queue })
+
+		var firstSession = Session(
+			hostname: "one.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		var secondSession = Session(
+			hostname: "two.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		try db.queue.write { database in
+			try firstSession.save(database)
+			try secondSession.save(database)
+		}
+
+		coordinator.openTab(for: firstSession)
+		coordinator.openTab(for: secondSession)
+		coordinator.selectTab(coordinator.tabs.first?.id)
+
+		let persistedSessions = try db.queue.read { database in
+			try Session.order(Session.Columns.id).fetchAll(database)
+		}
+		#expect(persistedSessions[0].isOpen)
+		#expect(persistedSessions[0].tabOrder == 0)
+		#expect(persistedSessions[1].isOpen)
+		#expect(persistedSessions[1].tabOrder == 1)
+	}
+
+	@MainActor
+	@Test func coordinatorRestoresSavedWorkspaceInPersistedOrder() throws {
+		let db = DB.memory()
+		try db.migrate()
+		let coordinator = ViewCoordinator()
+		coordinator.configureDatabaseContext(.readWrite { db.queue })
+		let selectedSessionIDKey = "workspace.selectedSessionID"
+		UserDefaults.standard.removeObject(forKey: selectedSessionIDKey)
+		defer {
+			UserDefaults.standard.removeObject(forKey: selectedSessionIDKey)
+		}
+
+		var firstSession = Session(
+			hostname: "one.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		firstSession.tabOrder = 1
+		firstSession.isOpen = true
+		var secondSession = Session(
+			hostname: "two.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		secondSession.tabOrder = 0
+		secondSession.isOpen = true
+		try db.queue.write { database in
+			try firstSession.save(database)
+			try secondSession.save(database)
+		}
+		UserDefaults.standard.set(NSNumber(value: firstSession.id!), forKey: selectedSessionIDKey)
+
+		coordinator.restoreSavedWorkspace()
+
+		#expect(coordinator.tabs.count == 2)
+		#expect(coordinator.tabs[0].session?.id == secondSession.id)
+		#expect(coordinator.tabs[1].session?.id == firstSession.id)
+		#expect(coordinator.selectedTab?.session?.id == firstSession.id)
+	}
+
+	@Test func tmuxNameIsPrimarySavedSessionTitle() {
+		let sessionWithTmux = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: "api",
+			port: 22,
+			autoconnect: false,
+			customTitle: "Production"
+		)
+		#expect(sessionWithTmux.listTitle == "api")
+		#expect(sessionWithTmux.listSubtitle == "pat@prod.example.com")
+	}
+
+	@Test func savedSessionsAreOrderedByMostRecentConnection() throws {
+		let db = DB.memory()
+		try db.migrate()
+
+		var newestConnected = Session(
+			hostname: "new.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		newestConnected.createdAt = Date(timeIntervalSince1970: 100)
+		newestConnected.lastConnectedAt = Date(timeIntervalSince1970: 300)
+
+		var olderConnected = Session(
+			hostname: "old.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		olderConnected.createdAt = Date(timeIntervalSince1970: 200)
+		olderConnected.lastConnectedAt = Date(timeIntervalSince1970: 250)
+
+		var neverConnected = Session(
+			hostname: "draft.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		neverConnected.createdAt = Date(timeIntervalSince1970: 400)
+
+		try db.queue.write { database in
+			try olderConnected.save(database)
+			try neverConnected.save(database)
+			try newestConnected.save(database)
+		}
+
+		let sessions = try db.queue.read { database in
+			try Session.fetchSavedSessions(database)
+		}
+		#expect(sessions.map(\.hostname) == ["new.example.com", "old.example.com", "draft.example.com"])
+	}
+
 	@Test func sameHostDifferentTmuxNamesPersistAsSeparateSessions() throws {
 		let db = DB.memory()
 		try db.migrate()
@@ -187,5 +329,53 @@ struct TermsyTests {
 			let existing = try Session.existing(duplicate, in: database)
 			#expect(existing?.id == original.id)
 		}
+	}
+
+	@MainActor
+	@Test func cleanSSHExitWhileBackgroundedSchedulesReconnectInsteadOfClosingTab() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+		var didClose = false
+		var didRequestReconnect = false
+		tab.onRequestClose = { didClose = true }
+		tab.onRequestReconnect = { didRequestReconnect = true }
+		tab.isConnected = true
+
+		ApplicationActivity.isActive = false
+		defer { ApplicationActivity.isActive = true }
+		tab.noteAppWillResignActive()
+
+		tab.sshSession.onClose?(.cleanExit)
+
+		#expect(!didClose)
+		#expect(!didRequestReconnect)
+		#expect(tab.consumeReconnectOnActivation())
+	}
+
+	@MainActor
+	@Test func cleanSSHExitWhileActiveStillClosesTab() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+		var didClose = false
+		tab.onRequestClose = { didClose = true }
+		tab.isConnected = true
+
+		ApplicationActivity.isActive = true
+		tab.sshSession.onClose?(.cleanExit)
+
+		#expect(didClose)
+		#expect(!tab.consumeReconnectOnActivation())
 	}
 }

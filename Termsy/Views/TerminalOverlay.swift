@@ -4,6 +4,9 @@
 //
 
 import SwiftUI
+#if canImport(UIKit)
+	import UIKit
+#endif
 
 struct TerminalOverlay: View {
 	@Environment(\.appTheme) private var theme
@@ -24,7 +27,20 @@ struct TerminalOverlay: View {
 			}
 
 			if tab.isRestoring {
-				theme.background
+				#if canImport(UIKit)
+					if let reconnectSnapshot = tab.reconnectSnapshot {
+						Image(uiImage: reconnectSnapshot)
+							.resizable()
+							.scaledToFill()
+							.ignoresSafeArea()
+					} else {
+						theme.background
+					}
+				#else
+					theme.background
+				#endif
+				Color.black.opacity(0.28)
+					.ignoresSafeArea()
 				ProgressView("Restoring session…")
 					.tint(theme.accent)
 					.foregroundStyle(theme.primaryText)
