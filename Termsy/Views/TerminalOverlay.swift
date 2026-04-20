@@ -19,29 +19,16 @@ struct TerminalOverlay: View {
 
 	var body: some View {
 		ZStack {
-			if !tab.isConnected, tab.connectionError == nil, !tab.needsPassword {
-				theme.background
-				ProgressView(tab.progressTitle)
-					.tint(theme.accent)
-					.foregroundStyle(theme.primaryText)
-			}
-
 			if tab.isRestoring {
-				#if canImport(UIKit)
-					if let reconnectSnapshot = tab.reconnectSnapshot {
-						Image(uiImage: reconnectSnapshot)
-							.resizable()
-							.scaledToFill()
-							.ignoresSafeArea()
-					} else {
-						theme.background
-					}
-				#else
-					theme.background
-				#endif
+				restoringBackdrop
 				Color.black.opacity(0.28)
 					.ignoresSafeArea()
 				ProgressView("Restoring session…")
+					.tint(theme.accent)
+					.foregroundStyle(theme.primaryText)
+			} else if !tab.isConnected, tab.connectionError == nil, !tab.needsPassword {
+				snapshotBackdrop
+				ProgressView(tab.progressTitle)
 					.tint(theme.accent)
 					.foregroundStyle(theme.primaryText)
 			}
@@ -108,6 +95,40 @@ struct TerminalOverlay: View {
 				isShowingConnectionLog = true
 			}
 		}
+	}
+
+	@ViewBuilder
+	private var snapshotBackdrop: some View {
+		#if canImport(UIKit)
+			if let snapshot = tab.displaySnapshot {
+				Image(uiImage: snapshot)
+					.resizable()
+					.scaledToFill()
+					.ignoresSafeArea()
+			} else {
+				theme.background
+			}
+		#else
+			theme.background
+		#endif
+	}
+
+	@ViewBuilder
+	private var restoringBackdrop: some View {
+		#if canImport(UIKit)
+			if let snapshot = tab.displaySnapshot {
+				Image(uiImage: snapshot)
+					.resizable()
+					.scaledToFill()
+					.ignoresSafeArea()
+			} else {
+				Color.clear
+					.ignoresSafeArea()
+			}
+		#else
+			Color.clear
+				.ignoresSafeArea()
+		#endif
 	}
 
 	private var showsConnectionLogToggle: Bool {

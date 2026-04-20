@@ -247,10 +247,9 @@
 			connectTask?.cancel()
 			connectTask = nil
 			activeConnectTaskID = nil
-			terminalTab.updateReconnectSnapshot(terminalView?.captureSnapshot())
+			terminalTab.updateReconnectSnapshot(nil)
 			terminalTab.prepareForReconnectAfterBackgroundLoss()
-			terminalView = nil
-			setupTerminal()
+			updateOverlay()
 			startConnectTask(after: activationReconnectDelayNanoseconds)
 		}
 

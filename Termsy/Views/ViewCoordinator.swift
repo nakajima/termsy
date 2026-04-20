@@ -36,6 +36,11 @@ class ViewCoordinator {
 		isShowingConnectView || isShowingSessionPicker || isShowingSettings
 	}
 
+	private struct PersistedTerminalSnapshot {
+		let sessionID: Int64
+		let jpegData: Data
+	}
+
 	private var appIsActive = true
 	private var databaseContext: DatabaseContext?
 	private var isRestoringSavedWorkspace = false
@@ -160,6 +165,11 @@ class ViewCoordinator {
 	func appWillResignActive() {
 		appIsActive = false
 		ApplicationActivity.isActive = false
+		#if canImport(UIKit)
+			persistWorkspaceStateIfPossible(snapshotRecords: capturePersistedTerminalSnapshots())
+		#else
+			persistWorkspaceStateIfPossible()
+		#endif
 		if tabs.contains(where: \.shouldRequestBackgroundExecution) {
 			_ = ApplicationActivity.beginBackgroundExecution(name: "Teletype SSH")
 		}
@@ -313,7 +323,7 @@ class ViewCoordinator {
 		}
 	}
 
-	private func persistWorkspaceStateIfPossible() {
+	private func persistWorkspaceStateIfPossible(snapshotRecords: [PersistedTerminalSnapshot] = []) {
 		guard !isRestoringSavedWorkspace else { return }
 		guard let databaseContext else { return }
 
@@ -331,12 +341,31 @@ class ViewCoordinator {
 						arguments: [openSession.tabOrder, openSession.sessionID]
 					)
 				}
+				for snapshotRecord in snapshotRecords {
+					try db.execute(
+						sql: "UPDATE session SET lastTerminalSnapshotJPEGData = ? WHERE id = ?",
+						arguments: [snapshotRecord.jpegData, snapshotRecord.sessionID]
+					)
+				}
 			}
 			persistedSelectedSessionID = selectedTab?.session?.id
 		} catch {
 			print("[DB] failed to persist workspace state: \(error)")
 		}
 	}
+
+	#if canImport(UIKit)
+		private func capturePersistedTerminalSnapshots() -> [PersistedTerminalSnapshot] {
+			tabs.compactMap { tab in
+				guard let sessionID = tab.session?.id,
+				      let jpegData = tab.capturePersistedSnapshotJPEGData()
+				else {
+					return nil
+				}
+				return PersistedTerminalSnapshot(sessionID: sessionID, jpegData: jpegData)
+			}
+		}
+	#endif
 
 	private func refreshDisplayActivity() {
 		let activeTabID = appIsActive && !isPresentingAuxiliaryUI ? selectedTabID : nil
@@ -372,6 +401,10 @@ class TerminalTab: Identifiable {
 	var connectionLog: [String] = []
 	#if canImport(UIKit)
 		var reconnectSnapshot: UIImage?
+		@ObservationIgnored private var restoredLaunchSnapshot: UIImage?
+		var displaySnapshot: UIImage? {
+			reconnectSnapshot ?? restoredLaunchSnapshot
+		}
 	#endif
 
 	@ObservationIgnored var onFirstRemoteOutput: (() -> Void)?
@@ -393,6 +426,16 @@ class TerminalTab: Identifiable {
 		self.session = session
 		self.customTitle = Self.normalizedTabTitle(session.customTitle)
 		self.terminalView = TerminalView(frame: .zero)
+		#if canImport(UIKit)
+			if session.isOpen,
+			   let snapshotData = session.lastTerminalSnapshotJPEGData
+			{
+				self.restoredLaunchSnapshot = UIImage(data: snapshotData)
+				self.isRestoring = self.restoredLaunchSnapshot != nil
+			} else {
+				self.restoredLaunchSnapshot = nil
+			}
+		#endif
 		#if os(macOS)
 			self.localShellSession = nil
 		#endif
@@ -685,6 +728,7 @@ class TerminalTab: Identifiable {
 				self.isRestoring = false
 				#if canImport(UIKit)
 					self.reconnectSnapshot = nil
+					self.restoredLaunchSnapshot = nil
 				#endif
 			}
 			if let onFirstRemoteOutput = self.onFirstRemoteOutput {
@@ -781,6 +825,17 @@ class TerminalTab: Identifiable {
 	#if canImport(UIKit)
 		func updateReconnectSnapshot(_ image: UIImage?) {
 			reconnectSnapshot = image
+		}
+
+		func capturePersistedSnapshotJPEGData() -> Data? {
+			guard case .remote = endpoint,
+			      let jpegData = terminalView.capturePersistedSnapshotJPEGData()
+			else {
+				return nil
+			}
+			session?.lastTerminalSnapshotJPEGData = jpegData
+			restoredLaunchSnapshot = UIImage(data: jpegData)
+			return jpegData
 		}
 	#endif
 
@@ -882,7 +937,6 @@ class TerminalTab: Identifiable {
 		needsPassword = false
 		isRestoring = true
 		disconnect()
-		resetTerminalView()
 	}
 
 	private func isRecoverableBackgroundDisconnectMessage(_ message: String) -> Bool {

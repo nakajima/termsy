@@ -18,6 +18,7 @@ struct Session: Codable, FetchableRecord, MutablePersistableRecord, Identifiable
 	var customTitle: String?
 	var tabOrder: Int?
 	var isOpen: Bool = false
+	var lastTerminalSnapshotJPEGData: Data?
 	var autoconnect: Bool = true
 	var port: Int = 22
 	var createdAt: Date
@@ -35,6 +36,7 @@ extension Session {
 		static let customTitle = Column(CodingKeys.customTitle)
 		static let tabOrder = Column(CodingKeys.tabOrder)
 		static let isOpen = Column(CodingKeys.isOpen)
+		static let lastTerminalSnapshotJPEGData = Column(CodingKeys.lastTerminalSnapshotJPEGData)
 		static let autoconnect = Column(CodingKeys.autoconnect)
 		static let port = Column(CodingKeys.port)
 		static let createdAt = Column(CodingKeys.createdAt)
@@ -53,6 +55,7 @@ extension Session {
 		self.customTitle = customTitle
 		self.tabOrder = tabOrder
 		self.isOpen = isOpen
+		self.lastTerminalSnapshotJPEGData = nil
 		self.port = port
 		self.autoconnect = autoconnect
 		self.createdAt = now

@@ -54,6 +54,12 @@ struct DB {
 			}
 		}
 
+		migrator.registerMigration("AddSessionLastTerminalSnapshotJPEGData") { db in
+			try db.alter(table: "session") { t in
+				t.add(column: "lastTerminalSnapshotJPEGData", .blob)
+			}
+		}
+
 		try migrator.migrate(queue)
 	}
 }

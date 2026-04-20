@@ -438,6 +438,27 @@
 			}
 		}
 
+		func capturePersistedSnapshotJPEGData(maxDimension: CGFloat = 600, compressionQuality: CGFloat = 0.72)
+			-> Data?
+		{
+			guard let snapshot = captureSnapshot() else { return nil }
+			let imageSize = snapshot.size
+			guard imageSize.width > 0, imageSize.height > 0 else { return nil }
+			let largestDimension = max(imageSize.width, imageSize.height)
+			let scale = min(1, maxDimension / largestDimension)
+			let targetSize = CGSize(
+				width: max(1, floor(imageSize.width * scale)),
+				height: max(1, floor(imageSize.height * scale))
+			)
+			let format = UIGraphicsImageRendererFormat.default()
+			format.scale = 1
+			let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+			let resizedImage = renderer.image { _ in
+				snapshot.draw(in: CGRect(origin: .zero, size: targetSize))
+			}
+			return resizedImage.jpegData(compressionQuality: compressionQuality)
+		}
+
 		func setDisplayActive(_ isActive: Bool) {
 			isDisplayActive = isActive
 			applyDisplayActivity()

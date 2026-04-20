@@ -8,6 +8,9 @@
 import Foundation
 import GRDB
 import GRDBQuery
+#if canImport(UIKit)
+	import UIKit
+#endif
 @testable import Termsy
 import Testing
 
@@ -30,6 +33,24 @@ struct TermsyTests {
 		#expect(tab.isDisplayActive)
 		#expect(tab.terminalView !== oldView)
 		#expect(tab.terminalView.isDisplayActive)
+	}
+
+	@MainActor
+	@Test func prepareForReconnectAfterBackgroundLossPreservesTerminalView() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+		let oldView = tab.terminalView
+
+		tab.prepareForReconnectAfterBackgroundLoss()
+
+		#expect(tab.isRestoring)
+		#expect(tab.terminalView === oldView)
 	}
 
 	@MainActor
@@ -132,6 +153,40 @@ struct TermsyTests {
 			#expect(savedSession?.isOpen == true)
 		}
 	}
+
+	#if canImport(UIKit)
+		@MainActor
+		@Test func restoredOpenSessionLoadsPersistedSnapshot() throws {
+			let db = DB.memory()
+			try db.migrate()
+			let snapshotData = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { context in
+				UIColor.systemGreen.setFill()
+				context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+			}.jpegData(compressionQuality: 0.8)
+			#expect(snapshotData != nil)
+
+			var session = Session(
+				hostname: "prod.example.com",
+				username: "pat",
+				tmuxSessionName: nil,
+				port: 22,
+				autoconnect: false
+			)
+			session.isOpen = true
+			session.lastTerminalSnapshotJPEGData = snapshotData
+
+			try db.queue.write { database in
+				try session.save(database)
+			}
+
+			let restoredSession = try db.queue.read { database in
+				try Session.fetchOne(database, key: session.id)
+			}
+			let tab = TerminalTab(session: try #require(restoredSession))
+			#expect(tab.isRestoring)
+			#expect(tab.displaySnapshot != nil)
+		}
+	#endif
 
 	@MainActor
 	@Test func coordinatorPersistsWorkspaceStateForOpenTabs() throws {
