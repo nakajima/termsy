@@ -384,9 +384,26 @@ class ViewCoordinator {
 /// Represents a single open terminal tab.
 @Observable @MainActor
 class TerminalTab: Identifiable {
-	enum RestorationPresentation {
+	enum RestorationMode {
 		case launch
 		case backgroundReconnect
+
+		var showsProgress: Bool {
+			switch self {
+			case .launch:
+				true
+			case .backgroundReconnect:
+				false
+			}
+		}
+	}
+
+	enum OverlayState {
+		case connected
+		case connecting
+		case awaitingPassword
+		case failed(String)
+		case restoring(RestorationMode)
 	}
 
 	let endpoint: TerminalEndpoint
@@ -399,8 +416,7 @@ class TerminalTab: Identifiable {
 	var isConnected = false
 	var connectionError: String?
 	var needsPassword = false
-	var isRestoring = false
-	var restorationPresentation: RestorationPresentation?
+	var restorationMode: RestorationMode?
 	var onRequestClose: (() -> Void)?
 	var onRequestNewTab: (() -> Void)?
 	var onRequestSelectTab: ((Int) -> Void)?
@@ -412,10 +428,9 @@ class TerminalTab: Identifiable {
 	var reportedTitle = ""
 	var connectionLog: [String] = []
 	#if canImport(UIKit)
-		var reconnectSnapshot: UIImage?
-		@ObservationIgnored private var restoredLaunchSnapshot: UIImage?
+		@ObservationIgnored private var restorationSnapshot: UIImage?
 		var displaySnapshot: UIImage? {
-			reconnectSnapshot ?? restoredLaunchSnapshot
+			restorationSnapshot
 		}
 	#endif
 
@@ -439,19 +454,16 @@ class TerminalTab: Identifiable {
 		self.customTitle = Self.normalizedTabTitle(session.customTitle)
 		self.terminalView = TerminalView(frame: .zero)
 		#if canImport(UIKit)
-			if session.isOpen,
-			   let snapshotData = session.lastTerminalSnapshotJPEGData
-			{
-				self.restoredLaunchSnapshot = UIImage(data: snapshotData)
-				if self.restoredLaunchSnapshot != nil {
-					self.isRestoring = true
-					self.restorationPresentation = .launch
+			if session.isOpen {
+				self.restorationMode = .launch
+				if let snapshotData = session.lastTerminalSnapshotJPEGData {
+					self.restorationSnapshot = UIImage(data: snapshotData)
 				} else {
-					self.restorationPresentation = nil
+					self.restorationSnapshot = nil
 				}
 			} else {
-				self.restoredLaunchSnapshot = nil
-				self.restorationPresentation = nil
+				self.restorationMode = nil
+				self.restorationSnapshot = nil
 			}
 		#endif
 		#if os(macOS)
@@ -538,8 +550,48 @@ class TerminalTab: Identifiable {
 		return false
 	}
 
+	var overlayState: OverlayState {
+		if let restorationMode {
+			return .restoring(restorationMode)
+		}
+		if let connectionError {
+			return .failed(connectionError)
+		}
+		if needsPassword {
+			return .awaitingPassword
+		}
+		if !isConnected {
+			return .connecting
+		}
+		return .connected
+	}
+
+	var showsOverlay: Bool {
+		switch overlayState {
+		case .connected:
+			return false
+		case .connecting, .awaitingPassword, .failed, .restoring:
+			return true
+		}
+	}
+
+	var isRestoring: Bool {
+		if case .restoring = overlayState {
+			return true
+		}
+		return false
+	}
+
+	var showsConnectingOverlay: Bool {
+		if case .connecting = overlayState {
+			return true
+		}
+		return false
+	}
+
 	var showsRestoringProgress: Bool {
-		restorationPresentation != .backgroundReconnect
+		guard case let .restoring(mode) = overlayState else { return false }
+		return mode.showsProgress
 	}
 
 	var connectionIsActive: Bool {
@@ -743,18 +795,22 @@ class TerminalTab: Identifiable {
 	}
 
 	private func clearRestorationState() {
-		isRestoring = false
-		restorationPresentation = nil
+		restorationMode = nil
 		#if canImport(UIKit)
-			reconnectSnapshot = nil
-			restoredLaunchSnapshot = nil
+			restorationSnapshot = nil
 		#endif
 	}
 
-	private func enterBackgroundReconnectRestoration() {
-		isRestoring = true
-		restorationPresentation = .backgroundReconnect
-	}
+	#if canImport(UIKit)
+		private func beginRestoration(_ mode: RestorationMode, snapshot: UIImage?) {
+			restorationMode = mode
+			restorationSnapshot = snapshot
+		}
+	#else
+		private func beginRestoration(_ mode: RestorationMode) {
+			restorationMode = mode
+		}
+	#endif
 
 	private func configureSSHSessionCallbacks(for sshSession: SSHTerminalSession? = nil) {
 		let sshSession = sshSession ?? self.sshSession
@@ -855,10 +911,6 @@ class TerminalTab: Identifiable {
 	}
 
 	#if canImport(UIKit)
-		func updateReconnectSnapshot(_ image: UIImage?) {
-			reconnectSnapshot = image
-		}
-
 		func capturePersistedSnapshotJPEGData() -> Data? {
 			guard case .remote = endpoint,
 			      let jpegData = terminalView.capturePersistedSnapshotJPEGData()
@@ -866,7 +918,9 @@ class TerminalTab: Identifiable {
 				return nil
 			}
 			session?.lastTerminalSnapshotJPEGData = jpegData
-			restoredLaunchSnapshot = UIImage(data: jpegData)
+			if restorationMode == .launch {
+				restorationSnapshot = UIImage(data: jpegData)
+			}
 			return jpegData
 		}
 	#endif
@@ -961,16 +1015,29 @@ class TerminalTab: Identifiable {
 		reconnectGraceTask = nil
 	}
 
-	func prepareForReconnectAfterBackgroundLoss() {
-		guard !isPassivePreview else { return }
-		logConnectionEvent("Preparing for reconnect after background loss")
-		clearAppInactiveState()
-		connectionError = nil
-		needsPassword = false
-		enterBackgroundReconnectRestoration()
-		disconnect()
-		resetTerminalView()
-	}
+	#if canImport(UIKit)
+		func prepareForReconnectAfterBackgroundLoss(snapshot: UIImage? = nil) {
+			guard !isPassivePreview else { return }
+			logConnectionEvent("Preparing for reconnect after background loss")
+			clearAppInactiveState()
+			connectionError = nil
+			needsPassword = false
+			beginRestoration(.backgroundReconnect, snapshot: snapshot)
+			disconnect()
+			resetTerminalView()
+		}
+	#else
+		func prepareForReconnectAfterBackgroundLoss() {
+			guard !isPassivePreview else { return }
+			logConnectionEvent("Preparing for reconnect after background loss")
+			clearAppInactiveState()
+			connectionError = nil
+			needsPassword = false
+			beginRestoration(.backgroundReconnect)
+			disconnect()
+			resetTerminalView()
+		}
+	#endif
 
 	private func isRecoverableBackgroundDisconnectMessage(_ message: String) -> Bool {
 		let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1142,12 +1209,20 @@ class TerminalTab: Identifiable {
 		switch reason {
 		case .localDisconnect:
 			logConnectionEvent("SSH session closed locally")
+			if restorationMode == .backgroundReconnect {
+				logConnectionEvent("Ignoring expected local disconnect while preparing background reconnect")
+				return
+			}
 			clearRestorationState()
 			clearAppInactiveState()
 		case .cleanExit:
 			logConnectionEvent("SSH session exited cleanly")
 			if shouldReconnectAfterAppDeactivation {
-				enterBackgroundReconnectRestoration()
+				#if canImport(UIKit)
+					beginRestoration(.backgroundReconnect, snapshot: displaySnapshot)
+				#else
+					beginRestoration(.backgroundReconnect)
+				#endif
 				scheduleReconnectAfterBackgroundLoss(
 					logMessage: "Treating clean SSH exit as recoverable after app deactivation"
 				)
@@ -1160,7 +1235,11 @@ class TerminalTab: Identifiable {
 		case let .error(message):
 			logConnectionEvent("SSH session closed with error: \(message)")
 			if shouldAutoReconnect(for: message) {
-				enterBackgroundReconnectRestoration()
+				#if canImport(UIKit)
+					beginRestoration(.backgroundReconnect, snapshot: displaySnapshot)
+				#else
+					beginRestoration(.backgroundReconnect)
+				#endif
 				scheduleReconnectAfterBackgroundLoss(
 					logMessage: "Scheduling automatic reconnect after transport shutdown"
 				)

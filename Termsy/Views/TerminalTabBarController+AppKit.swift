@@ -155,10 +155,7 @@
 			)
 			.environment(\.appTheme, theme)
 
-			let overlayNeedsInteraction = !terminalTab.isConnected
-				|| terminalTab.connectionError != nil
-				|| terminalTab.isRestoring
-				|| terminalTab.needsPassword
+			let overlayNeedsInteraction = terminalTab.showsOverlay
 
 			if let existing = overlayHostController {
 				existing.rootView = AnyView(overlayView)
@@ -178,10 +175,7 @@
 		}
 
 		private var showsConnectingOverlay: Bool {
-			!terminalTab.isConnected
-				&& terminalTab.connectionError == nil
-				&& !terminalTab.needsPassword
-				&& !terminalTab.isRestoring
+			terminalTab.showsConnectingOverlay
 		}
 
 		private func updateConnectionWatchdog() {

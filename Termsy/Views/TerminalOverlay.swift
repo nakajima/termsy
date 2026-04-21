@@ -19,23 +19,26 @@ struct TerminalOverlay: View {
 
 	var body: some View {
 		ZStack {
-			if tab.isRestoring {
+			switch tab.overlayState {
+			case let .restoring(mode):
 				snapshotBackdrop
 				Color.black.opacity(0.28)
 					.ignoresSafeArea()
-				if tab.showsRestoringProgress {
+				if mode.showsProgress {
 					ProgressView("Restoring session…")
 						.tint(theme.accent)
 						.foregroundStyle(theme.primaryText)
 				}
-			} else if !tab.isConnected, tab.connectionError == nil, !tab.needsPassword {
+			case .connecting:
 				snapshotBackdrop
 				ProgressView(tab.progressTitle)
 					.tint(theme.accent)
 					.foregroundStyle(theme.primaryText)
+			case .connected, .awaitingPassword, .failed:
+				EmptyView()
 			}
 
-			if let error = tab.connectionError {
+			if case let .failed(error) = tab.overlayState {
 				VStack(spacing: 12) {
 					Image(systemName: "xmark.circle")
 						.font(.largeTitle)

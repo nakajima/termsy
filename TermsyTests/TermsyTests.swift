@@ -50,7 +50,7 @@ struct TermsyTests {
 		tab.prepareForReconnectAfterBackgroundLoss()
 
 		#expect(tab.isRestoring)
-		#expect(tab.restorationPresentation == .backgroundReconnect)
+		#expect(tab.restorationMode == .backgroundReconnect)
 		#expect(!tab.showsRestoringProgress)
 		#expect(tab.terminalView !== oldView)
 	}
@@ -186,7 +186,7 @@ struct TermsyTests {
 			}
 			let tab = TerminalTab(session: try #require(restoredSession))
 			#expect(tab.isRestoring)
-			#expect(tab.restorationPresentation == .launch)
+			#expect(tab.restorationMode == .launch)
 			#expect(tab.showsRestoringProgress)
 			#expect(tab.displaySnapshot != nil)
 		}
