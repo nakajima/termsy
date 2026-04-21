@@ -384,6 +384,11 @@ class ViewCoordinator {
 /// Represents a single open terminal tab.
 @Observable @MainActor
 class TerminalTab: Identifiable {
+	enum RestorationPresentation {
+		case launch
+		case backgroundReconnect
+	}
+
 	let endpoint: TerminalEndpoint
 	var session: Session?
 	var sshSession = SSHTerminalSession()
@@ -395,6 +400,7 @@ class TerminalTab: Identifiable {
 	var connectionError: String?
 	var needsPassword = false
 	var isRestoring = false
+	var restorationPresentation: RestorationPresentation?
 	var onRequestClose: (() -> Void)?
 	var onRequestNewTab: (() -> Void)?
 	var onRequestSelectTab: ((Int) -> Void)?
@@ -437,9 +443,15 @@ class TerminalTab: Identifiable {
 			   let snapshotData = session.lastTerminalSnapshotJPEGData
 			{
 				self.restoredLaunchSnapshot = UIImage(data: snapshotData)
-				self.isRestoring = self.restoredLaunchSnapshot != nil
+				if self.restoredLaunchSnapshot != nil {
+					self.isRestoring = true
+					self.restorationPresentation = .launch
+				} else {
+					self.restorationPresentation = nil
+				}
 			} else {
 				self.restoredLaunchSnapshot = nil
+				self.restorationPresentation = nil
 			}
 		#endif
 		#if os(macOS)
@@ -526,6 +538,10 @@ class TerminalTab: Identifiable {
 		return false
 	}
 
+	var showsRestoringProgress: Bool {
+		restorationPresentation != .backgroundReconnect
+	}
+
 	var connectionIsActive: Bool {
 		if isPassivePreview {
 			return true
@@ -610,12 +626,12 @@ class TerminalTab: Identifiable {
 			startRemotePostConnectSetup(using: sshSession, attempt: attempt)
 		} catch SSHConnectionError.authenticationFailed {
 			guard self.sshSession === sshSession else { return }
-			isRestoring = false
+			clearRestorationState()
 			logConnectionEvent("Attempt \(attempt): authentication failed; prompting for password")
 			needsPassword = true
 		} catch {
 			guard self.sshSession === sshSession else { return }
-			isRestoring = false
+			clearRestorationState()
 			logConnectionEvent("Attempt \(attempt): connection failed: \(error)")
 			connectionError = "\(error)"
 		}
@@ -627,10 +643,10 @@ class TerminalTab: Identifiable {
 			do {
 				try localShellSession.start()
 				isConnected = true
-				isRestoring = false
+				clearRestorationState()
 				clearAppInactiveState()
 			} catch {
-				isRestoring = false
+				clearRestorationState()
 				print("[LocalShell] failed to start: \(error)")
 				connectionError = error.localizedDescription
 			}
@@ -726,16 +742,26 @@ class TerminalTab: Identifiable {
 		return newSession
 	}
 
+	private func clearRestorationState() {
+		isRestoring = false
+		restorationPresentation = nil
+		#if canImport(UIKit)
+			reconnectSnapshot = nil
+			restoredLaunchSnapshot = nil
+		#endif
+	}
+
+	private func enterBackgroundReconnectRestoration() {
+		isRestoring = true
+		restorationPresentation = .backgroundReconnect
+	}
+
 	private func configureSSHSessionCallbacks(for sshSession: SSHTerminalSession? = nil) {
 		let sshSession = sshSession ?? self.sshSession
 		sshSession.onRemoteOutput = { [weak self, weak sshSession] data in
 			guard let self, let sshSession, self.sshSession === sshSession else { return }
 			if self.isRestoring {
-				self.isRestoring = false
-				#if canImport(UIKit)
-					self.reconnectSnapshot = nil
-					self.restoredLaunchSnapshot = nil
-				#endif
+				self.clearRestorationState()
 			}
 			if let onFirstRemoteOutput = self.onFirstRemoteOutput {
 				self.onFirstRemoteOutput = nil
@@ -784,7 +810,7 @@ class TerminalTab: Identifiable {
 			startRemotePostConnectSetup(using: sshSession, attempt: attempt)
 		} catch {
 			guard self.sshSession === sshSession else { return }
-			isRestoring = false
+			clearRestorationState()
 			logConnectionEvent("Attempt \(attempt): password retry failed: \(error)")
 			connectionError = "\(error)"
 		}
@@ -856,7 +882,7 @@ class TerminalTab: Identifiable {
 		isConnected = true
 		connectionError = nil
 		needsPassword = false
-		isRestoring = false
+		clearRestorationState()
 		terminalView.setPresentationMode(.passivePreview)
 		clearAppInactiveState()
 		connectionLog = [
@@ -941,7 +967,7 @@ class TerminalTab: Identifiable {
 		clearAppInactiveState()
 		connectionError = nil
 		needsPassword = false
-		isRestoring = true
+		enterBackgroundReconnectRestoration()
 		disconnect()
 		resetTerminalView()
 	}
@@ -1110,21 +1136,23 @@ class TerminalTab: Identifiable {
 	private func handleSSHSessionClose(_ reason: SSHTerminalSession.CloseReason) {
 		isConnected = false
 		needsPassword = false
-		isRestoring = false
 		tmuxStartupTask?.cancel()
 		tmuxStartupTask = nil
 
 		switch reason {
 		case .localDisconnect:
 			logConnectionEvent("SSH session closed locally")
+			clearRestorationState()
 			clearAppInactiveState()
 		case .cleanExit:
 			logConnectionEvent("SSH session exited cleanly")
 			if shouldReconnectAfterAppDeactivation {
+				enterBackgroundReconnectRestoration()
 				scheduleReconnectAfterBackgroundLoss(
 					logMessage: "Treating clean SSH exit as recoverable after app deactivation"
 				)
 			} else {
+				clearRestorationState()
 				clearAppInactiveState()
 				terminalView.processExited()
 				onRequestClose?()
@@ -1132,10 +1160,12 @@ class TerminalTab: Identifiable {
 		case let .error(message):
 			logConnectionEvent("SSH session closed with error: \(message)")
 			if shouldAutoReconnect(for: message) {
+				enterBackgroundReconnectRestoration()
 				scheduleReconnectAfterBackgroundLoss(
 					logMessage: "Scheduling automatic reconnect after transport shutdown"
 				)
 			} else {
+				clearRestorationState()
 				clearAppInactiveState()
 				connectionError = message
 			}
@@ -1146,7 +1176,7 @@ class TerminalTab: Identifiable {
 		private func handleLocalShellClose(_ reason: LocalShellSession.CloseReason) {
 			isConnected = false
 			needsPassword = false
-			isRestoring = false
+			clearRestorationState()
 
 			switch reason {
 			case .localDisconnect:

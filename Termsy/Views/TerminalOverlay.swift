@@ -23,9 +23,11 @@ struct TerminalOverlay: View {
 				snapshotBackdrop
 				Color.black.opacity(0.28)
 					.ignoresSafeArea()
-				ProgressView("Restoring session…")
-					.tint(theme.accent)
-					.foregroundStyle(theme.primaryText)
+				if tab.showsRestoringProgress {
+					ProgressView("Restoring session…")
+						.tint(theme.accent)
+						.foregroundStyle(theme.primaryText)
+				}
 			} else if !tab.isConnected, tab.connectionError == nil, !tab.needsPassword {
 				snapshotBackdrop
 				ProgressView(tab.progressTitle)
