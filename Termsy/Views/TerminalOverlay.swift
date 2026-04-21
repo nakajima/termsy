@@ -20,7 +20,7 @@ struct TerminalOverlay: View {
 	var body: some View {
 		ZStack {
 			if tab.isRestoring {
-				restoringBackdrop
+				snapshotBackdrop
 				Color.black.opacity(0.28)
 					.ignoresSafeArea()
 				ProgressView("Restoring session…")
@@ -113,23 +113,6 @@ struct TerminalOverlay: View {
 		#endif
 	}
 
-	@ViewBuilder
-	private var restoringBackdrop: some View {
-		#if canImport(UIKit)
-			if let snapshot = tab.displaySnapshot {
-				Image(uiImage: snapshot)
-					.resizable()
-					.scaledToFill()
-					.ignoresSafeArea()
-			} else {
-				Color.clear
-					.ignoresSafeArea()
-			}
-		#else
-			Color.clear
-				.ignoresSafeArea()
-		#endif
-	}
 
 	private var showsConnectionLogToggle: Bool {
 		!tab.isConnected || tab.connectionError != nil || tab.isRestoring

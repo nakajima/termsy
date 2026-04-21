@@ -165,6 +165,15 @@ class ViewCoordinator {
 	func appWillResignActive() {
 		appIsActive = false
 		ApplicationActivity.isActive = false
+		for tab in tabs {
+			tab.noteAppWillResignActive()
+		}
+		refreshDisplayActivity()
+	}
+
+	func appDidEnterBackground() {
+		appIsActive = false
+		ApplicationActivity.isActive = false
 		#if canImport(UIKit)
 			persistWorkspaceStateIfPossible(snapshotRecords: capturePersistedTerminalSnapshots())
 		#else
@@ -172,9 +181,6 @@ class ViewCoordinator {
 		#endif
 		if tabs.contains(where: \.shouldRequestBackgroundExecution) {
 			_ = ApplicationActivity.beginBackgroundExecution(name: "Teletype SSH")
-		}
-		for tab in tabs {
-			tab.noteAppWillResignActive()
 		}
 		refreshDisplayActivity()
 	}
@@ -937,6 +943,7 @@ class TerminalTab: Identifiable {
 		needsPassword = false
 		isRestoring = true
 		disconnect()
+		resetTerminalView()
 	}
 
 	private func isRecoverableBackgroundDisconnectMessage(_ message: String) -> Bool {

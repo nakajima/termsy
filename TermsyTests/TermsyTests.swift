@@ -36,7 +36,7 @@ struct TermsyTests {
 	}
 
 	@MainActor
-	@Test func prepareForReconnectAfterBackgroundLossPreservesTerminalView() {
+	@Test func prepareForReconnectAfterBackgroundLossResetsTerminalView() {
 		let session = Session(
 			hostname: "prod.example.com",
 			username: "pat",
@@ -50,7 +50,7 @@ struct TermsyTests {
 		tab.prepareForReconnectAfterBackgroundLoss()
 
 		#expect(tab.isRestoring)
-		#expect(tab.terminalView === oldView)
+		#expect(tab.terminalView !== oldView)
 	}
 
 	@MainActor
@@ -187,6 +187,35 @@ struct TermsyTests {
 			#expect(tab.displaySnapshot != nil)
 		}
 	#endif
+
+	@MainActor
+	@Test func appWillResignActiveDoesNotClearSavedWorkspace() throws {
+		let db = DB.memory()
+		try db.migrate()
+		let coordinator = ViewCoordinator()
+		coordinator.configureDatabaseContext(.readWrite { db.queue })
+
+		var session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		session.isOpen = true
+		session.tabOrder = 0
+		try db.queue.write { database in
+			try session.save(database)
+		}
+
+		coordinator.appWillResignActive()
+
+		let savedSession = try db.queue.read { database in
+			try Session.fetchOne(database, key: session.id)
+		}
+		#expect(savedSession?.isOpen == true)
+		#expect(savedSession?.tabOrder == 0)
+	}
 
 	@MainActor
 	@Test func coordinatorPersistsWorkspaceStateForOpenTabs() throws {
