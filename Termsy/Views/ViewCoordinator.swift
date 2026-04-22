@@ -95,6 +95,16 @@ class ViewCoordinator {
 		open(tab: TerminalTab(session: session))
 	}
 
+	func openPassivePreviewTab(
+		for session: Session,
+		transcript: String,
+		screenshotReadyLabel: String? = nil
+	) {
+		let tab = TerminalTab(session: session)
+		tab.preparePassivePreview(transcript: transcript, screenshotReadyLabel: screenshotReadyLabel)
+		open(tab: tab)
+	}
+
 	#if os(macOS)
 		func openLocalShellTab(profile: LocalShellProfile = .default) {
 			open(tab: TerminalTab(localShellProfile: profile))
@@ -195,11 +205,20 @@ class ViewCoordinator {
 		refreshDisplayActivity()
 
 		guard let selectedTab else { return }
-		if selectedTab.consumeReconnectOnActivation() {
+		if selectedTab.reconnectOnActivationPending {
+			guard selectedTab.canHandleReconnectRequest else {
+				selectedTab.logDeferredReconnectUntilControllerReady()
+				return
+			}
+			_ = selectedTab.consumeReconnectOnActivation()
 			selectedTab.requestReconnect()
 			return
 		}
 		if selectedTab.hasRecoverableBackgroundDisconnectError {
+			guard selectedTab.canHandleReconnectRequest else {
+				selectedTab.deferReconnectUntilControllerReady()
+				return
+			}
 			selectedTab.requestReconnect()
 			return
 		}
@@ -923,6 +942,23 @@ class TerminalTab: Identifiable {
 			}
 			return jpegData
 		}
+
+		func prepareScreenshotBackgroundReconnect(readinessLabel: String, retryCount: Int = 12) {
+			guard retryCount > 0 else {
+				print("[Screenshots] failed to prepare \(readinessLabel)")
+				return
+			}
+			renderPendingPreviewIfNeeded()
+			guard terminalView.hasAttachedWindow else {
+				Task { @MainActor [weak self] in
+					try? await Task.sleep(nanoseconds: 100_000_000)
+					self?.prepareScreenshotBackgroundReconnect(readinessLabel: readinessLabel, retryCount: retryCount - 1)
+				}
+				return
+			}
+			beginRestoration(.backgroundReconnect, snapshot: terminalView.captureSnapshot())
+			print("[Screenshots] ready \(readinessLabel)")
+		}
 	#endif
 
 	func applyTheme(_ theme: AppTheme) {
@@ -1001,10 +1037,29 @@ class TerminalTab: Identifiable {
 		}
 	}
 
+	var reconnectOnActivationPending: Bool {
+		shouldReconnectOnActivation
+	}
+
+	var canHandleReconnectRequest: Bool {
+		onRequestReconnect != nil
+	}
+
 	func consumeReconnectOnActivation() -> Bool {
 		let shouldReconnect = shouldReconnectOnActivation
 		shouldReconnectOnActivation = false
 		return shouldReconnect
+	}
+
+	func deferReconnectUntilControllerReady() {
+		guard !shouldReconnectOnActivation else { return }
+		logConnectionEvent("Deferring reconnect until terminal controller is ready")
+		connectionError = nil
+		shouldReconnectOnActivation = true
+	}
+
+	func logDeferredReconnectUntilControllerReady() {
+		logConnectionEvent("Reconnect pending, waiting for terminal controller to become ready")
 	}
 
 	func clearAppInactiveState() {

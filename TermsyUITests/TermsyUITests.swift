@@ -21,6 +21,11 @@ final class TermsyUITests: XCTestCase {
 	}
 
 	@MainActor
+	func testIpadBackgroundReconnectScreenshot() throws {
+		try captureScreenshot(for: .backgroundReconnect)
+	}
+
+	@MainActor
 	func testIpadSessionPickerScreenshot() throws {
 		try captureScreenshot(for: .sessionPicker)
 	}
@@ -34,6 +39,7 @@ final class TermsyUITests: XCTestCase {
 		case savedSessions
 		case newSession
 		case terminal
+		case backgroundReconnect
 		case sessionPicker
 		case settings
 
@@ -45,6 +51,8 @@ final class TermsyUITests: XCTestCase {
 				return "new-session"
 			case .terminal:
 				return "terminal"
+			case .backgroundReconnect:
+				return "background-reconnect"
 			case .sessionPicker:
 				return "session-picker"
 			case .settings:
@@ -60,10 +68,12 @@ final class TermsyUITests: XCTestCase {
 				return "ipad-02-new-session"
 			case .terminal:
 				return "ipad-03-terminal"
+			case .backgroundReconnect:
+				return "ipad-04-background-reconnect"
 			case .sessionPicker:
-				return "ipad-04-session-picker"
+				return "ipad-05-session-picker"
 			case .settings:
-				return "ipad-05-settings"
+				return "ipad-06-settings"
 			}
 		}
 	}
@@ -92,7 +102,7 @@ final class TermsyUITests: XCTestCase {
 	private func settleUI(for scenario: String, forceLandscape: Bool) {
 		let baseDelay: TimeInterval
 		switch scenario {
-		case "terminal", "session-picker":
+		case "terminal", "session-picker", "background-reconnect":
 			baseDelay = 6.0
 		default:
 			baseDelay = 4.0

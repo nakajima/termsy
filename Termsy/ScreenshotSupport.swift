@@ -6,6 +6,7 @@ struct AppLaunchConfiguration {
 		case savedSessions = "saved-sessions"
 		case newSession = "new-session"
 		case terminal
+		case backgroundReconnect = "background-reconnect"
 		case sessionPicker = "session-picker"
 		case settings
 	}

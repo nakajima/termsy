@@ -144,6 +144,8 @@ struct ContentView: View {
 			announceScreenshotReadiness("settings")
 		case .terminal:
 			openScreenshotTerminal(using: seededSessions, readinessLabel: "terminal")
+		case .backgroundReconnect:
+			openScreenshotBackgroundReconnect(using: seededSessions, readinessLabel: "background-reconnect")
 		case .sessionPicker:
 			openScreenshotTerminal(using: seededSessions, readinessLabel: "session-picker")
 			coordinator.isShowingSessionPicker = true
@@ -178,6 +180,26 @@ struct ContentView: View {
 			announceScreenshotReadiness(readinessLabel)
 		}
 		coordinator.selectTab(primaryTab.id)
+	}
+
+	private func openScreenshotBackgroundReconnect(using sessions: [Session], readinessLabel: String) {
+		guard let primarySession = sessions.first(where: { $0.hostname == AppStoreScreenshotFixtures.primaryHostname }) ?? sessions.first else {
+			return
+		}
+
+		coordinator.openPassivePreviewTab(
+			for: primarySession,
+			transcript: AppStoreScreenshotFixtures.terminalTranscript
+		)
+		guard let primaryTab = coordinator.tabs.first(where: { $0.session?.normalizedTargetKey == primarySession.normalizedTargetKey }) else {
+			return
+		}
+		coordinator.selectTab(primaryTab.id)
+		#if canImport(UIKit)
+			primaryTab.prepareScreenshotBackgroundReconnect(readinessLabel: readinessLabel)
+		#else
+			announceScreenshotReadiness(readinessLabel)
+		#endif
 	}
 
 }
