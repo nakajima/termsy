@@ -431,6 +431,7 @@ class TerminalTab: Identifiable {
 			restorationSnapshot
 		}
 	#endif
+	@ObservationIgnored private var restorationPresentationMode: RestorationMode?
 
 	@ObservationIgnored var onFirstRemoteOutput: (() -> Void)?
 	@ObservationIgnored private var pendingPreviewTranscript: String?
@@ -456,6 +457,7 @@ class TerminalTab: Identifiable {
 		#if canImport(UIKit)
 			if session.isOpen {
 				self.restorationMode = .launch
+				self.restorationPresentationMode = .launch
 				if let snapshotData = session.lastTerminalSnapshotJPEGData {
 					self.restorationSnapshot = UIImage(data: snapshotData)
 				} else {
@@ -463,6 +465,7 @@ class TerminalTab: Identifiable {
 				}
 			} else {
 				self.restorationMode = nil
+				self.restorationPresentationMode = nil
 				self.restorationSnapshot = nil
 			}
 		#endif
@@ -551,6 +554,9 @@ class TerminalTab: Identifiable {
 	}
 
 	var overlayState: OverlayState {
+		if let restorationPresentationMode {
+			return .restoring(restorationPresentationMode)
+		}
 		if let restorationMode {
 			return .restoring(restorationMode)
 		}
@@ -731,13 +737,13 @@ class TerminalTab: Identifiable {
 			startRemotePostConnectSetup(using: sshSession, attempt: attempt)
 		} catch SSHConnectionError.authenticationFailed {
 			guard self.sshSession === sshSession else { return }
-			clearRestorationState()
+			finishRestorationPresentation()
 			logConnectionEvent("Attempt \(attempt): authentication failed; prompting for password")
 			needsPassword = true
 			notifyOverlayStateChanged()
 		} catch {
 			guard self.sshSession === sshSession else { return }
-			clearRestorationState()
+			finishRestorationPresentation()
 			logConnectionEvent("Attempt \(attempt): connection failed: \(error)")
 			connectionError = "\(error)"
 			notifyOverlayStateChanged()
@@ -750,11 +756,11 @@ class TerminalTab: Identifiable {
 			do {
 				try localShellSession.start()
 				isConnected = true
-				clearRestorationState()
+				finishRestorationPresentation()
 				clearAppInactiveState()
 				notifyOverlayStateChanged()
 			} catch {
-				clearRestorationState()
+				finishRestorationPresentation()
 				print("[LocalShell] failed to start: \(error)")
 				connectionError = error.localizedDescription
 				notifyOverlayStateChanged()
@@ -853,6 +859,12 @@ class TerminalTab: Identifiable {
 
 	private func clearRestorationState() {
 		restorationMode = nil
+		notifyOverlayStateChanged()
+	}
+
+	private func finishRestorationPresentation() {
+		restorationMode = nil
+		restorationPresentationMode = nil
 		#if canImport(UIKit)
 			restorationSnapshot = nil
 		#endif
@@ -862,12 +874,14 @@ class TerminalTab: Identifiable {
 	#if canImport(UIKit)
 		private func beginRestoration(_ mode: RestorationMode, snapshot: UIImage?) {
 			restorationMode = mode
+			restorationPresentationMode = mode
 			restorationSnapshot = snapshot
 			notifyOverlayStateChanged()
 		}
 	#else
 		private func beginRestoration(_ mode: RestorationMode) {
 			restorationMode = mode
+			restorationPresentationMode = mode
 			notifyOverlayStateChanged()
 		}
 	#endif
@@ -877,7 +891,7 @@ class TerminalTab: Identifiable {
 		sshSession.onRemoteOutput = { [weak self, weak sshSession] data in
 			guard let self, let sshSession, self.sshSession === sshSession else { return }
 			if self.isRestoring {
-				self.clearRestorationState()
+				self.finishRestorationPresentation()
 			}
 			if let onFirstRemoteOutput = self.onFirstRemoteOutput {
 				self.onFirstRemoteOutput = nil
@@ -927,7 +941,7 @@ class TerminalTab: Identifiable {
 			startRemotePostConnectSetup(using: sshSession, attempt: attempt)
 		} catch {
 			guard self.sshSession === sshSession else { return }
-			clearRestorationState()
+			finishRestorationPresentation()
 			logConnectionEvent("Attempt \(attempt): password retry failed: \(error)")
 			connectionError = "\(error)"
 			notifyOverlayStateChanged()
@@ -1020,7 +1034,7 @@ class TerminalTab: Identifiable {
 		isConnected = true
 		connectionError = nil
 		needsPassword = false
-		clearRestorationState()
+		finishRestorationPresentation()
 		terminalView.setPresentationMode(.passivePreview)
 		clearAppInactiveState()
 		connectionLog = [
@@ -1322,7 +1336,7 @@ class TerminalTab: Identifiable {
 				notifyOverlayStateChanged()
 				return
 			}
-			clearRestorationState()
+			finishRestorationPresentation()
 			clearAppInactiveState()
 			notifyOverlayStateChanged()
 		case .cleanExit:
@@ -1338,7 +1352,7 @@ class TerminalTab: Identifiable {
 					logMessage: "Treating clean SSH exit as recoverable after app deactivation"
 				)
 			} else {
-				clearRestorationState()
+				finishRestorationPresentation()
 				clearAppInactiveState()
 				notifyOverlayStateChanged()
 				terminalView.processExited()
@@ -1357,7 +1371,7 @@ class TerminalTab: Identifiable {
 					logMessage: "Scheduling automatic reconnect after transport shutdown"
 				)
 			} else {
-				clearRestorationState()
+				finishRestorationPresentation()
 				clearAppInactiveState()
 				connectionError = message
 				notifyOverlayStateChanged()
@@ -1371,7 +1385,7 @@ class TerminalTab: Identifiable {
 			connectTask = nil
 			isConnected = false
 			needsPassword = false
-			clearRestorationState()
+			finishRestorationPresentation()
 
 			switch reason {
 			case .localDisconnect:
