@@ -17,11 +17,35 @@ struct SessionsRequest: ValueObservationQueryable {
 	}
 }
 
+private struct SessionHostGroup: Identifiable {
+	let id: String
+	let title: String
+	var sessions: [Session]
+}
+
 struct SessionListView: View {
 	@Environment(ViewCoordinator.self) var coordinator
 	@Environment(\.databaseContext) var dbContext
 	@Environment(\.appTheme) private var theme
 	@Query(SessionsRequest()) var sessions: [Session]
+
+	private var groupedSessions: [SessionHostGroup] {
+		var groups: [SessionHostGroup] = []
+		var indexByHost: [String: Int] = [:]
+
+		for session in sessions {
+			let hostKey = session.normalizedHostname
+			if let existingIndex = indexByHost[hostKey] {
+				groups[existingIndex].sessions.append(session)
+			} else {
+				let title = session.hostname.trimmingCharacters(in: .whitespacesAndNewlines)
+				groups.append(SessionHostGroup(id: hostKey, title: title.isEmpty ? session.hostname : title, sessions: [session]))
+				indexByHost[hostKey] = groups.count - 1
+			}
+		}
+
+		return groups
+	}
 
 	var body: some View {
 		List {
@@ -45,11 +69,21 @@ struct SessionListView: View {
 				}
 			#endif
 
-			Section(sessions.isEmpty ? "Saved Sessions" : "") {
-				ForEach(sessions, id: \.id) { session in
-					sessionRow(for: session)
+			if groupedSessions.isEmpty {
+				Section("Saved Sessions") {
+					EmptyView()
 				}
-				.onDelete(perform: deleteSessions)
+			} else {
+				ForEach(groupedSessions) { group in
+					Section(group.title) {
+						ForEach(group.sessions, id: \.id) { session in
+							sessionRow(for: session)
+						}
+						.onDelete { offsets in
+							deleteSessions(at: offsets, from: group.sessions)
+						}
+					}
+				}
 			}
 		}
 		.scrollContentBackground(.hidden)
@@ -131,8 +165,8 @@ struct SessionListView: View {
 	}
 
 	@MainActor
-	private func deleteSessions(at offsets: IndexSet) {
-		let sessionsToDelete = offsets.map { sessions[$0] }
+	private func deleteSessions(at offsets: IndexSet, from groupSessions: [Session]) {
+		let sessionsToDelete = offsets.map { groupSessions[$0] }
 		guard !sessionsToDelete.isEmpty else { return }
 
 		do {
@@ -162,6 +196,16 @@ struct SessionListView: View {
 		)
 		defaultPortSession.lastConnectedAt = .now
 		try defaultPortSession.save(db)
+
+		var secondProdSession = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: "worker",
+			port: 22,
+			autoconnect: true
+		)
+		secondProdSession.createdAt = Date.now.addingTimeInterval(-3_600)
+		try secondProdSession.save(db)
 
 		var customPortSession = Session(
 			hostname: "staging.example.com",
