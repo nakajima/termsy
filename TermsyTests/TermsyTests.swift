@@ -430,9 +430,7 @@ struct TermsyTests {
 		)
 		let tab = TerminalTab(session: session)
 		var didClose = false
-		var didRequestReconnect = false
 		tab.onRequestClose = { didClose = true }
-		tab.onRequestReconnect = { didRequestReconnect = true }
 		tab.isConnected = true
 
 		ApplicationActivity.isActive = false
@@ -442,8 +440,8 @@ struct TermsyTests {
 		tab.sshSession.onClose?(.cleanExit)
 
 		#expect(!didClose)
-		#expect(!didRequestReconnect)
-		#expect(tab.consumeReconnectOnActivation())
+		#expect(tab.isRestoring)
+		#expect(tab.restorationMode == .backgroundReconnect)
 	}
 
 	@MainActor
@@ -464,6 +462,6 @@ struct TermsyTests {
 		tab.sshSession.onClose?(.cleanExit)
 
 		#expect(didClose)
-		#expect(!tab.consumeReconnectOnActivation())
+		#expect(!tab.isRestoring)
 	}
 }

@@ -31,9 +31,13 @@ struct TerminalOverlay: View {
 				}
 			case .connecting:
 				snapshotBackdrop
-				ProgressView(tab.progressTitle)
-					.tint(theme.accent)
-					.foregroundStyle(theme.primaryText)
+				Color.black.opacity(tab.displaySnapshot == nil ? 0 : 0.28)
+					.ignoresSafeArea()
+				if tab.displaySnapshot == nil {
+					ProgressView(tab.progressTitle)
+						.tint(theme.accent)
+						.foregroundStyle(theme.primaryText)
+				}
 			case .connected, .awaitingPassword, .failed:
 				EmptyView()
 			}
