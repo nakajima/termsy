@@ -1500,6 +1500,16 @@
 
 		private func tabSelectionOffset(for key: UIKey) -> Int? {
 			guard key.modifierFlags.contains(.command), key.modifierFlags.contains(.shift) else { return nil }
+
+			switch key.keyCode {
+			case .keyboardOpenBracket:
+				return -1
+			case .keyboardCloseBracket:
+				return 1
+			default:
+				break
+			}
+
 			switch key.charactersIgnoringModifiers {
 			case "[":
 				return -1
