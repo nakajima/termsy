@@ -19,6 +19,12 @@
 			case passivePreview
 		}
 
+		private struct AppliedSurfaceMetrics: Equatable {
+			let pixelWidth: UInt32
+			let pixelHeight: UInt32
+			let scale: CGFloat
+		}
+
 		private(set) nonisolated(unsafe) var surface: ghostty_surface_t?
 		private var hostManagedSurface: HostManagedSurface?
 		private var ghosttySurfaceUserdata: GhosttySurfaceUserdata?
@@ -51,6 +57,7 @@
 		private var smoothScrollSuppressedUntilNextScrollGesture = false
 		private var pinchBaselineFontSize: Float?
 		private var pinchAppliedFontSize: Float?
+		private var lastAppliedSurfaceMetrics: AppliedSurfaceMetrics?
 		private(set) var isDisplayActive = false
 		private var currentTheme = TerminalTheme.current.appTheme
 		private var presentationMode: PresentationMode = .interactive
@@ -307,6 +314,7 @@
 		func start() {
 			if surface == nil {
 				guard let app = GhosttyApp.shared.app else { return }
+				lastAppliedSurfaceMetrics = nil
 				if hostManagedSurface == nil {
 					hostManagedSurface = HostManagedSurface(
 						onData: { [weak self] data in
@@ -370,6 +378,7 @@
 			hostManagedSurface?.free()
 			hostManagedSurface = nil
 			surface = nil
+			lastAppliedSurfaceMetrics = nil
 		}
 
 		func feedData(_ data: Data) {
@@ -716,14 +725,21 @@
 			)
 		}
 
-		private func syncSize() {
+		private func syncSize(force: Bool = false) {
 			guard let surface else { return }
 			let scale = resolvedScale()
 			let w = UInt32((bounds.width * scale).rounded(.down))
 			let h = UInt32((bounds.height * scale).rounded(.down))
 			guard w > 0, h > 0 else { return }
+
+			let metrics = AppliedSurfaceMetrics(pixelWidth: w, pixelHeight: h, scale: scale)
+			if !force, lastAppliedSurfaceMetrics == metrics {
+				return
+			}
+
 			ghostty_surface_set_content_scale(surface, Double(scale), Double(scale))
 			ghostty_surface_set_size(surface, w, h)
+			lastAppliedSurfaceMetrics = metrics
 		}
 
 		// MARK: - Display Link
@@ -921,7 +937,7 @@
 				pinchAppliedFontSize = nextSize
 				TerminalFontSettings.persistSize(nextSize)
 				GhosttyApp.shared.reloadConfig()
-				syncSize()
+				syncSize(force: true)
 
 			case .ended, .cancelled, .failed:
 				pinchBaselineFontSize = nil
