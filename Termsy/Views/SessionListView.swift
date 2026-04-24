@@ -17,12 +17,6 @@ struct SessionsRequest: ValueObservationQueryable {
 	}
 }
 
-private struct SessionHostGroup: Identifiable {
-	let id: String
-	let title: String
-	var sessions: [Session]
-}
-
 struct SessionListView: View {
 	@Environment(ViewCoordinator.self) var coordinator
 	@Environment(\.databaseContext) var dbContext
@@ -30,21 +24,7 @@ struct SessionListView: View {
 	@Query(SessionsRequest()) var sessions: [Session]
 
 	private var groupedSessions: [SessionHostGroup] {
-		var groups: [SessionHostGroup] = []
-		var indexByHost: [String: Int] = [:]
-
-		for session in sessions {
-			let hostKey = session.normalizedHostname
-			if let existingIndex = indexByHost[hostKey] {
-				groups[existingIndex].sessions.append(session)
-			} else {
-				let title = session.hostname.trimmingCharacters(in: .whitespacesAndNewlines)
-				groups.append(SessionHostGroup(id: hostKey, title: title.isEmpty ? session.hostname : title, sessions: [session]))
-				indexByHost[hostKey] = groups.count - 1
-			}
-		}
-
-		return groups
+		Session.groupByHost(sessions)
 	}
 
 	var body: some View {

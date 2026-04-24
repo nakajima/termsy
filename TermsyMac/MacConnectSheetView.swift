@@ -19,6 +19,10 @@
 		@Environment(\.dismiss) private var dismiss
 		@Query(MacSavedSessionsRequest()) private var savedSessions: [Session]
 
+		private var groupedSavedSessions: [SessionHostGroup] {
+			Session.groupByHost(savedSessions)
+		}
+
 		@State private var host = ""
 		@State private var port = "22"
 		@State private var username = ""
@@ -35,39 +39,41 @@
 		var body: some View {
 			NavigationStack {
 				Form {
-					if !savedSessions.isEmpty {
-						Section("Saved Sessions") {
-							ForEach(savedSessions, id: \.id) { session in
-								Button {
-									connectExisting(session)
-								} label: {
-									HStack(alignment: .top, spacing: 12) {
-										VStack(alignment: .leading, spacing: 5) {
-											Text(session.listTitle)
-												.foregroundStyle(theme.primaryText)
-												.lineLimit(1)
-											if let subtitle = session.listSubtitle {
-												Text(subtitle)
-													.font(.caption)
-													.foregroundStyle(theme.secondaryText)
+					if !groupedSavedSessions.isEmpty {
+						ForEach(groupedSavedSessions) { group in
+							Section(group.title) {
+								ForEach(group.sessions, id: \.id) { session in
+									Button {
+										connectExisting(session)
+									} label: {
+										HStack(alignment: .top, spacing: 12) {
+											VStack(alignment: .leading, spacing: 5) {
+												Text(session.listTitle)
+													.foregroundStyle(theme.primaryText)
 													.lineLimit(1)
-											}
-											HStack(spacing: 8) {
-												if let lastConnectedAt = session.lastConnectedAt {
-													Text(lastConnectedAt, style: .relative)
-														.monospacedDigit()
-												} else {
-													Text("Never connected")
+												if let subtitle = session.listSubtitle {
+													Text(subtitle)
+														.font(.caption)
+														.foregroundStyle(theme.secondaryText)
+														.lineLimit(1)
 												}
+												HStack(spacing: 8) {
+													if let lastConnectedAt = session.lastConnectedAt {
+														Text(lastConnectedAt, style: .relative)
+															.monospacedDigit()
+													} else {
+														Text("Never connected")
+													}
+												}
+												.font(.caption)
+												.foregroundStyle(theme.tertiaryText)
 											}
-											.font(.caption)
-											.foregroundStyle(theme.tertiaryText)
+											Spacer(minLength: 0)
 										}
-										Spacer(minLength: 0)
+										.frame(maxWidth: .infinity, alignment: .leading)
 									}
-									.frame(maxWidth: .infinity, alignment: .leading)
+									.buttonStyle(.plain)
 								}
-								.buttonStyle(.plain)
 							}
 						}
 					}

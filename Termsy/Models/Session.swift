@@ -27,6 +27,12 @@ struct Session: Codable, FetchableRecord, MutablePersistableRecord, Identifiable
 	static let databaseTableName = "session"
 }
 
+struct SessionHostGroup: Identifiable, Equatable {
+	let id: String
+	let title: String
+	var sessions: [Session]
+}
+
 extension Session {
 	enum Columns {
 		static let id = Column(CodingKeys.id)
@@ -74,6 +80,30 @@ extension Session {
 				Columns.id.desc
 			)
 			.fetchAll(db)
+	}
+
+	static func groupByHost(_ sessions: [Session]) -> [SessionHostGroup] {
+		var groups: [SessionHostGroup] = []
+		var indexByHost: [String: Int] = [:]
+
+		for session in sessions {
+			let hostKey = session.normalizedHostname
+			if let existingIndex = indexByHost[hostKey] {
+				groups[existingIndex].sessions.append(session)
+			} else {
+				let trimmedHostname = session.hostname.trimmingCharacters(in: .whitespacesAndNewlines)
+				groups.append(
+					SessionHostGroup(
+						id: hostKey,
+						title: trimmedHostname.isEmpty ? session.hostname : trimmedHostname,
+						sessions: [session]
+					)
+				)
+				indexByHost[hostKey] = groups.count - 1
+			}
+		}
+
+		return groups
 	}
 
 	var normalizedHostname: String {

@@ -26,6 +26,10 @@ struct SessionPickerView: View {
 
 	private let selectionPageJump = 8
 
+	private var groupedSessions: [SessionHostGroup] {
+		Session.groupByHost(sessions)
+	}
+
 	private var pickerItemIDs: [PickerItemID] {
 		let sessionItems = sessions.map { PickerItemID.session($0.normalizedTargetKey) }
 		#if os(macOS)
@@ -49,12 +53,16 @@ struct SessionPickerView: View {
 						}
 					#endif
 
-					if !sessions.isEmpty {
-						Section("Saved Sessions") {
-							ForEach(sessions) { session in
-								sessionRow(for: session)
+					if !groupedSessions.isEmpty {
+						ForEach(groupedSessions) { group in
+							Section(group.title) {
+								ForEach(group.sessions) { session in
+									sessionRow(for: session)
+								}
+								.onDelete { offsets in
+									deleteSessions(at: offsets, from: group.sessions)
+								}
 							}
-							.onDelete(perform: deleteSessions)
 						}
 					}
 
@@ -296,8 +304,8 @@ struct SessionPickerView: View {
 	}
 
 	@MainActor
-	private func deleteSessions(at offsets: IndexSet) {
-		let sessionsToDelete = offsets.map { sessions[$0] }
+	private func deleteSessions(at offsets: IndexSet, from groupSessions: [Session]) {
+		let sessionsToDelete = offsets.map { groupSessions[$0] }
 		guard !sessionsToDelete.isEmpty else { return }
 
 		do {
