@@ -165,6 +165,17 @@ enum ShellTitleIntegration {
 	done
 	builtin unset _termsy_rcfile
 
+	if [[ -n "${TERMSY_STARTUP_TMUX_SESSION-}" ]]; then
+	  __termsy_tmux_session=$TERMSY_STARTUP_TMUX_SESSION
+	  builtin unset TERMSY_STARTUP_TMUX_SESSION
+	  if command -v tmux >/dev/null 2>&1; then
+	    exec tmux new-session -A -s "$__termsy_tmux_session"
+	  else
+	    printf 'Termsy: tmux not found after bash startup; continuing with login shell\n' >&2
+	  fi
+	  builtin unset __termsy_tmux_session
+	fi
+
 	if [[ -n "${TERMSY_TITLE_HOOKS_ACTIVE-}" ]]; then
 	  return 0 2>/dev/null || exit 0
 	fi
@@ -246,6 +257,19 @@ enum ShellTitleIntegration {
 	    end
 	end
 
+	function __termsy_maybe_start_tmux --on-event fish_prompt
+	    if set -q TERMSY_STARTUP_TMUX_SESSION
+	        set -l session "$TERMSY_STARTUP_TMUX_SESSION"
+	        set -e TERMSY_STARTUP_TMUX_SESSION
+	        functions -e __termsy_maybe_start_tmux
+	        if command -sq tmux
+	            exec tmux new-session -A -s "$session"
+	        else
+	            printf 'Termsy: tmux not found after fish startup; continuing with login shell\n' >&2
+	        end
+	    end
+	end
+
 	function __termsy_prompt_title --on-event fish_prompt
 	    __termsy_set_title (prompt_pwd)
 	end
@@ -284,6 +308,23 @@ enum ShellTitleIntegration {
 	  return 0 2>/dev/null || exit 0
 	fi
 	typeset -g TERMSY_TITLE_HOOKS_ACTIVE=1
+
+	_termsy_maybe_start_tmux() {
+	  emulate -L zsh
+	  [[ -n "${TERMSY_STARTUP_TMUX_SESSION-}" ]] || return 0
+	  local session=$TERMSY_STARTUP_TMUX_SESSION
+	  unset TERMSY_STARTUP_TMUX_SESSION
+	  if (( $+functions[add-zsh-hook] )); then
+	    add-zsh-hook -d precmd _termsy_maybe_start_tmux 2>/dev/null
+	  else
+	    precmd_functions=(${precmd_functions:#_termsy_maybe_start_tmux})
+	  fi
+	  if (( $+commands[tmux] )); then
+	    exec tmux new-session -A -s "$session"
+	  else
+	    print -ru2 -- 'Termsy: tmux not found after zsh startup; continuing with login shell'
+	  fi
+	}
 
 	_termsy_sanitize_title() {
 	  emulate -L zsh
@@ -329,11 +370,12 @@ enum ShellTitleIntegration {
 
 	autoload -Uz add-zsh-hook 2>/dev/null
 	if (( $+functions[add-zsh-hook] )); then
+	  add-zsh-hook precmd _termsy_maybe_start_tmux
 	  add-zsh-hook precmd _termsy_prompt_title
 	  add-zsh-hook preexec _termsy_preexec_title
 	else
 	  typeset -ag precmd_functions preexec_functions
-	  precmd_functions+=(_termsy_prompt_title)
+	  precmd_functions+=(_termsy_maybe_start_tmux _termsy_prompt_title)
 	  preexec_functions+=(_termsy_preexec_title)
 	fi
 
@@ -366,18 +408,8 @@ enum ShellTitleIntegration {
 		fi
 		"""
 
-		let tmuxLaunchScript = if let tmuxSessionName, !tmuxSessionName.isEmpty {
-			"""
-			if command -v tmux >/dev/null 2>&1; then
-			  tmux new-session -A -s \(shellQuoted(tmuxSessionName))
-			  tmux_status=$?
-			  if [ "$tmux_status" -ne 0 ]; then
-			    printf 'Termsy: tmux exited with status %s; starting login shell\n' "$tmux_status" >&2
-			  fi
-			else
-			  printf 'Termsy: tmux not found; starting login shell\n' >&2
-			fi
-			"""
+		let tmuxStartupExport = if let tmuxSessionName, !tmuxSessionName.isEmpty {
+			"export TERMSY_STARTUP_TMUX_SESSION=\(shellQuoted(tmuxSessionName))\n"
 		} else {
 			""
 		}
@@ -400,12 +432,11 @@ enum ShellTitleIntegration {
 		cache_root="$cache_root/termsy-shell-title"
 		export TERM_PROGRAM=ghostty
 		export COLORTERM=truecolor
-		"""# + termProgramVersionExport
+		"""# + termProgramVersionExport + tmuxStartupExport
 
 		return """
 		\(cacheRootScript)
 		\(terminfoSetupScript)
-		\(tmuxLaunchScript)
 		case "$shell_name" in
 		  bash)
 		    bash_dir="$cache_root/bash"
