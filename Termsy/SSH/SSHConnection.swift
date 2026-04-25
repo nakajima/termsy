@@ -167,13 +167,18 @@ enum ShellTitleIntegration {
 
 	if [[ -n "${TERMSY_STARTUP_TMUX_SESSION-}" ]]; then
 	  __termsy_tmux_session=$TERMSY_STARTUP_TMUX_SESSION
-	  builtin unset TERMSY_STARTUP_TMUX_SESSION
+	  __termsy_tmux_command=${TERMSY_TMUX_SHELL_COMMAND-}
+	  builtin unset TERMSY_STARTUP_TMUX_SESSION TERMSY_TMUX_SHELL_COMMAND
 	  if command -v tmux >/dev/null 2>&1; then
-	    exec tmux new-session -A -s "$__termsy_tmux_session"
+	    if [[ -n "$__termsy_tmux_command" ]]; then
+	      exec tmux new-session -A -s "$__termsy_tmux_session" "$__termsy_tmux_command"
+	    else
+	      exec tmux new-session -A -s "$__termsy_tmux_session"
+	    fi
 	  else
 	    printf 'Termsy: tmux not found after bash startup; continuing with login shell\n' >&2
 	  fi
-	  builtin unset __termsy_tmux_session
+	  builtin unset __termsy_tmux_session __termsy_tmux_command
 	fi
 
 	if [[ -n "${TERMSY_TITLE_HOOKS_ACTIVE-}" ]]; then
@@ -260,10 +265,15 @@ enum ShellTitleIntegration {
 	function __termsy_maybe_start_tmux --on-event fish_prompt
 	    if set -q TERMSY_STARTUP_TMUX_SESSION
 	        set -l session "$TERMSY_STARTUP_TMUX_SESSION"
-	        set -e TERMSY_STARTUP_TMUX_SESSION
+	        set -l shell_command "$TERMSY_TMUX_SHELL_COMMAND"
+	        set -e TERMSY_STARTUP_TMUX_SESSION TERMSY_TMUX_SHELL_COMMAND
 	        functions -e __termsy_maybe_start_tmux
 	        if command -sq tmux
-	            exec tmux new-session -A -s "$session"
+	            if test -n "$shell_command"
+	                exec tmux new-session -A -s "$session" "$shell_command"
+	            else
+	                exec tmux new-session -A -s "$session"
+	            end
 	        else
 	            printf 'Termsy: tmux not found after fish startup; continuing with login shell\n' >&2
 	        end
@@ -313,14 +323,19 @@ enum ShellTitleIntegration {
 	  emulate -L zsh
 	  [[ -n "${TERMSY_STARTUP_TMUX_SESSION-}" ]] || return 0
 	  local session=$TERMSY_STARTUP_TMUX_SESSION
-	  unset TERMSY_STARTUP_TMUX_SESSION
+	  local shell_command=${TERMSY_TMUX_SHELL_COMMAND-}
+	  unset TERMSY_STARTUP_TMUX_SESSION TERMSY_TMUX_SHELL_COMMAND
 	  if (( $+functions[add-zsh-hook] )); then
 	    add-zsh-hook -d precmd _termsy_maybe_start_tmux 2>/dev/null
 	  else
 	    precmd_functions=(${precmd_functions:#_termsy_maybe_start_tmux})
 	  fi
 	  if (( $+commands[tmux] )); then
-	    exec tmux new-session -A -s "$session"
+	    if [[ -n "$shell_command" ]]; then
+	      exec tmux new-session -A -s "$session" "$shell_command"
+	    else
+	      exec tmux new-session -A -s "$session"
+	    fi
 	  else
 	    print -ru2 -- 'Termsy: tmux not found after zsh startup; continuing with login shell'
 	  fi
@@ -444,6 +459,7 @@ enum ShellTitleIntegration {
 		    cat >"$bash_dir/termsy-title.bash" <<'__TERMSY_BASH__'
 		\(bashScript)
 		__TERMSY_BASH__
+		    export TERMSY_TMUX_SHELL_COMMAND="exec \"$shell_path\" --noprofile --norc --rcfile \"$bash_dir/termsy-title.bash\" -i"
 		    exec "$shell_path" --noprofile --norc --rcfile "$bash_dir/termsy-title.bash" -i
 		    ;;
 		  fish)
@@ -457,6 +473,7 @@ enum ShellTitleIntegration {
 		    else
 		      export XDG_DATA_DIRS="$fish_dir:/usr/local/share:/usr/share"
 		    fi
+		    export TERMSY_TMUX_SHELL_COMMAND="exec \"$shell_path\" -i -l"
 		    exec "$shell_path" -i -l
 		    ;;
 		  zsh)
@@ -473,6 +490,7 @@ enum ShellTitleIntegration {
 		    fi
 		    export TERMSY_TITLE_ZSH_INTEGRATION_FILE="$zsh_dir/termsy-title.zsh"
 		    export ZDOTDIR="$zsh_dir"
+		    export TERMSY_TMUX_SHELL_COMMAND="exec \"$shell_path\" -i -l"
 		    exec "$shell_path" -i -l
 		    ;;
 		  *)
@@ -622,13 +640,14 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 			log("session channel open")
 
 			// Request PTY
+			let ptySize = pendingTerminalSize
 			let ptyReq = SSHChannelRequestEvent.PseudoTerminalRequest(
 				wantReply: true,
 				term: "xterm-256color",
-				terminalCharacterWidth: size.columns,
-				terminalRowHeight: size.rows,
-				terminalPixelWidth: size.pixelWidth,
-				terminalPixelHeight: size.pixelHeight,
+				terminalCharacterWidth: ptySize.columns,
+				terminalRowHeight: ptySize.rows,
+				terminalPixelWidth: ptySize.pixelWidth,
+				terminalPixelHeight: ptySize.pixelHeight,
 				terminalModes: .init([:])
 			)
 			try await withTimeout(
@@ -652,7 +671,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 					error: .timedOut("starting the remote shell")
 				).get()
 				log("exec request sent, waiting for data...")
-				resize(pendingTerminalSize)
+				sendWindowChange(pendingTerminalSize, force: true)
 
 				// Wait briefly for the server to respond before falling back to ShellRequest.
 				// Direct tmux startup can take longer than a plain shell prompt.
@@ -682,7 +701,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 					error: .timedOut("starting the remote shell")
 				).get()
 				log("shell started")
-				resize(pendingTerminalSize)
+				sendWindowChange(pendingTerminalSize, force: true)
 			}
 		} catch {
 			disconnect()
@@ -702,10 +721,14 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	}
 
 	func resize(_ size: TerminalWindowSize) {
+		sendWindowChange(size, force: false)
+	}
+
+	private func sendWindowChange(_ size: TerminalWindowSize, force: Bool) {
 		let previousSize = pendingTerminalSize
 		pendingTerminalSize = size
 		// Re-sending the same character grid can make remote TUIs redraw on tab switches.
-		guard size.columns != previousSize.columns || size.rows != previousSize.rows else { return }
+		guard force || size.columns != previousSize.columns || size.rows != previousSize.rows else { return }
 		guard let sshChildChannel, sshChildChannel.isActive else { return }
 		sshChildChannel.eventLoop.execute {
 			guard sshChildChannel.isActive else { return }
