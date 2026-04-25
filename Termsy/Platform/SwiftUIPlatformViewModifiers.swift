@@ -20,6 +20,16 @@ extension View {
 			self
 		#endif
 	}
+
+	@ViewBuilder
+	func termsyTerminalSystemGestureBehavior() -> some View {
+		#if os(iOS)
+			persistentSystemOverlays(.hidden)
+				.defersSystemGestures(on: .bottom)
+		#else
+			self
+		#endif
+	}
 }
 
 extension ToolbarItemPlacement {

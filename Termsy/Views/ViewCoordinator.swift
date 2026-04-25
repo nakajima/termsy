@@ -444,7 +444,6 @@ class TerminalTab: Identifiable {
 	@ObservationIgnored private var connectTask: Task<Void, Never>?
 	@ObservationIgnored private var pendingAutomaticConnectDelayNanoseconds: UInt64 = 0
 	@ObservationIgnored private let activationReconnectDelayNanoseconds: UInt64 = 750_000_000
-	@ObservationIgnored private var tmuxStartupTask: Task<Void, Never>?
 	@ObservationIgnored private var remoteConnectAttempt = 0
 
 	let id = UUID()
@@ -713,13 +712,21 @@ class TerminalTab: Identifiable {
 				: "Attempt \(attempt): using saved password from keychain"
 		)
 		let sshSession = resetSSHSessionForNewConnection(attempt: attempt)
+		let tmuxSessionName = configuredTmuxSessionName(for: session)
+		let startupModeMessage = if let tmuxSessionName {
+			"Attempt \(attempt): starting remote session directly in tmux \(tmuxSessionName)"
+		} else {
+			"Attempt \(attempt): starting remote login shell"
+		}
 		logConnectionEvent("Attempt \(attempt): connecting to \(session.username)@\(session.hostname):\(session.port)")
+		logConnectionEvent(startupModeMessage)
 		do {
 			try await sshSession.connect(
 				host: session.hostname,
 				port: session.port,
 				username: session.username,
-				password: keychainPassword
+				password: keychainPassword,
+				tmuxSessionName: tmuxSessionName
 			)
 			guard !Task.isCancelled, self.sshSession === sshSession else {
 				logConnectionEvent("Attempt \(attempt): ignoring stale successful connection")
@@ -734,7 +741,6 @@ class TerminalTab: Identifiable {
 			if let session = self.session {
 				onConnectionEstablished?(session)
 			}
-			startRemotePostConnectSetup(using: sshSession, attempt: attempt)
 		} catch SSHConnectionError.authenticationFailed {
 			guard self.sshSession === sshSession else { return }
 			finishRestorationPresentation()
@@ -768,73 +774,13 @@ class TerminalTab: Identifiable {
 		}
 	#endif
 
-	private func startRemotePostConnectSetup(using sshSession: SSHTerminalSession, attempt: Int) {
-		let rawTmuxSessionName = (session?.tmuxSessionName)?
-			.trimmingCharacters(in: .whitespacesAndNewlines)
-		let tmuxSessionName = rawTmuxSessionName.flatMap { $0.isEmpty ? nil : $0 }
-		tmuxStartupTask?.cancel()
-		guard let tmuxSessionName else {
-			logConnectionEvent("Attempt \(attempt): no tmux session configured; leaving remote shell as-is")
-			tmuxStartupTask = nil
-			return
+	private func configuredTmuxSessionName(for session: Session?) -> String? {
+		guard let rawTmuxSessionName = session?.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+		      !rawTmuxSessionName.isEmpty
+		else {
+			return nil
 		}
-
-		logConnectionEvent("Attempt \(attempt): scheduling tmux attach for \(tmuxSessionName)")
-		tmuxStartupTask = Task { @MainActor [weak self, weak sshSession] in
-			try? await Task.sleep(nanoseconds: 150_000_000)
-			guard let self, let sshSession, self.isConnected, self.sshSession === sshSession else { return }
-
-			var hasGhosttyTerminfo = false
-			do {
-				self.logConnectionEvent("Attempt \(attempt): checking/installing remote xterm-ghostty terminfo")
-				let result = try await sshSession.connection.runDetachedCommand(
-					ShellTitleIntegration.remoteTerminfoInstallCommand
-				)
-				hasGhosttyTerminfo = self.remoteGhosttyTerminfoReady(from: result.output)
-				let logOutput = self.remoteGhosttyTerminfoLogOutput(from: result.output)
-				if let exitSignal = result.exitSignal {
-					self.logConnectionEvent("Attempt \(attempt): remote terminfo setup exited with signal \(exitSignal)")
-				} else if let exitStatus = result.exitStatus, exitStatus != 0 {
-					self.logConnectionEvent("Attempt \(attempt): remote terminfo setup exited with status \(exitStatus)")
-				}
-				if !logOutput.isEmpty {
-					self.logConnectionEvent("Attempt \(attempt): remote terminfo setup output: \(logOutput)")
-				}
-				self.logConnectionEvent(
-					hasGhosttyTerminfo
-						? "Attempt \(attempt): remote xterm-ghostty terminfo ready"
-						: "Attempt \(attempt): remote xterm-ghostty terminfo unavailable; continuing with xterm-256color"
-				)
-			} catch {
-				self.logConnectionEvent("Attempt \(attempt): remote terminfo setup failed: \(error)")
-			}
-
-			guard self.isConnected, self.sshSession === sshSession else { return }
-			let escapedName = self.shellQuoted(tmuxSessionName)
-			let commandPrefix = hasGhosttyTerminfo ? "env TERM=xterm-ghostty " : ""
-			let command = Data("\(commandPrefix)tmux new-session -A -s \(escapedName)\r".utf8)
-			self.logConnectionEvent("Attempt \(attempt): sending tmux attach command")
-			sshSession.connection.send(command)
-		}
-	}
-
-	private func remoteGhosttyTerminfoReady(from output: String) -> Bool {
-		output
-			.split(whereSeparator: \.isNewline)
-			.contains { $0 == "TERMSY_XTERM_GHOSTTY_READY=1" }
-	}
-
-	private func remoteGhosttyTerminfoLogOutput(from output: String) -> String {
-		output
-			.split(whereSeparator: \.isNewline)
-			.filter { !$0.hasPrefix("TERMSY_XTERM_GHOSTTY_READY=") }
-			.map(String.init)
-			.joined(separator: "\n")
-			.trimmingCharacters(in: .whitespacesAndNewlines)
-	}
-
-	private func shellQuoted(_ value: String) -> String {
-		"'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+		return rawTmuxSessionName
 	}
 
 	private func resetSSHSessionForNewConnection(attempt: Int) -> SSHTerminalSession {
@@ -916,13 +862,21 @@ class TerminalTab: Identifiable {
 		remoteConnectAttempt += 1
 		let attempt = remoteConnectAttempt
 		let sshSession = resetSSHSessionForNewConnection(attempt: attempt)
+		let tmuxSessionName = configuredTmuxSessionName(for: session)
+		let startupModeMessage = if let tmuxSessionName {
+			"Attempt \(attempt): starting remote session directly in tmux \(tmuxSessionName)"
+		} else {
+			"Attempt \(attempt): starting remote login shell"
+		}
 		logConnectionEvent("Attempt \(attempt): retrying with password for \(session.username)@\(session.hostname):\(session.port)")
+		logConnectionEvent(startupModeMessage)
 		do {
 			try await sshSession.connect(
 				host: session.hostname,
 				port: session.port,
 				username: session.username,
-				password: password
+				password: password,
+				tmuxSessionName: tmuxSessionName
 			)
 			guard !Task.isCancelled, self.sshSession === sshSession else {
 				logConnectionEvent("Attempt \(attempt): ignoring stale successful password retry")
@@ -938,7 +892,6 @@ class TerminalTab: Identifiable {
 			if let session = self.session {
 				onConnectionEstablished?(session)
 			}
-			startRemotePostConnectSetup(using: sshSession, attempt: attempt)
 		} catch {
 			guard self.sshSession === sshSession else { return }
 			finishRestorationPresentation()
@@ -958,8 +911,6 @@ class TerminalTab: Identifiable {
 			return
 		}
 		isConnected = false
-		tmuxStartupTask?.cancel()
-		tmuxStartupTask = nil
 		notifyOverlayStateChanged()
 		logConnectionEvent("Disconnect requested")
 		switch endpoint {
@@ -1325,8 +1276,6 @@ class TerminalTab: Identifiable {
 		connectTask = nil
 		isConnected = false
 		needsPassword = false
-		tmuxStartupTask?.cancel()
-		tmuxStartupTask = nil
 
 		switch reason {
 		case .localDisconnect:

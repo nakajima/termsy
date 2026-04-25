@@ -65,9 +65,14 @@ final class SSHTerminalSession {
 		connection.resize(size)
 	}
 
-	func connect(host: String, port: Int, username: String, password: String?) async throws {
+	func connect(host: String, port: Int, username: String, password: String?, tmuxSessionName: String?) async throws {
+		let startupOutputGraceNanoseconds: UInt64 = tmuxSessionName == nil ? 500_000_000 : 2_000_000_000
 		try await connection.connect(host: host, port: port, username: username, password: password)
-		try await connection.startShell(size: terminalSize, startupCommand: ShellTitleIntegration.remoteBootstrapCommand)
+		try await connection.startShell(
+			size: terminalSize,
+			startupCommand: ShellTitleIntegration.remoteStartupCommand(tmuxSessionName: tmuxSessionName),
+			startupOutputGraceNanoseconds: startupOutputGraceNanoseconds
+		)
 	}
 
 	func disconnect() {

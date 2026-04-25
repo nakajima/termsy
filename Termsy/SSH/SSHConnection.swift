@@ -135,26 +135,8 @@ enum ShellTitleIntegration {
 		}
 	}
 
-	static var remoteBootstrapCommand: String {
-		let script = remoteBootstrapScript
-		return "/bin/sh -lc \(shellQuoted(script))"
-	}
-
-	static var remoteTerminfoInstallCommand: String {
-		let script = """
-		ready=0
-		if command -v infocmp >/dev/null 2>&1 && infocmp xterm-ghostty >/dev/null 2>&1; then
-		  ready=1
-		elif command -v tic >/dev/null 2>&1; then
-		  mkdir -p ~/.terminfo 2>/dev/null || true
-		  if cat <<'__TERMSY_GHOSTTY_TERMINFO__' | tic -x - >/dev/null 2>&1; then
-		\(GhosttyTerminfo.source)
-		__TERMSY_GHOSTTY_TERMINFO__
-		    ready=1
-		  fi
-		fi
-		printf 'TERMSY_XTERM_GHOSTTY_READY=%s\n' "$ready"
-		"""
+	static func remoteStartupCommand(tmuxSessionName: String?) -> String {
+		let script = remoteBootstrapScript(tmuxSessionName: tmuxSessionName)
 		return "/bin/sh -lc \(shellQuoted(script))"
 	}
 
@@ -358,18 +340,47 @@ enum ShellTitleIntegration {
 	_termsy_prompt_title
 	"""#
 
-	private static let remoteBootstrapScript: String = {
+	private static func remoteBootstrapScript(tmuxSessionName: String?) -> String {
 		let termProgramVersionExport = if termProgramVersion.isEmpty {
 			""
 		} else {
 			"export TERM_PROGRAM_VERSION=\(shellQuoted(termProgramVersion))\n"
 		}
 
-		let terminfoBootstrapScript = """
+		let terminfoSetupScript = """
+		ready=0
 		if command -v infocmp >/dev/null 2>&1 && infocmp xterm-ghostty >/dev/null 2>&1; then
+		  ready=1
+		elif command -v tic >/dev/null 2>&1; then
+		  mkdir -p ~/.terminfo 2>/dev/null || true
+		  if cat <<'__TERMSY_GHOSTTY_TERMINFO__' | tic -x - >/dev/null 2>&1; then
+		\(GhosttyTerminfo.source)
+		__TERMSY_GHOSTTY_TERMINFO__
+		    ready=1
+		  fi
+		fi
+		if [ "$ready" = 1 ]; then
 		  export TERM=xterm-ghostty
+		else
+		  export TERM=xterm-256color
 		fi
 		"""
+
+		let tmuxLaunchScript = if let tmuxSessionName, !tmuxSessionName.isEmpty {
+			"""
+			if command -v tmux >/dev/null 2>&1; then
+			  tmux new-session -A -s \(shellQuoted(tmuxSessionName))
+			  tmux_status=$?
+			  if [ "$tmux_status" -ne 0 ]; then
+			    printf 'Termsy: tmux exited with status %s; starting login shell\n' "$tmux_status" >&2
+			  fi
+			else
+			  printf 'Termsy: tmux not found; starting login shell\n' >&2
+			fi
+			"""
+		} else {
+			""
+		}
 
 		let cacheRootScript = #"""
 		shell_path=${SHELL:-}
@@ -393,7 +404,8 @@ enum ShellTitleIntegration {
 
 		return """
 		\(cacheRootScript)
-		\(terminfoBootstrapScript)
+		\(terminfoSetupScript)
+		\(tmuxLaunchScript)
 		case "$shell_name" in
 		  bash)
 		    bash_dir="$cache_root/bash"
@@ -437,7 +449,7 @@ enum ShellTitleIntegration {
 		    ;;
 		esac
 		"""
-	}()
+	}
 }
 
 final nonisolated class SSHConnection: @unchecked Sendable {
@@ -515,7 +527,11 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		log("connected")
 	}
 
-	func startShell(size: TerminalWindowSize, startupCommand: String? = nil) async throws {
+	func startShell(
+		size: TerminalWindowSize,
+		startupCommand: String? = nil,
+		startupOutputGraceNanoseconds: UInt64 = 500_000_000
+	) async throws {
 		pendingTerminalSize = size
 		log("startShell \(size.columns)x\(size.rows) px=\(size.pixelWidth)x\(size.pixelHeight)")
 		guard let channel else { throw SSHConnectionError.notConnected }
@@ -607,8 +623,9 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 				log("exec request sent, waiting for data...")
 				resize(pendingTerminalSize)
 
-				// Wait briefly for the server to respond
-				try await Task.sleep(nanoseconds: 500_000_000) // 500ms
+				// Wait briefly for the server to respond before falling back to ShellRequest.
+				// Direct tmux startup can take longer than a plain shell prompt.
+				try await Task.sleep(nanoseconds: startupOutputGraceNanoseconds)
 
 				if hasReceivedData {
 					log("exec request worked, data received")

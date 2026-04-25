@@ -47,6 +47,7 @@ struct ContentView: View {
 					TabBarRepresentable()
 						.frame(height: 44)
 				}
+				.termsyTerminalSystemGestureBehavior()
 			}
 		}
 		.background(theme.background.ignoresSafeArea())
