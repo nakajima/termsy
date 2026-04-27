@@ -13,39 +13,42 @@
 
 	// MARK: - SwiftUI Bridge
 
-	struct TabBarRepresentable: UIViewRepresentable {
-		@Environment(ViewCoordinator.self) var coordinator
+	struct TabBarRepresentable: View {
+		@Environment(ViewCoordinator.self) private var coordinator
 		@Environment(\.databaseContext) private var dbContext
 		@Environment(\.appTheme) private var theme
 
-		func makeUIView(context _: Context) -> TabBarCollectionView {
-			let view = TabBarCollectionView()
-			view.onSelectTab = { [coordinator] id in coordinator.selectTab(id) }
-			view.onCloseTab = { [coordinator] id in coordinator.closeTab(id) }
-			view.onCloseOtherTabs = { [coordinator] id in coordinator.closeOtherTabs(id) }
-			view.onRenameTab = { [coordinator, dbContext] id, title in
-				persistRename(for: id, title: title, coordinator: coordinator, dbContext: dbContext)
+		private var tabItems: [TabBarItem] {
+			coordinator.tabs.map { tab in
+				TabBarItem(
+					id: tab.id,
+					title: tab.displayTitle,
+					customTitle: tab.customTitle,
+					automaticTitle: tab.automaticTitle,
+					isConnected: tab.isConnected,
+					hasError: tab.connectionError != nil
+				)
 			}
-			view.onReorderTabs = { [coordinator] ids in coordinator.reorderTabs(ids) }
-			view.onAddTab = { [coordinator] in coordinator.openNewTabUI() }
-			view.onSettings = { [coordinator] in coordinator.openSettings() }
-			view.applyTheme(theme)
-			view.update(tabs: coordinator.tabs, selectedID: coordinator.selectedTabID)
-			return view
 		}
 
-		func updateUIView(_ view: TabBarCollectionView, context _: Context) {
-			view.onSelectTab = { [coordinator] id in coordinator.selectTab(id) }
-			view.onCloseTab = { [coordinator] id in coordinator.closeTab(id) }
-			view.onCloseOtherTabs = { [coordinator] id in coordinator.closeOtherTabs(id) }
-			view.onRenameTab = { [coordinator, dbContext] id, title in
-				persistRename(for: id, title: title, coordinator: coordinator, dbContext: dbContext)
-			}
-			view.onReorderTabs = { [coordinator] ids in coordinator.reorderTabs(ids) }
-			view.onAddTab = { [coordinator] in coordinator.openNewTabUI() }
-			view.onSettings = { [coordinator] in coordinator.openSettings() }
-			view.applyTheme(theme)
-			view.update(tabs: coordinator.tabs, selectedID: coordinator.selectedTabID)
+		var body: some View {
+			let currentCoordinator = coordinator
+			let currentDBContext = dbContext
+
+			TabBarUIKitRepresentable(
+				items: tabItems,
+				selectedID: currentCoordinator.selectedTabID,
+				theme: theme,
+				onSelectTab: { id in currentCoordinator.selectTab(id) },
+				onCloseTab: { id in currentCoordinator.closeTab(id) },
+				onCloseOtherTabs: { id in currentCoordinator.closeOtherTabs(id) },
+				onRenameTab: { id, title in
+					persistRename(for: id, title: title, coordinator: currentCoordinator, dbContext: currentDBContext)
+				},
+				onReorderTabs: { ids in currentCoordinator.reorderTabs(ids) },
+				onAddTab: { currentCoordinator.openNewTabUI() },
+				onSettings: { currentCoordinator.openSettings() }
+			)
 		}
 
 		private func persistRename(for id: UUID, title: String?, coordinator: ViewCoordinator, dbContext: DatabaseContext) {
@@ -65,6 +68,43 @@
 			} catch {
 				print("[DB] failed to persist customTitle for session \(session.id.map(String.init) ?? "new"): \(error)")
 			}
+		}
+	}
+
+	private struct TabBarUIKitRepresentable: UIViewRepresentable {
+		let items: [TabBarItem]
+		let selectedID: UUID?
+		let theme: AppTheme
+		let onSelectTab: (UUID) -> Void
+		let onCloseTab: (UUID) -> Void
+		let onCloseOtherTabs: (UUID) -> Void
+		let onRenameTab: (UUID, String?) -> Void
+		let onReorderTabs: ([UUID]) -> Void
+		let onAddTab: () -> Void
+		let onSettings: () -> Void
+
+		func makeUIView(context _: Context) -> TabBarCollectionView {
+			let view = TabBarCollectionView()
+			configure(view)
+			view.applyTheme(theme)
+			view.update(items: items, selectedID: selectedID)
+			return view
+		}
+
+		func updateUIView(_ view: TabBarCollectionView, context _: Context) {
+			configure(view)
+			view.applyTheme(theme)
+			view.update(items: items, selectedID: selectedID)
+		}
+
+		private func configure(_ view: TabBarCollectionView) {
+			view.onSelectTab = onSelectTab
+			view.onCloseTab = onCloseTab
+			view.onCloseOtherTabs = onCloseOtherTabs
+			view.onRenameTab = onRenameTab
+			view.onReorderTabs = onReorderTabs
+			view.onAddTab = onAddTab
+			view.onSettings = onSettings
 		}
 	}
 
@@ -201,23 +241,13 @@
 			}
 		}
 
-		@MainActor
-		func update(tabs: [TerminalTab], selectedID: UUID?) {
+		func update(items newItems: [TabBarItem], selectedID: UUID?) {
 			self.selectedID = selectedID
 			backgroundColor = theme.backgroundUIColor
 
-			let newItems = tabs.map { tab in
-				TabBarItem(
-					id: tab.id,
-					title: tab.displayTitle,
-					customTitle: tab.customTitle,
-					automaticTitle: tab.automaticTitle,
-					isConnected: tab.isConnected,
-					hasError: tab.connectionError != nil
-				)
-			}
-
-			let changed = newItems != items
+			let oldItems = items
+			let changed = newItems != oldItems
+			let structureChanged = newItems.map(\.id) != oldItems.map(\.id)
 			items = newItems
 
 			var snapshot = NSDiffableDataSourceSnapshot<Int, TabBarItem>()
@@ -225,7 +255,7 @@
 			snapshot.appendItems(items)
 
 			if changed {
-				dataSource.apply(snapshot, animatingDifferences: true)
+				dataSource.apply(snapshot, animatingDifferences: structureChanged)
 			} else {
 				dataSource.apply(snapshot, animatingDifferences: false)
 				for cell in collectionView.visibleCells {
@@ -544,5 +574,28 @@
 			isCurrentlySelected = false
 			onClose = nil
 		}
+	}
+
+	#Preview {
+		let db = DB.memory()
+		try? db.migrate()
+		let coordinator = ViewCoordinator()
+		coordinator.openTab(
+			for: Session(hostname: "prod.example.com", username: "pat", tmuxSessionName: nil, port: 22, autoconnect: false)
+		)
+		coordinator.openTab(
+			for: Session(hostname: "staging.example.com", username: "pat", tmuxSessionName: nil, port: 22, autoconnect: false)
+		)
+		coordinator.tabs.first?.reportedTitle = "~/app"
+		coordinator.tabs.first?.isConnected = true
+		if let firstTabID = coordinator.tabs.first?.id {
+			coordinator.selectTab(firstTabID)
+		}
+
+		return TabBarRepresentable()
+			.frame(height: tabBarHeight)
+			.databaseContext(.readWrite { db.queue })
+			.environment(coordinator)
+			.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 	}
 #endif
