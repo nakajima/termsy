@@ -141,12 +141,14 @@
 
 			if let existing = overlayHostController {
 				existing.rootView = AnyView(overlayView)
+				existing.view.isHidden = !overlayNeedsInteraction
 				existing.view.isUserInteractionEnabled = overlayNeedsInteraction
 			} else {
 				let host = UIHostingController(rootView: AnyView(overlayView))
 				host.view.backgroundColor = .clear
 				host.view.frame = view.bounds
 				host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+				host.view.isHidden = !overlayNeedsInteraction
 				host.view.isUserInteractionEnabled = overlayNeedsInteraction
 				addChild(host)
 				view.addSubview(host.view)
