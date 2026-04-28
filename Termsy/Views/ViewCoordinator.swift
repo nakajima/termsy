@@ -711,6 +711,9 @@ class TerminalTab: Identifiable {
 				? "Attempt \(attempt): no saved password available"
 				: "Attempt \(attempt): using saved password from keychain"
 		)
+		if let size = refreshTerminalSizeFromSurface() {
+			logConnectionEvent("Attempt \(attempt): using terminal size \(terminalSizeDescription(size))")
+		}
 		let sshSession = resetSSHSessionForNewConnection(attempt: attempt)
 		let tmuxSessionName = configuredTmuxSessionName(for: session)
 		let startupModeMessage = if let tmuxSessionName {
@@ -781,6 +784,18 @@ class TerminalTab: Identifiable {
 			return nil
 		}
 		return rawTmuxSessionName
+	}
+
+	private func refreshTerminalSizeFromSurface() -> TerminalWindowSize? {
+		guard terminalView.hasAttachedWindow else { return nil }
+		terminalView.start()
+		guard let size = terminalView.syncSizeAndReadBack() else { return nil }
+		updateTerminalSize(size)
+		return size
+	}
+
+	private func terminalSizeDescription(_ size: TerminalWindowSize) -> String {
+		"\(size.columns)x\(size.rows) px=\(size.pixelWidth)x\(size.pixelHeight)"
 	}
 
 	private func resetSSHSessionForNewConnection(attempt: Int) -> SSHTerminalSession {
@@ -861,6 +876,9 @@ class TerminalTab: Identifiable {
 		connectionError = nil
 		remoteConnectAttempt += 1
 		let attempt = remoteConnectAttempt
+		if let size = refreshTerminalSizeFromSurface() {
+			logConnectionEvent("Attempt \(attempt): using terminal size \(terminalSizeDescription(size))")
+		}
 		let sshSession = resetSSHSessionForNewConnection(attempt: attempt)
 		let tmuxSessionName = configuredTmuxSessionName(for: session)
 		let startupModeMessage = if let tmuxSessionName {

@@ -67,7 +67,7 @@
 			if terminalView == nil {
 				setupTerminal()
 			}
-			_ = terminalView?.syncSizeAndReadBack()
+			syncTerminalSizeToSession()
 			terminalTab.hostDidAppear()
 			terminalView?.restoreKeyboardFocusIfNeeded(retryCount: 30)
 		}
@@ -116,7 +116,7 @@
 			terminalView?.removeFromSuperview()
 			terminalView = nil
 			setupTerminal()
-			_ = terminalView?.syncSizeAndReadBack()
+			syncTerminalSizeToSession()
 			terminalTab.hostDidAppear()
 		}
 

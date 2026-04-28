@@ -61,7 +61,7 @@ final class SSHTerminalSession {
 		let previousSize = terminalSize
 		terminalSize = size
 		// Avoid redundant SSH window-change requests during tab/view churn.
-		guard size.columns != previousSize.columns || size.rows != previousSize.rows else { return }
+		guard size != previousSize else { return }
 		connection.resize(size)
 	}
 
