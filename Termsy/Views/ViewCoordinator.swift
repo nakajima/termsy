@@ -184,13 +184,29 @@ class ViewCoordinator {
 	func appDidEnterBackground() {
 		appIsActive = false
 		ApplicationActivity.isActive = false
+		for tab in tabs {
+			tab.noteAppDidEnterBackground()
+		}
 		#if canImport(UIKit)
 			persistWorkspaceStateIfPossible(snapshotRecords: capturePersistedTerminalSnapshots())
 		#else
 			persistWorkspaceStateIfPossible()
 		#endif
-		if tabs.contains(where: \.shouldRequestBackgroundExecution) {
-			_ = ApplicationActivity.beginBackgroundExecution(name: "Teletype SSH")
+		let backgroundExecutionTabs = tabs.filter(\.shouldRequestBackgroundExecution)
+		if !backgroundExecutionTabs.isEmpty {
+			let alreadyActive = ApplicationActivity.hasBackgroundExecution
+			ApplicationActivity.onBackgroundExecutionExpiration = { [weak self] remaining in
+				self?.noteBackgroundExecutionExpired(remaining: remaining)
+			}
+			let granted = ApplicationActivity.beginBackgroundExecution(name: "Teletype SSH")
+			let remaining = ApplicationActivity.backgroundTimeRemaining
+			for tab in backgroundExecutionTabs {
+				tab.noteBackgroundExecutionRequested(
+					granted: granted,
+					alreadyActive: alreadyActive,
+					remaining: remaining
+				)
+			}
 		}
 		refreshDisplayActivity()
 	}
@@ -198,11 +214,25 @@ class ViewCoordinator {
 	func appDidBecomeActive() {
 		appIsActive = true
 		ApplicationActivity.isActive = true
+		let hadBackgroundExecution = ApplicationActivity.hasBackgroundExecution
+		let remaining = ApplicationActivity.backgroundTimeRemaining
 		ApplicationActivity.endBackgroundExecution()
+		ApplicationActivity.onBackgroundExecutionExpiration = nil
+		if hadBackgroundExecution {
+			for tab in tabs {
+				tab.noteBackgroundExecutionEnded(remainingBeforeEnd: remaining)
+			}
+		}
 		for tab in tabs {
 			tab.noteAppDidBecomeActive()
 		}
 		refreshDisplayActivity()
+	}
+
+	private func noteBackgroundExecutionExpired(remaining: TimeInterval?) {
+		for tab in tabs {
+			tab.noteBackgroundExecutionExpired(remaining: remaining)
+		}
 	}
 
 	func selectTab(_ id: UUID?, persistWorkspace: Bool = true) {
@@ -1033,7 +1063,8 @@ class TerminalTab: Identifiable {
 		reconnectGraceTask?.cancel()
 		reconnectGraceTask = nil
 		backgroundReconnectGraceDeadline = nil
-		wasConnectedWhenAppResignedActive = isConnected
+		let reconnectPending = restorationMode == .backgroundReconnect
+		wasConnectedWhenAppResignedActive = isConnected || reconnectPending
 		#if canImport(UIKit)
 			if case .remote = endpoint,
 			   isConnected,
@@ -1046,7 +1077,43 @@ class TerminalTab: Identifiable {
 		if ApplicationActivity.hasBackgroundExecution, shouldRequestBackgroundExecution {
 			logConnectionEvent("Requested iOS background execution to keep the SSH session alive")
 		}
-		logConnectionEvent("App will resign active; wasConnected=\(isConnected)")
+		logConnectionEvent("App will resign active; wasConnected=\(isConnected) reconnectPending=\(reconnectPending)")
+	}
+
+	func noteAppDidEnterBackground() {
+		guard case .remote = endpoint, !isPassivePreview else { return }
+		logConnectionEvent(
+			"App did enter background; shouldRequestBackgroundExecution=\(shouldRequestBackgroundExecution) "
+				+ "backgroundTaskActive=\(ApplicationActivity.hasBackgroundExecution) "
+				+ "remaining=\(Self.backgroundTimeRemainingDescription(ApplicationActivity.backgroundTimeRemaining))"
+		)
+	}
+
+	func noteBackgroundExecutionRequested(
+		granted: Bool,
+		alreadyActive: Bool,
+		remaining: TimeInterval?
+	) {
+		guard case .remote = endpoint, !isPassivePreview else { return }
+		logConnectionEvent(
+			"Background execution request: granted=\(granted) alreadyActive=\(alreadyActive) "
+				+ "remaining=\(Self.backgroundTimeRemainingDescription(remaining))"
+		)
+	}
+
+	func noteBackgroundExecutionExpired(remaining: TimeInterval?) {
+		guard case .remote = endpoint, !isPassivePreview else { return }
+		logConnectionEvent(
+			"Background execution expired; remaining=\(Self.backgroundTimeRemainingDescription(remaining))"
+		)
+	}
+
+	func noteBackgroundExecutionEnded(remainingBeforeEnd: TimeInterval?) {
+		guard case .remote = endpoint, !isPassivePreview else { return }
+		logConnectionEvent(
+			"Ended background execution; remainingBeforeEnd="
+				+ Self.backgroundTimeRemainingDescription(remainingBeforeEnd)
+		)
 	}
 
 	func noteAppDidBecomeActive() {
@@ -1137,9 +1204,9 @@ class TerminalTab: Identifiable {
 		return keywords.contains { normalized.contains($0) }
 	}
 
-	private func shouldAutoReconnect(for message: String) -> Bool {
+	private func shouldAutoReconnect(for message: String, wasConnectedBeforeClose: Bool) -> Bool {
 		guard isRecoverableBackgroundDisconnectMessage(message) else { return false }
-		return shouldReconnectAfterAppDeactivation
+		return wasConnectedBeforeClose || shouldReconnectAfterAppDeactivation
 	}
 
 	private var shouldReconnectAfterAppDeactivation: Bool {
@@ -1178,9 +1245,18 @@ class TerminalTab: Identifiable {
 	private func logConnectionEvent(_ message: String) {
 		let timestamp = Date().formatted(date: .omitted, time: .standard)
 		connectionLog.append("[\(timestamp)] \(message)")
-		if connectionLog.count > 60 {
-			connectionLog.removeFirst(connectionLog.count - 60)
+		if connectionLog.count > 120 {
+			connectionLog.removeFirst(connectionLog.count - 120)
 		}
+	}
+
+	private static func backgroundTimeRemainingDescription(_ remaining: TimeInterval?) -> String {
+		guard let remaining else { return "unavailable" }
+		guard remaining.isFinite else { return "unlimited" }
+		if remaining >= TimeInterval(Int32.max) {
+			return "unlimited"
+		}
+		return String(format: "%.1fs", remaining)
 	}
 
 	private func notifyOverlayStateChanged() {
@@ -1272,6 +1348,7 @@ class TerminalTab: Identifiable {
 	}
 
 	private func handleSSHSessionClose(_ reason: SSHTerminalSession.CloseReason) {
+		let wasConnectedBeforeClose = isConnected
 		connectTask?.cancel()
 		connectTask = nil
 		isConnected = false
@@ -1309,9 +1386,10 @@ class TerminalTab: Identifiable {
 			}
 		case let .error(message):
 			logConnectionEvent("SSH session closed with error: \(message)")
-			if shouldAutoReconnect(for: message) {
+			if shouldAutoReconnect(for: message, wasConnectedBeforeClose: wasConnectedBeforeClose) {
 				#if canImport(UIKit)
-					beginRestoration(.backgroundReconnect, snapshot: displaySnapshot)
+					let reconnectSnapshot = displaySnapshot ?? terminalView.captureSnapshot()
+					beginRestoration(.backgroundReconnect, snapshot: reconnectSnapshot)
 				#else
 					beginRestoration(.backgroundReconnect)
 				#endif

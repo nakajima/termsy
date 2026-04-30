@@ -22,8 +22,6 @@ struct TerminalOverlay: View {
 			switch tab.overlayState {
 			case let .restoring(mode):
 				snapshotBackdrop
-				Color.black.opacity(0.28)
-					.ignoresSafeArea()
 				if mode.showsProgress {
 					ProgressView("Restoring session…")
 						.tint(theme.accent)
@@ -31,8 +29,6 @@ struct TerminalOverlay: View {
 				}
 			case .connecting:
 				snapshotBackdrop
-				Color.black.opacity(tab.displaySnapshot == nil ? 0 : 0.28)
-					.ignoresSafeArea()
 				if tab.displaySnapshot == nil {
 					ProgressView(tab.progressTitle)
 						.tint(theme.accent)
