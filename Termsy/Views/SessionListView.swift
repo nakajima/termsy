@@ -9,65 +9,31 @@ import GRDB
 import GRDBQuery
 import SwiftUI
 
-struct SessionsRequest: ValueObservationQueryable {
-	static var defaultValue: [Session] { [] }
-
-	func fetch(_ db: Database) throws -> [Session] {
-		try Session.fetchSavedSessions(db)
-	}
-}
-
 struct SessionListView: View {
 	@Environment(ViewCoordinator.self) var coordinator
-	@Environment(\.databaseContext) var dbContext
-	@Environment(\.appTheme) private var theme
-	@Query(SessionsRequest()) var sessions: [Session]
-
-	private var groupedSessions: [SessionHostGroup] {
-		Session.groupByHost(sessions)
-	}
 
 	var body: some View {
-		List {
-			#if os(macOS)
-				Section("Local") {
-					Button {
-						coordinator.openLocalShellTab()
-					} label: {
-						VStack(alignment: .leading, spacing: 4) {
-							Text("Local Shell")
-								.font(.headline)
-								.foregroundStyle(theme.primaryText)
-							Text(LocalShellProfile.default.detailText)
-								.font(.caption)
-								.foregroundStyle(theme.secondaryText)
-						}
-						.frame(maxWidth: .infinity, alignment: .leading)
-						.padding(.vertical, 6)
+		SessionListContent(
+			variant: .savedSessions,
+			onOpenSession: { session in
+				coordinator.openTab(for: session)
+			},
+			onOpenLocalShell: {
+				#if os(macOS)
+					coordinator.openLocalShellTab()
+				#endif
+			},
+			onOpenNewSession: {
+				coordinator.openNewTabUI()
+			},
+			onAppearWithSessions: { sessions in
+				#if os(iOS)
+					if sessions.isEmpty {
+						coordinator.isShowingConnectView = true
 					}
-					.listRowBackground(theme.cardBackground)
-				}
-			#endif
-
-			if groupedSessions.isEmpty {
-				Section("Saved Sessions") {
-					EmptyView()
-				}
-			} else {
-				ForEach(groupedSessions) { group in
-					Section(group.title) {
-						ForEach(group.sessions, id: \.id) { session in
-							sessionRow(for: session)
-						}
-						.onDelete { offsets in
-							deleteSessions(at: offsets, from: group.sessions)
-						}
-					}
-				}
+				#endif
 			}
-		}
-		.scrollContentBackground(.hidden)
-		.background(theme.background)
+		)
 		.navigationTitle("Teletype")
 		.accessibilityIdentifier("screen.savedSessions")
 		.toolbar {
@@ -99,66 +65,6 @@ struct SessionListView: View {
 				}
 			#endif
 		}
-		.onAppear {
-			#if os(iOS)
-				if sessions.isEmpty {
-					coordinator.isShowingConnectView = true
-				}
-			#endif
-		}
-	}
-
-	@ViewBuilder
-	private func sessionRow(for session: Session) -> some View {
-		Button {
-			coordinator.openTab(for: session)
-		} label: {
-			HStack(alignment: .top, spacing: 12) {
-				VStack(alignment: .leading, spacing: 5) {
-					Text(session.listTitle)
-						.font(.headline)
-						.foregroundStyle(theme.primaryText)
-						.lineLimit(1)
-					if let subtitle = session.listSubtitle {
-						Text(subtitle)
-							.font(.subheadline)
-							.foregroundStyle(theme.secondaryText)
-							.lineLimit(1)
-					}
-					HStack(spacing: 8) {
-						if let lastConnectedAt = session.lastConnectedAt {
-							Text(lastConnectedAt, style: .relative)
-								.monospacedDigit()
-						} else {
-							Text("Never connected")
-						}
-					}
-					.font(.caption)
-					.foregroundStyle(theme.tertiaryText)
-				}
-				Spacer(minLength: 0)
-			}
-			.frame(maxWidth: .infinity, alignment: .leading)
-			.padding(.vertical, 6)
-		}
-		.listRowBackground(theme.cardBackground)
-	}
-
-	@MainActor
-	private func deleteSessions(at offsets: IndexSet, from groupSessions: [Session]) {
-		let sessionsToDelete = offsets.map { groupSessions[$0] }
-		guard !sessionsToDelete.isEmpty else { return }
-
-		do {
-			try dbContext.writer.write { db in
-				for session in sessionsToDelete {
-					try session.delete(db)
-				}
-			}
-			sessionsToDelete.forEach(Keychain.removePassword)
-		} catch {
-			print("[DB] failed to delete sessions: \(error)")
-		}
 	}
 }
 
@@ -184,7 +90,7 @@ struct SessionListView: View {
 			port: 22,
 			autoconnect: true
 		)
-		secondProdSession.createdAt = Date.now.addingTimeInterval(-3_600)
+		secondProdSession.createdAt = Date.now.addingTimeInterval(-3600)
 		try secondProdSession.save(db)
 
 		var customPortSession = Session(
@@ -194,7 +100,7 @@ struct SessionListView: View {
 			port: 2222,
 			autoconnect: false
 		)
-		customPortSession.createdAt = Date.now.addingTimeInterval(-86_400)
+		customPortSession.createdAt = Date.now.addingTimeInterval(-86400)
 		try customPortSession.save(db)
 	}
 

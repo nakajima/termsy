@@ -57,16 +57,13 @@ struct ContentView: View {
 					.environment(coordinator)
 			}
 		}
-		.overlay {
-			if !coordinator.tabs.isEmpty, coordinator.isShowingSessionPicker {
-				SessionPickerPanelOverlay()
-					.transition(.move(edge: .trailing).combined(with: .opacity))
-			}
-		}
-		.animation(.easeInOut(duration: 0.2), value: coordinator.isShowingSessionPicker)
 		.environment(coordinator)
 		.onAppear {
 			coordinator.configureDatabaseContext(dbContext)
+		}
+		.sheet(isPresented: $coordinator.isShowingSessionPicker) {
+			SessionPickerView()
+				.environment(coordinator)
 		}
 		.sheet(isPresented: $coordinator.isShowingConnectView) {
 			NavigationStack {
@@ -202,7 +199,6 @@ struct ContentView: View {
 			announceScreenshotReadiness(readinessLabel)
 		#endif
 	}
-
 }
 
 // MARK: - Terminal Container

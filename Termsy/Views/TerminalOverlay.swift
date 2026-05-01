@@ -38,34 +38,6 @@ struct TerminalOverlay: View {
 				EmptyView()
 			}
 
-			if case let .failed(error) = tab.overlayState {
-				VStack(spacing: 12) {
-					Image(systemName: "xmark.circle")
-						.font(.largeTitle)
-						.foregroundStyle(theme.error)
-					Text(tab.failureTitle)
-						.font(.headline)
-						.foregroundStyle(theme.primaryText)
-					Text(error)
-						.font(.caption)
-						.foregroundStyle(theme.secondaryText)
-						.multilineTextAlignment(.center)
-					Button {
-						onReconnect()
-					} label: {
-						Label("Reconnect", systemImage: "arrow.clockwise")
-							.frame(maxWidth: .infinity)
-					}
-					.buttonStyle(.borderedProminent)
-					.tint(theme.accent)
-				}
-				.padding()
-				.background(theme.cardBackground, in: .rect(cornerRadius: 12))
-				.overlay {
-					RoundedRectangle(cornerRadius: 12)
-						.stroke(theme.divider, lineWidth: 1)
-				}
-			}
 		}
 		.safeAreaInset(edge: .bottom) {
 			if showsConnectionLogToggle {
@@ -175,7 +147,7 @@ private struct ConnectionLogPanel: View {
 	.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 }
 
-#Preview("Terminal Overlay Error") {
+#Preview("Terminal Overlay Connection Log") {
 	let tab: TerminalTab = {
 		var session = Session(
 			hostname: "example.local",

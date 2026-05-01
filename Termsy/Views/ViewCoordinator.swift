@@ -583,19 +583,16 @@ class TerminalTab: Identifiable {
 	}
 
 	var overlayState: OverlayState {
+		if needsPassword {
+			return .awaitingPassword
+		}
 		if let restorationPresentationMode {
 			return .restoring(restorationPresentationMode)
 		}
 		if let restorationMode {
 			return .restoring(restorationMode)
 		}
-		if let connectionError {
-			return .failed(connectionError)
-		}
-		if needsPassword {
-			return .awaitingPassword
-		}
-		if !isConnected {
+		if !isConnected, connectionError == nil {
 			return .connecting
 		}
 		return .connected
@@ -603,10 +600,10 @@ class TerminalTab: Identifiable {
 
 	var showsOverlay: Bool {
 		switch overlayState {
-		case .connected:
-			return false
-		case .connecting, .awaitingPassword, .failed, .restoring:
+		case .awaitingPassword:
 			return true
+		case .connected, .connecting, .failed, .restoring:
+			return false
 		}
 	}
 
@@ -655,6 +652,15 @@ class TerminalTab: Identifiable {
 		return isConnected || (connectionError == nil && !needsPassword)
 	}
 
+	private var shouldDeferRemoteConnectionUntilAppActive: Bool {
+		guard case .remote = endpoint else { return false }
+		#if canImport(UIKit) && !os(macOS)
+			return !ApplicationActivity.isActive
+		#else
+			return false
+		#endif
+	}
+
 	var hasRecoverableBackgroundDisconnectError: Bool {
 		guard case .remote = endpoint else { return false }
 		guard !isConnected, wasConnectedWhenAppResignedActive, let connectionError else { return false }
@@ -687,6 +693,10 @@ class TerminalTab: Identifiable {
 			return
 		}
 		guard terminalView.hasAttachedWindow else { return }
+		if shouldDeferRemoteConnectionUntilAppActive {
+			logConnectionEvent("Deferring connection until app becomes active")
+			return
+		}
 		guard !isConnected,
 		      connectionError == nil,
 		      !needsPassword,
@@ -708,13 +718,22 @@ class TerminalTab: Identifiable {
 				try? await Task.sleep(nanoseconds: delay)
 				guard !Task.isCancelled else { return }
 			}
-			await self?.connect()
+			guard let self else { return }
+			if self.shouldDeferRemoteConnectionUntilAppActive {
+				self.logConnectionEvent("Deferred pending connection because app is inactive")
+				return
+			}
+			await self.connect()
 		}
 	}
 
 	func connect() async {
 		if isPassivePreview {
 			renderPendingPreviewIfNeeded()
+			return
+		}
+		if shouldDeferRemoteConnectionUntilAppActive {
+			logConnectionEvent("Connection request deferred because app is inactive")
 			return
 		}
 		connectionError = nil
@@ -779,6 +798,12 @@ class TerminalTab: Identifiable {
 			notifyOverlayStateChanged()
 		} catch {
 			guard self.sshSession === sshSession else { return }
+			if shouldDeferRemoteConnectionUntilAppActive {
+				logConnectionEvent("Attempt \(attempt): connection failed while app inactive; deferring reconnect: \(error)")
+				connectionError = nil
+				notifyOverlayStateChanged()
+				return
+			}
 			finishRestorationPresentation()
 			logConnectionEvent("Attempt \(attempt): connection failed: \(error)")
 			connectionError = "\(error)"
@@ -1129,6 +1154,11 @@ class TerminalTab: Identifiable {
 			ensureConnectionIfNeeded(after: activationReconnectDelayNanoseconds)
 			return
 		}
+		if !isConnected, connectionError == nil, !needsPassword, !connectionIsActive {
+			logConnectionEvent("App became active; resuming deferred connection")
+			ensureConnectionIfNeeded(after: activationReconnectDelayNanoseconds)
+			return
+		}
 		if hasRecoverableBackgroundDisconnectError || (isConnected && !connectionIsActive) {
 			requestReconnect()
 		}
@@ -1153,7 +1183,6 @@ class TerminalTab: Identifiable {
 			beginRestoration(.backgroundReconnect, snapshot: snapshot ?? displaySnapshot)
 			disconnect()
 			pendingAutomaticConnectDelayNanoseconds = activationReconnectDelayNanoseconds
-			resetTerminalView()
 			notifyOverlayStateChanged()
 			ensureConnectionIfNeeded()
 		}
@@ -1169,7 +1198,6 @@ class TerminalTab: Identifiable {
 			beginRestoration(.backgroundReconnect)
 			disconnect()
 			pendingAutomaticConnectDelayNanoseconds = activationReconnectDelayNanoseconds
-			resetTerminalView()
 			notifyOverlayStateChanged()
 			ensureConnectionIfNeeded()
 		}
@@ -1373,7 +1401,6 @@ class TerminalTab: Identifiable {
 				#else
 					beginRestoration(.backgroundReconnect)
 				#endif
-				resetTerminalView()
 				scheduleReconnectAfterBackgroundLoss(
 					logMessage: "Treating clean SSH exit as recoverable after app deactivation"
 				)
@@ -1393,7 +1420,6 @@ class TerminalTab: Identifiable {
 				#else
 					beginRestoration(.backgroundReconnect)
 				#endif
-				resetTerminalView()
 				scheduleReconnectAfterBackgroundLoss(
 					logMessage: "Scheduling automatic reconnect after transport shutdown"
 				)
