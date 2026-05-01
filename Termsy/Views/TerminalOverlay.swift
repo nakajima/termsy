@@ -49,7 +49,7 @@ struct TerminalOverlay: View {
 				.padding(.bottom)
 			}
 		}
-		.allowsHitTesting(!tab.isConnected || tab.connectionError != nil || tab.isRestoring)
+		.allowsHitTesting(tab.needsPassword)
 		.alert("Password Required", isPresented: .init(
 			get: { tab.needsPassword && !tab.isLocalShell },
 			set: { if !$0 { tab.needsPassword = false } }
@@ -92,7 +92,7 @@ struct TerminalOverlay: View {
 
 
 	private var showsConnectionLogToggle: Bool {
-		!tab.isConnected || tab.connectionError != nil || tab.isRestoring
+		tab.needsPassword
 	}
 
 }
