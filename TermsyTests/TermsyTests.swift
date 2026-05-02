@@ -304,6 +304,13 @@ struct TermsyTests {
 		#expect(coordinator.selectedTab?.session?.id == firstSession.id)
 	}
 
+	@Test func remoteStartupCommandDoesNotRunBootstrapShellAsLoginShell() {
+		let command = ShellTitleIntegration.remoteStartupCommand(tmuxSessionName: nil)
+
+		#expect(command.hasPrefix("/bin/sh -c "))
+		#expect(!command.hasPrefix("/bin/sh -lc "))
+	}
+
 	@Test func tmuxNameIsPrimarySavedSessionTitle() {
 		let sessionWithTmux = Session(
 			hostname: "prod.example.com",

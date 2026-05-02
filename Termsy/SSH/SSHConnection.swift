@@ -137,7 +137,9 @@ enum ShellTitleIntegration {
 
 	static func remoteStartupCommand(tmuxSessionName: String?) -> String {
 		let script = remoteBootstrapScript(tmuxSessionName: tmuxSessionName)
-		return "/bin/sh -lc \(shellQuoted(script))"
+		// Keep the bootstrap shell non-login. The real shell below loads profiles;
+		// a login /bin/sh can source bash-oriented profile.d scripts under dash.
+		return "/bin/sh -c \(shellQuoted(script))"
 	}
 
 	private static func prependDataDirectory(_ path: String, to existingValue: String?) -> String {
