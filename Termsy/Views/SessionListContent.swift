@@ -10,6 +10,67 @@ struct SessionsRequest: ValueObservationQueryable {
 	}
 }
 
+private struct DirectSessionTarget: Hashable {
+	let username: String
+	let hostname: String
+	let port: Int
+	let tmuxSessionName: String?
+
+	init?(_ input: String) {
+		let trimmedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !trimmedInput.isEmpty else { return nil }
+		guard let atIndex = trimmedInput.firstIndex(of: "@") else { return nil }
+
+		let username = String(trimmedInput[..<atIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+		var targetText = String(trimmedInput[trimmedInput.index(after: atIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !username.isEmpty, !targetText.isEmpty, !targetText.contains("@") else { return nil }
+
+		let tmuxSessionName: String?
+		if let tmuxSeparator = targetText.firstIndex(of: "#") {
+			let tmuxText = String(targetText[targetText.index(after: tmuxSeparator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+			tmuxSessionName = tmuxText.isEmpty ? nil : tmuxText
+			targetText = String(targetText[..<tmuxSeparator]).trimmingCharacters(in: .whitespacesAndNewlines)
+		} else {
+			tmuxSessionName = nil
+		}
+
+		var hostname = targetText
+		var port = 22
+		if let portSeparator = targetText.lastIndex(of: ":") {
+			let portText = String(targetText[targetText.index(after: portSeparator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+			guard let parsedPort = Int(portText), (1 ... 65535).contains(parsedPort) else { return nil }
+			hostname = String(targetText[..<portSeparator]).trimmingCharacters(in: .whitespacesAndNewlines)
+			port = parsedPort
+		}
+
+		guard !hostname.isEmpty, !hostname.contains(" ") else { return nil }
+		guard !username.contains(" ") else { return nil }
+
+		self.username = username
+		self.hostname = hostname
+		self.port = port
+		self.tmuxSessionName = tmuxSessionName
+	}
+
+	var session: Session {
+		Session(
+			hostname: hostname,
+			username: username,
+			tmuxSessionName: tmuxSessionName,
+			port: port,
+			autoconnect: false
+		)
+	}
+
+	var displayTarget: String {
+		session.displayTarget
+	}
+
+	var normalizedTargetKey: String {
+		session.normalizedTargetKey
+	}
+}
+
 struct SessionListContent: View {
 	enum Variant {
 		case savedSessions
@@ -72,6 +133,7 @@ struct SessionListContent: View {
 
 	private enum ItemID: Hashable {
 		case localShell
+		case directConnection(String)
 		case session(String)
 		case newSession
 	}
@@ -79,7 +141,10 @@ struct SessionListContent: View {
 	@Environment(\.databaseContext) private var dbContext
 	@Environment(\.appTheme) private var theme
 	@Query(SessionsRequest()) private var sessions: [Session]
+	@State private var filterText = ""
+	@State private var directConnectError: String?
 	@State private var selectedItemID: ItemID?
+	@FocusState private var isFilterFocused: Bool
 
 	private let variant: Variant
 	private let isSessionOpen: (Session) -> Bool
@@ -108,15 +173,49 @@ struct SessionListContent: View {
 		self.onAppearWithSessions = onAppearWithSessions
 	}
 
+	private var normalizedFilterText: String {
+		filterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+	}
+
+	private var filteredSessions: [Session] {
+		guard !normalizedFilterText.isEmpty else { return sessions }
+		return sessions.filter { sessionMatchesFilter($0) }
+	}
+
 	private var groupedSessions: [SessionHostGroup] {
-		Session.groupByHost(sessions)
+		Session.groupByHost(filteredSessions)
+	}
+
+	private var parsedDirectTarget: DirectSessionTarget? {
+		DirectSessionTarget(filterText)
+	}
+
+	private var directConnectTarget: DirectSessionTarget? {
+		guard let parsedDirectTarget else { return nil }
+		guard existingSession(for: parsedDirectTarget) == nil else { return nil }
+		return parsedDirectTarget
+	}
+
+	private var shouldShowLocalShellRow: Bool {
+		#if os(macOS)
+			guard !normalizedFilterText.isEmpty else { return true }
+			return "local shell".contains(normalizedFilterText)
+				|| LocalShellProfile.default.detailText.lowercased().contains(normalizedFilterText)
+		#else
+			return false
+		#endif
 	}
 
 	private var visibleItemIDs: [ItemID] {
 		var ids: [ItemID] = []
 		#if os(macOS)
-			ids.append(.localShell)
+			if shouldShowLocalShellRow {
+				ids.append(.localShell)
+			}
 		#endif
+		if let directConnectTarget {
+			ids.append(.directConnection(directConnectTarget.normalizedTargetKey))
+		}
 		for group in groupedSessions {
 			ids.append(contentsOf: group.sessions.map { .session($0.normalizedTargetKey) })
 		}
@@ -129,11 +228,23 @@ struct SessionListContent: View {
 	var body: some View {
 		ScrollViewReader { proxy in
 			List {
+				Section {
+					filterField()
+				}
+
 				#if os(macOS)
-					Section("Local") {
-						localShellRow()
+					if shouldShowLocalShellRow {
+						Section("Local") {
+							localShellRow()
+						}
 					}
 				#endif
+
+				if let directConnectTarget {
+					Section {
+						directConnectionRow(for: directConnectTarget)
+					}
+				}
 
 				if groupedSessions.isEmpty {
 					if variant.showsEmptySavedSessionsSection {
@@ -164,6 +275,7 @@ struct SessionListContent: View {
 			.background(theme.background)
 			.background {
 				SessionListKeyboardHandler(
+					isEnabled: !isFilterFocused,
 					handlesClose: variant.handlesEscape,
 					onMoveSelection: moveSelection,
 					onMovePage: moveSelectionByPage,
@@ -179,6 +291,11 @@ struct SessionListContent: View {
 				ensureValidSelection()
 				scrollSelectionIfNeeded(using: proxy, animated: false)
 			}
+			.onChange(of: filterText, initial: false) { _, _ in
+				directConnectError = nil
+				resetSelectionToFirstItem()
+				scrollSelectionIfNeeded(using: proxy, animated: true)
+			}
 			.onChange(of: visibleItemIDs, initial: false) { _, _ in
 				ensureValidSelection()
 				scrollSelectionIfNeeded(using: proxy, animated: true)
@@ -187,6 +304,62 @@ struct SessionListContent: View {
 				scrollSelectionIfNeeded(using: proxy, animated: true)
 			}
 		}
+	}
+
+	@ViewBuilder
+	private func filterField() -> some View {
+		VStack(alignment: .leading, spacing: 6) {
+			TextField("Filter or connect as user@host[:port][#tmux]", text: $filterText)
+				.textInputAutocapitalization(.never)
+				.autocorrectionDisabled()
+				.submitLabel(.go)
+				.focused($isFilterFocused)
+				.foregroundStyle(theme.primaryText)
+				.accessibilityIdentifier("field.sessionFilter")
+				.onSubmit(submitFilter)
+
+			if let directConnectError {
+				Text(directConnectError)
+					.font(.caption)
+					.foregroundStyle(theme.error)
+			}
+		}
+		.listRowBackground(theme.cardBackground)
+	}
+
+	@ViewBuilder
+	private func directConnectionRow(for target: DirectSessionTarget) -> some View {
+		let itemID = ItemID.directConnection(target.normalizedTargetKey)
+		let isSelected = selectedItemID == itemID
+
+		Button {
+			selectedItemID = itemID
+			connect(to: target)
+		} label: {
+			HStack(alignment: .top, spacing: 12) {
+				Image(systemName: "bolt.fill")
+					.foregroundStyle(theme.accent)
+				VStack(alignment: .leading, spacing: 5) {
+					Text("Connect to \(target.displayTarget)")
+						.font(variant.sessionTitleFont)
+						.foregroundStyle(theme.primaryText)
+						.lineLimit(1)
+					if let tmuxSessionName = target.tmuxSessionName {
+						Text("tmux: \(tmuxSessionName)")
+							.font(variant.sessionSubtitleFont)
+							.foregroundStyle(theme.secondaryText)
+							.lineLimit(1)
+					}
+				}
+				Spacer(minLength: 0)
+			}
+			.frame(maxWidth: .infinity, alignment: .leading)
+			.padding(.vertical, 6)
+			.contentShape(Rectangle())
+		}
+		.buttonStyle(.plain)
+		.listRowBackground(rowBackground(isSelected: isSelected))
+		.id(itemID)
 	}
 
 	#if os(macOS)
@@ -337,6 +510,12 @@ struct SessionListContent: View {
 		switch selectedItemID {
 		case .localShell:
 			onOpenLocalShell()
+		case let .directConnection(key):
+			guard let target = directConnectTarget, target.normalizedTargetKey == key else {
+				ensureValidSelection()
+				return
+			}
+			connect(to: target)
 		case let .session(key):
 			guard let session = sessions.first(where: { $0.normalizedTargetKey == key }) else {
 				ensureValidSelection()
@@ -346,6 +525,20 @@ struct SessionListContent: View {
 		case .newSession:
 			onOpenNewSession()
 		}
+	}
+
+	private func submitFilter() {
+		if let parsedDirectTarget {
+			if let existingSession = existingSession(for: parsedDirectTarget) {
+				onOpenSession(existingSession)
+			} else {
+				connect(to: parsedDirectTarget)
+			}
+			return
+		}
+
+		guard normalizedFilterText.isEmpty || !filteredSessions.isEmpty else { return }
+		activateSelection()
 	}
 
 	private func ensureValidSelection() {
@@ -359,6 +552,10 @@ struct SessionListContent: View {
 		}
 	}
 
+	private func resetSelectionToFirstItem() {
+		selectedItemID = visibleItemIDs.first
+	}
+
 	private func scrollSelectionIfNeeded(using proxy: ScrollViewProxy, animated: Bool) {
 		guard let selectedItemID else { return }
 		let scroll = {
@@ -368,6 +565,45 @@ struct SessionListContent: View {
 			withAnimation(.easeInOut(duration: 0.15), scroll)
 		} else {
 			scroll()
+		}
+	}
+
+	private func existingSession(for target: DirectSessionTarget) -> Session? {
+		sessions.first { $0.normalizedTargetKey == target.normalizedTargetKey }
+	}
+
+	private func sessionMatchesFilter(_ session: Session) -> Bool {
+		let searchableValues = [
+			session.listTitle,
+			session.listSubtitle,
+			session.displayTarget,
+			session.normalizedTargetKey,
+			session.hostname,
+			session.username,
+			session.trimmedTmuxSessionName,
+			String(session.port),
+		]
+		return searchableValues
+			.compactMap { $0?.lowercased() }
+			.contains { $0.contains(normalizedFilterText) }
+	}
+
+	@MainActor
+	private func connect(to target: DirectSessionTarget) {
+		var session = target.session
+
+		do {
+			try dbContext.writer.write { db in
+				if let existingSession = try Session.existing(session, in: db) {
+					session = existingSession
+				} else {
+					try session.save(db)
+				}
+			}
+			directConnectError = nil
+			onOpenSession(session)
+		} catch {
+			directConnectError = error.localizedDescription
 		}
 	}
 
@@ -402,6 +638,7 @@ private extension View {
 
 #if canImport(UIKit)
 	private struct SessionListKeyboardHandler: UIViewRepresentable {
+		let isEnabled: Bool
 		let handlesClose: Bool
 		let onMoveSelection: (Int) -> Void
 		let onMovePage: (Int) -> Void
@@ -416,16 +653,22 @@ private extension View {
 		}
 
 		func updateUIView(_ uiView: KeyCommandView, context _: Context) {
+			uiView.acceptsKeyCommands = isEnabled
 			uiView.handlesClose = handlesClose
 			uiView.onMoveSelection = onMoveSelection
 			uiView.onMovePage = onMovePage
 			uiView.onMoveToBoundary = onMoveToBoundary
 			uiView.onActivateSelection = onActivateSelection
 			uiView.onClose = onClose
-			uiView.activateIfPossible()
+			if isEnabled {
+				uiView.activateIfPossible()
+			} else {
+				uiView.deactivateIfNeeded()
+			}
 		}
 
 		final class KeyCommandView: UIView {
+			var acceptsKeyCommands = true
 			var handlesClose = false
 			var onMoveSelection: ((Int) -> Void)?
 			var onMovePage: ((Int) -> Void)?
@@ -436,6 +679,7 @@ private extension View {
 			override var canBecomeFirstResponder: Bool { true }
 
 			override var keyCommands: [UIKeyCommand]? {
+				guard acceptsKeyCommands else { return nil }
 				var commands = [
 					command(input: UIKeyCommand.inputUpArrow, modifiers: [], action: #selector(moveUp), title: "Move Selection Up"),
 					command(input: UIKeyCommand.inputDownArrow, modifiers: [], action: #selector(moveDown), title: "Move Selection Down"),
@@ -468,10 +712,16 @@ private extension View {
 			}
 
 			func activateIfPossible() {
-				guard window != nil else { return }
+				guard acceptsKeyCommands, window != nil else { return }
 				DispatchQueue.main.async { [weak self] in
-					guard let self, self.window != nil else { return }
+					guard let self, self.acceptsKeyCommands, self.window != nil else { return }
 					_ = self.becomeFirstResponder()
+				}
+			}
+
+			func deactivateIfNeeded() {
+				if isFirstResponder {
+					resignFirstResponder()
 				}
 			}
 
@@ -490,6 +740,7 @@ private extension View {
 	import AppKit
 
 	private struct SessionListKeyboardHandler: NSViewRepresentable {
+		let isEnabled: Bool
 		let handlesClose: Bool
 		let onMoveSelection: (Int) -> Void
 		let onMovePage: (Int) -> Void
@@ -502,16 +753,22 @@ private extension View {
 		}
 
 		func updateNSView(_ nsView: KeyCommandView, context _: Context) {
+			nsView.acceptsKeyCommands = isEnabled
 			nsView.handlesClose = handlesClose
 			nsView.onMoveSelection = onMoveSelection
 			nsView.onMovePage = onMovePage
 			nsView.onMoveToBoundary = onMoveToBoundary
 			nsView.onActivateSelection = onActivateSelection
 			nsView.onClose = onClose
-			nsView.activateIfPossible()
+			if isEnabled {
+				nsView.activateIfPossible()
+			} else {
+				nsView.deactivateIfNeeded()
+			}
 		}
 
 		final class KeyCommandView: NSView {
+			var acceptsKeyCommands = true
 			var handlesClose = false
 			var onMoveSelection: ((Int) -> Void)?
 			var onMovePage: ((Int) -> Void)?
@@ -527,14 +784,23 @@ private extension View {
 			}
 
 			func activateIfPossible() {
-				guard let window else { return }
+				guard acceptsKeyCommands, let window else { return }
 				DispatchQueue.main.async { [weak self, weak window] in
-					guard let self, let window, self.window === window else { return }
+					guard let self, self.acceptsKeyCommands, let window, self.window === window else { return }
 					window.makeFirstResponder(self)
 				}
 			}
 
+			func deactivateIfNeeded() {
+				guard window?.firstResponder === self else { return }
+				window?.makeFirstResponder(nil)
+			}
+
 			override func keyDown(with event: NSEvent) {
+				guard acceptsKeyCommands else {
+					nextResponder?.keyDown(with: event)
+					return
+				}
 				guard !handle(event) else { return }
 				nextResponder?.keyDown(with: event)
 			}
@@ -597,6 +863,7 @@ private extension View {
 	}
 #else
 	private struct SessionListKeyboardHandler: View {
+		let isEnabled: Bool
 		let handlesClose: Bool
 		let onMoveSelection: (Int) -> Void
 		let onMovePage: (Int) -> Void

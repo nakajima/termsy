@@ -35,6 +35,22 @@ final class TermsyUITests: XCTestCase {
 		try captureScreenshot(for: .settings)
 	}
 
+	@MainActor
+	func testDirectSessionInputOpensTerminal() throws {
+		let app = XCUIApplication()
+		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.savedSessions.scenario)
+		XCUIDevice.shared.orientation = .landscapeLeft
+		app.launch()
+		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not reach foreground")
+
+		let filterField = app.textFields["field.sessionFilter"]
+		XCTAssertTrue(filterField.waitForExistence(timeout: 10), "Session filter field did not appear")
+		filterField.tap()
+		filterField.typeText("fresh@example.com:2222#work\n")
+
+		XCTAssertTrue(app.otherElements["screen.terminal"].waitForExistence(timeout: 10), "Direct session input did not open a terminal")
+	}
+
 	private enum ScreenshotPlan {
 		case savedSessions
 		case newSession
