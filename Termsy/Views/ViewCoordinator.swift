@@ -454,6 +454,7 @@ class TerminalTab: Identifiable {
 		get { connectionState == .connected }
 		set { connectionState = newValue ? .connected : .idle }
 	}
+
 	var needsPassword: Bool {
 		get { connectionState == .waitingForPassword }
 		set {
@@ -464,6 +465,7 @@ class TerminalTab: Identifiable {
 			}
 		}
 	}
+
 	var restorationMode: RestorationMode?
 	var onRequestClose: (() -> Void)?
 	var onRequestNewTab: (() -> Void)?
@@ -603,18 +605,45 @@ class TerminalTab: Identifiable {
 	}
 
 	var overlayState: OverlayState {
-		needsPassword ? .awaitingPassword : .connected
+		if let restorationPresentationMode {
+			return .restoring(restorationPresentationMode)
+		}
+		if needsPassword {
+			return .awaitingPassword
+		}
+		if let connectionError {
+			return .failed(connectionError)
+		}
+
+		switch connectionState {
+		case .connecting:
+			return .connecting
+		case .idle, .connected, .closedByUser:
+			return .connected
+		case .waitingForPassword:
+			return .awaitingPassword
+		}
 	}
 
 	var showsOverlay: Bool {
-		needsPassword
+		switch overlayState {
+		case .connected, .failed:
+			false
+		case .connecting, .awaitingPassword, .restoring:
+			true
+		}
 	}
 
-	var isRestoring: Bool { false }
+	var isRestoring: Bool { restorationPresentationMode != nil }
 
-	var showsConnectingOverlay: Bool { false }
+	var showsConnectingOverlay: Bool {
+		if case .connecting = overlayState { return true }
+		return false
+	}
 
-	var showsRestoringProgress: Bool { false }
+	var showsRestoringProgress: Bool {
+		restorationPresentationMode?.showsProgress ?? false
+	}
 
 	var connectionIsActive: Bool {
 		if isPassivePreview {
@@ -657,14 +686,16 @@ class TerminalTab: Identifiable {
 		ensureConnectionIfNeeded()
 	}
 
-	func retryConnection() {
+	func retryConnection(preservingRestoration: Bool = false) {
 		guard !isPassivePreview else { return }
 		logConnectionEvent("Reconnect requested")
 		connectTask?.cancel()
 		connectTask = nil
 		scheduledConnectionTask?.cancel()
 		scheduledConnectionTask = nil
-		clearRestorationState()
+		if !preservingRestoration {
+			clearRestorationState()
+		}
 		wantsConnection = true
 		connectionError = nil
 		if connectionState == .connected || connectionState == .connecting {
@@ -767,6 +798,7 @@ class TerminalTab: Identifiable {
 		)
 		let sshSession = resetSSHSessionForNewConnection(attempt: attempt)
 		let tmuxSessionName = configuredTmuxSessionName(for: session)
+		let initialWorkingDirectory = session.trimmedInitialWorkingDirectory
 		let startupModeMessage = if let tmuxSessionName {
 			"Attempt \(attempt): starting remote session directly in tmux \(tmuxSessionName)"
 		} else {
@@ -774,13 +806,17 @@ class TerminalTab: Identifiable {
 		}
 		logConnectionEvent("Attempt \(attempt): connecting to \(session.username)@\(session.hostname):\(session.port)")
 		logConnectionEvent(startupModeMessage)
+		if let initialWorkingDirectory {
+			logConnectionEvent("Attempt \(attempt): starting in \(initialWorkingDirectory)")
+		}
 		do {
 			try await sshSession.connect(
 				host: session.hostname,
 				port: session.port,
 				username: session.username,
 				password: keychainPassword,
-				tmuxSessionName: tmuxSessionName
+				tmuxSessionName: tmuxSessionName,
+				initialWorkingDirectory: initialWorkingDirectory
 			)
 			guard !Task.isCancelled, self.sshSession === sshSession else {
 				logConnectionEvent("Attempt \(attempt): ignoring stale successful connection")
@@ -868,6 +904,10 @@ class TerminalTab: Identifiable {
 
 	private func clearRestorationState() {
 		restorationMode = nil
+		restorationPresentationMode = nil
+		#if canImport(UIKit)
+			restorationSnapshot = nil
+		#endif
 		notifyOverlayStateChanged()
 	}
 
@@ -927,6 +967,7 @@ class TerminalTab: Identifiable {
 		let attempt = remoteConnectAttempt
 		let sshSession = resetSSHSessionForNewConnection(attempt: attempt)
 		let tmuxSessionName = configuredTmuxSessionName(for: session)
+		let initialWorkingDirectory = session.trimmedInitialWorkingDirectory
 		let startupModeMessage = if let tmuxSessionName {
 			"Attempt \(attempt): starting remote session directly in tmux \(tmuxSessionName)"
 		} else {
@@ -934,13 +975,17 @@ class TerminalTab: Identifiable {
 		}
 		logConnectionEvent("Attempt \(attempt): retrying with password for \(session.username)@\(session.hostname):\(session.port)")
 		logConnectionEvent(startupModeMessage)
+		if let initialWorkingDirectory {
+			logConnectionEvent("Attempt \(attempt): starting in \(initialWorkingDirectory)")
+		}
 		do {
 			try await sshSession.connect(
 				host: session.hostname,
 				port: session.port,
 				username: session.username,
 				password: password,
-				tmuxSessionName: tmuxSessionName
+				tmuxSessionName: tmuxSessionName,
+				initialWorkingDirectory: initialWorkingDirectory
 			)
 			guard !Task.isCancelled, self.sshSession === sshSession else {
 				logConnectionEvent("Attempt \(attempt): ignoring stale successful password retry")
@@ -1177,12 +1222,24 @@ class TerminalTab: Identifiable {
 	func clearAppInactiveState() {}
 
 	#if canImport(UIKit)
-		func prepareForReconnectAfterBackgroundLoss(snapshot _: UIImage? = nil) {
-			retryConnection()
+		func prepareForReconnectAfterBackgroundLoss(snapshot: UIImage? = nil) {
+			guard case .remote = endpoint, !isPassivePreview else {
+				retryConnection()
+				return
+			}
+			beginRestoration(.backgroundReconnect, snapshot: snapshot ?? restorationSnapshot ?? terminalView.captureSnapshot())
+			resetTerminalView()
+			retryConnection(preservingRestoration: true)
 		}
 	#else
 		func prepareForReconnectAfterBackgroundLoss() {
-			retryConnection()
+			guard case .remote = endpoint, !isPassivePreview else {
+				retryConnection()
+				return
+			}
+			beginRestoration(.backgroundReconnect)
+			resetTerminalView()
+			retryConnection(preservingRestoration: true)
 		}
 	#endif
 
@@ -1378,7 +1435,11 @@ class TerminalTab: Identifiable {
 			} else {
 				wantsConnection = true
 				connectionState = .idle
-				notifyOverlayStateChanged()
+				#if canImport(UIKit)
+					prepareForReconnectAfterBackgroundLoss(snapshot: restorationSnapshot)
+				#else
+					prepareForReconnectAfterBackgroundLoss()
+				#endif
 			}
 		case let .error(message):
 			logConnectionEvent("SSH session closed with error: \(message)")

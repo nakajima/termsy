@@ -15,6 +15,7 @@ struct Session: Codable, FetchableRecord, MutablePersistableRecord, Identifiable
 	var hostname: String
 	var username: String
 	var tmuxSessionName: String?
+	var initialWorkingDirectory: String?
 	var customTitle: String?
 	var tabOrder: Int?
 	var isOpen: Bool = false
@@ -34,11 +35,16 @@ struct SessionHostGroup: Identifiable, Equatable {
 }
 
 extension Session {
+	mutating func didInsert(_ inserted: InsertionSuccess) {
+		id = inserted.rowID
+	}
+
 	enum Columns {
 		static let id = Column(CodingKeys.id)
 		static let hostname = Column(CodingKeys.hostname)
 		static let username = Column(CodingKeys.username)
 		static let tmuxSessionName = Column(CodingKeys.tmuxSessionName)
+		static let initialWorkingDirectory = Column(CodingKeys.initialWorkingDirectory)
 		static let customTitle = Column(CodingKeys.customTitle)
 		static let tabOrder = Column(CodingKeys.tabOrder)
 		static let isOpen = Column(CodingKeys.isOpen)
@@ -50,14 +56,22 @@ extension Session {
 	}
 
 	init(
-		hostname: String, username: String, tmuxSessionName: String?, port: Int, autoconnect: Bool,
-		customTitle: String? = nil, tabOrder: Int? = nil, isOpen: Bool = false
+		hostname: String,
+		username: String,
+		tmuxSessionName: String?,
+		initialWorkingDirectory: String? = nil,
+		port: Int,
+		autoconnect: Bool,
+		customTitle: String? = nil,
+		tabOrder: Int? = nil,
+		isOpen: Bool = false
 	) {
 		let now = Date()
 		self.id = nil
 		self.hostname = hostname
 		self.username = username
 		self.tmuxSessionName = tmuxSessionName
+		self.initialWorkingDirectory = initialWorkingDirectory
 		self.customTitle = customTitle
 		self.tabOrder = tabOrder
 		self.isOpen = isOpen
@@ -132,13 +146,25 @@ extension Session {
 		return trimmed.isEmpty ? nil : trimmed
 	}
 
+	var trimmedInitialWorkingDirectory: String? {
+		guard let initialWorkingDirectory else { return nil }
+		let trimmed = initialWorkingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+		return trimmed.isEmpty ? nil : trimmed
+	}
+
 	var listTitle: String {
 		trimmedTmuxSessionName ?? trimmedCustomTitle ?? displayTarget
 	}
 
 	var listSubtitle: String? {
-		guard trimmedTmuxSessionName != nil || trimmedCustomTitle != nil else { return nil }
-		return displayTarget
+		var parts: [String] = []
+		if trimmedTmuxSessionName != nil || trimmedCustomTitle != nil {
+			parts.append(displayTarget)
+		}
+		if let trimmedInitialWorkingDirectory {
+			parts.append(trimmedInitialWorkingDirectory)
+		}
+		return parts.isEmpty ? nil : parts.joined(separator: " • ")
 	}
 
 	var displayTarget: String {
@@ -148,6 +174,8 @@ extension Session {
 	}
 
 	var normalizedTargetKey: String {
-		"\(normalizedUsername)@\(normalizedHostname):\(port)#\(normalizedTmuxSessionName)"
+		let baseKey = "\(normalizedUsername)@\(normalizedHostname):\(port)#\(normalizedTmuxSessionName)"
+		guard let trimmedInitialWorkingDirectory else { return baseKey }
+		return "\(baseKey)@cwd:\(trimmedInitialWorkingDirectory)"
 	}
 }

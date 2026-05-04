@@ -45,10 +45,45 @@ final class TermsyUITests: XCTestCase {
 
 		let filterField = app.textFields["field.sessionFilter"]
 		XCTAssertTrue(filterField.waitForExistence(timeout: 10), "Session filter field did not appear")
-		filterField.tap()
-		filterField.typeText("fresh@example.com:2222#work\n")
+		filterField.typeText("fresh@example.com:pwd#work -2222\n")
 
 		XCTAssertTrue(app.otherElements["screen.terminal"].waitForExistence(timeout: 10), "Direct session input did not open a terminal")
+	}
+
+	@MainActor
+	func testSessionFilterControlNAndControlPMoveSelection() throws {
+		let app = XCUIApplication()
+		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.savedSessions.scenario)
+		XCUIDevice.shared.orientation = .landscapeLeft
+		app.launch()
+		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not reach foreground")
+
+		let filterField = app.textFields["field.sessionFilter"]
+		let firstRow = app.buttons["row.session.root@pimux:22#-"]
+		let secondRow = app.buttons["row.session.nethack@alt.org:22#-"]
+		XCTAssertTrue(filterField.waitForExistence(timeout: 10), "Session filter field did not appear")
+		XCTAssertTrue(firstRow.waitForExistence(timeout: 10), "First saved session row did not appear")
+		XCTAssertTrue(secondRow.waitForExistence(timeout: 10), "Second saved session row did not appear")
+
+		waitForSelected(firstRow)
+
+		filterField.typeKey("n", modifierFlags: .control)
+		waitForSelected(secondRow)
+
+		filterField.typeKey("p", modifierFlags: .control)
+		waitForSelected(firstRow)
+	}
+
+	private func waitForSelected(
+		_ element: XCUIElement,
+		timeout: TimeInterval = 5,
+		file: StaticString = #filePath,
+		line: UInt = #line
+	) {
+		let predicate = NSPredicate(format: "value == %@", "selected")
+		let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+		let result = XCTWaiter.wait(for: [expectation], timeout: timeout)
+		XCTAssertEqual(result, .completed, "Element did not become selected", file: file, line: line)
 	}
 
 	private enum ScreenshotPlan {

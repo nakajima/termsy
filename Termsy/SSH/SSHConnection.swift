@@ -135,8 +135,11 @@ enum ShellTitleIntegration {
 		}
 	}
 
-	static func remoteStartupCommand(tmuxSessionName: String?) -> String {
-		let script = remoteBootstrapScript(tmuxSessionName: tmuxSessionName)
+	static func remoteStartupCommand(tmuxSessionName: String?, initialWorkingDirectory: String?) -> String {
+		let script = remoteBootstrapScript(
+			tmuxSessionName: tmuxSessionName,
+			initialWorkingDirectory: initialWorkingDirectory
+		)
 		// Keep the bootstrap shell non-login. The real shell below loads profiles;
 		// a login /bin/sh can source bash-oriented profile.d scripts under dash.
 		return "/bin/sh -c \(shellQuoted(script))"
@@ -399,7 +402,7 @@ enum ShellTitleIntegration {
 	_termsy_prompt_title
 	"""#
 
-	private static func remoteBootstrapScript(tmuxSessionName: String?) -> String {
+	private static func remoteBootstrapScript(tmuxSessionName: String?, initialWorkingDirectory: String?) -> String {
 		let termProgramVersionExport = if termProgramVersion.isEmpty {
 			""
 		} else {
@@ -431,6 +434,15 @@ enum ShellTitleIntegration {
 			""
 		}
 
+		let initialWorkingDirectoryExport = if let initialWorkingDirectory = initialWorkingDirectory?
+			.trimmingCharacters(in: .whitespacesAndNewlines),
+			!initialWorkingDirectory.isEmpty
+		{
+			"export TERMSY_INITIAL_WORKING_DIRECTORY=\(shellQuoted(initialWorkingDirectory))\n"
+		} else {
+			""
+		}
+
 		let cacheRootScript = #"""
 		shell_path=${SHELL:-}
 		if [ -z "$shell_path" ] && [ -n "${USER:-}" ] && [ -r /etc/passwd ]; then
@@ -449,7 +461,22 @@ enum ShellTitleIntegration {
 		cache_root="$cache_root/termsy-shell-title"
 		export TERM_PROGRAM=ghostty
 		export COLORTERM=truecolor
-		"""# + termProgramVersionExport + tmuxStartupExport
+		"""# + termProgramVersionExport + tmuxStartupExport + initialWorkingDirectoryExport + #"""
+		if [ -n "${TERMSY_INITIAL_WORKING_DIRECTORY:-}" ]; then
+		  termsy_initial_working_directory=$TERMSY_INITIAL_WORKING_DIRECTORY
+		  unset TERMSY_INITIAL_WORKING_DIRECTORY
+		  case "$termsy_initial_working_directory" in
+		    "~")
+		      [ -z "${HOME:-}" ] || termsy_initial_working_directory=$HOME
+		      ;;
+		    "~/"*)
+		      [ -z "${HOME:-}" ] || termsy_initial_working_directory="$HOME/${termsy_initial_working_directory#~/}"
+		      ;;
+		  esac
+		  cd "$termsy_initial_working_directory" 2>/dev/null || true
+		  unset termsy_initial_working_directory
+		fi
+		"""#
 
 		return """
 		\(cacheRootScript)

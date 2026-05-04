@@ -60,6 +60,12 @@ struct DB {
 			}
 		}
 
+		migrator.registerMigration("AddSessionInitialWorkingDirectory") { db in
+			try db.alter(table: "session") { t in
+				t.add(column: "initialWorkingDirectory", .text)
+			}
+		}
+
 		try migrator.migrate(queue)
 	}
 }

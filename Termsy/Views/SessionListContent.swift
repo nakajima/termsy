@@ -10,19 +10,48 @@ struct SessionsRequest: ValueObservationQueryable {
 	}
 }
 
-private struct DirectSessionTarget: Hashable {
+struct DirectSessionTarget: Hashable {
 	let username: String
 	let hostname: String
+	let initialWorkingDirectory: String?
 	let port: Int
 	let tmuxSessionName: String?
 
 	init?(_ input: String) {
 		let trimmedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
 		guard !trimmedInput.isEmpty else { return nil }
-		guard let atIndex = trimmedInput.firstIndex(of: "@") else { return nil }
 
-		let username = String(trimmedInput[..<atIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-		var targetText = String(trimmedInput[trimmedInput.index(after: atIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+		var tokens = trimmedInput.split(whereSeparator: \.isWhitespace).map(String.init)
+		guard var targetText = tokens.first else { return nil }
+		tokens.removeFirst()
+
+		var port = 22
+		var hasExplicitPort = false
+		var tokenIndex = 0
+		while tokenIndex < tokens.count {
+			let token = tokens[tokenIndex]
+			if token == "-p" {
+				guard tokenIndex + 1 < tokens.count, let parsedPort = Self.parsePort(tokens[tokenIndex + 1]) else { return nil }
+				port = parsedPort
+				hasExplicitPort = true
+				tokenIndex += 2
+			} else if token.hasPrefix("-p"), let parsedPort = Self.parsePort(String(token.dropFirst(2))) {
+				port = parsedPort
+				hasExplicitPort = true
+				tokenIndex += 1
+			} else if token.hasPrefix("-"), let parsedPort = Self.parsePort(String(token.dropFirst())) {
+				port = parsedPort
+				hasExplicitPort = true
+				tokenIndex += 1
+			} else {
+				return nil
+			}
+		}
+
+		guard let atIndex = targetText.firstIndex(of: "@") else { return nil }
+
+		let username = String(targetText[..<atIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+		targetText = String(targetText[targetText.index(after: atIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
 		guard !username.isEmpty, !targetText.isEmpty, !targetText.contains("@") else { return nil }
 
 		let tmuxSessionName: String?
@@ -35,19 +64,25 @@ private struct DirectSessionTarget: Hashable {
 		}
 
 		var hostname = targetText
-		var port = 22
-		if let portSeparator = targetText.lastIndex(of: ":") {
-			let portText = String(targetText[targetText.index(after: portSeparator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-			guard let parsedPort = Int(portText), (1 ... 65535).contains(parsedPort) else { return nil }
-			hostname = String(targetText[..<portSeparator]).trimmingCharacters(in: .whitespacesAndNewlines)
-			port = parsedPort
+		var initialWorkingDirectory: String?
+		if let directorySeparator = targetText.firstIndex(of: ":") {
+			let suffix = String(targetText[targetText.index(after: directorySeparator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+			guard !suffix.isEmpty else { return nil }
+			hostname = String(targetText[..<directorySeparator]).trimmingCharacters(in: .whitespacesAndNewlines)
+			if !hasExplicitPort, let legacyPort = Self.parsePort(suffix) {
+				port = legacyPort
+			} else {
+				initialWorkingDirectory = suffix
+			}
 		}
 
 		guard !hostname.isEmpty, !hostname.contains(" ") else { return nil }
 		guard !username.contains(" ") else { return nil }
+		guard initialWorkingDirectory?.contains(" ") != true else { return nil }
 
 		self.username = username
 		self.hostname = hostname
+		self.initialWorkingDirectory = initialWorkingDirectory
 		self.port = port
 		self.tmuxSessionName = tmuxSessionName
 	}
@@ -57,6 +92,7 @@ private struct DirectSessionTarget: Hashable {
 			hostname: hostname,
 			username: username,
 			tmuxSessionName: tmuxSessionName,
+			initialWorkingDirectory: initialWorkingDirectory,
 			port: port,
 			autoconnect: false
 		)
@@ -68,6 +104,11 @@ private struct DirectSessionTarget: Hashable {
 
 	var normalizedTargetKey: String {
 		session.normalizedTargetKey
+	}
+
+	private static func parsePort(_ text: String) -> Int? {
+		guard let port = Int(text), (1 ... 65535).contains(port) else { return nil }
+		return port
 	}
 }
 
@@ -144,7 +185,7 @@ struct SessionListContent: View {
 	@State private var filterText = ""
 	@State private var directConnectError: String?
 	@State private var selectedItemID: ItemID?
-	@FocusState private var isFilterFocused: Bool
+	@State private var isFilterFocused = true
 
 	private let variant: Variant
 	private let isSessionOpen: (Session) -> Bool
@@ -154,6 +195,10 @@ struct SessionListContent: View {
 	private let onClose: () -> Void
 	private let onAppearWithSessions: ([Session]) -> Void
 	private let selectionPageJump = 8
+	private let rowHorizontalSpacing: CGFloat = 8
+	private let rowTextSpacing: CGFloat = 2
+	private let rowVerticalPadding: CGFloat = 2
+	private let denseRowInsets = EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16)
 
 	init(
 		variant: Variant,
@@ -290,6 +335,9 @@ struct SessionListContent: View {
 				onAppearWithSessions(sessions)
 				ensureValidSelection()
 				scrollSelectionIfNeeded(using: proxy, animated: false)
+				DispatchQueue.main.async {
+					isFilterFocused = true
+				}
 			}
 			.onChange(of: filterText, initial: false) { _, _ in
 				directConnectError = nil
@@ -308,15 +356,17 @@ struct SessionListContent: View {
 
 	@ViewBuilder
 	private func filterField() -> some View {
-		VStack(alignment: .leading, spacing: 6) {
-			TextField("Filter or connect as user@host[:port][#tmux]", text: $filterText)
-				.textInputAutocapitalization(.never)
-				.autocorrectionDisabled()
-				.submitLabel(.go)
-				.focused($isFilterFocused)
-				.foregroundStyle(theme.primaryText)
-				.accessibilityIdentifier("field.sessionFilter")
-				.onSubmit(submitFilter)
+		VStack(alignment: .leading, spacing: 4) {
+			SessionFilterTextField(
+				text: $filterText,
+				isFocused: $isFilterFocused,
+				placeholder: "Filter or connect as user@host[:dir][#tmux] [-2222]",
+				textColor: theme.primaryTextUIColor,
+				onSubmit: submitFilter,
+				onMoveSelection: moveSelection
+			)
+			.frame(minHeight: 24)
+			.accessibilityIdentifier("field.sessionFilter")
 
 			if let directConnectError {
 				Text(directConnectError)
@@ -324,6 +374,7 @@ struct SessionListContent: View {
 					.foregroundStyle(theme.error)
 			}
 		}
+		.listRowInsets(denseRowInsets)
 		.listRowBackground(theme.cardBackground)
 	}
 
@@ -336,14 +387,20 @@ struct SessionListContent: View {
 			selectedItemID = itemID
 			connect(to: target)
 		} label: {
-			HStack(alignment: .top, spacing: 12) {
+			HStack(alignment: .top, spacing: rowHorizontalSpacing) {
 				Image(systemName: "bolt.fill")
 					.foregroundStyle(theme.accent)
-				VStack(alignment: .leading, spacing: 5) {
+				VStack(alignment: .leading, spacing: rowTextSpacing) {
 					Text("Connect to \(target.displayTarget)")
 						.font(variant.sessionTitleFont)
 						.foregroundStyle(theme.primaryText)
 						.lineLimit(1)
+					if let initialWorkingDirectory = target.initialWorkingDirectory {
+						Text("cwd: \(initialWorkingDirectory)")
+							.font(variant.sessionSubtitleFont)
+							.foregroundStyle(theme.secondaryText)
+							.lineLimit(1)
+					}
 					if let tmuxSessionName = target.tmuxSessionName {
 						Text("tmux: \(tmuxSessionName)")
 							.font(variant.sessionSubtitleFont)
@@ -354,10 +411,13 @@ struct SessionListContent: View {
 				Spacer(minLength: 0)
 			}
 			.frame(maxWidth: .infinity, alignment: .leading)
-			.padding(.vertical, 6)
+			.padding(.vertical, rowVerticalPadding)
 			.contentShape(Rectangle())
 		}
 		.buttonStyle(.plain)
+		.accessibilityIdentifier("row.directSession")
+		.accessibilityValue(isSelected ? "selected" : "not selected")
+		.listRowInsets(denseRowInsets)
 		.listRowBackground(rowBackground(isSelected: isSelected))
 		.id(itemID)
 	}
@@ -375,6 +435,7 @@ struct SessionListContent: View {
 			}
 			.buttonStyle(.plain)
 			.sessionListKeyboardShortcut("l", modifiers: .command, enabled: variant == .picker)
+			.listRowInsets(denseRowInsets)
 			.listRowBackground(rowBackground(isSelected: isSelected))
 			.id(ItemID.localShell)
 		}
@@ -383,7 +444,7 @@ struct SessionListContent: View {
 		private func localShellLabel(isSelected: Bool) -> some View {
 			switch variant {
 			case .savedSessions:
-				VStack(alignment: .leading, spacing: 4) {
+				VStack(alignment: .leading, spacing: rowTextSpacing) {
 					Text("Local Shell")
 						.font(.headline)
 						.foregroundStyle(theme.primaryText)
@@ -392,12 +453,13 @@ struct SessionListContent: View {
 						.foregroundStyle(theme.secondaryText)
 				}
 				.frame(maxWidth: .infinity, alignment: .leading)
-				.padding(.vertical, 6)
+				.padding(.vertical, rowVerticalPadding)
 			case .picker:
 				Label("Local Shell", systemImage: "terminal")
 					.font(.body)
 					.foregroundStyle(isSelected ? theme.primaryText : theme.accent)
 					.frame(maxWidth: .infinity, alignment: .leading)
+					.padding(.vertical, rowVerticalPadding)
 					.contentShape(Rectangle())
 			}
 		}
@@ -413,8 +475,8 @@ struct SessionListContent: View {
 			selectedItemID = itemID
 			onOpenSession(session)
 		} label: {
-			HStack(alignment: .top, spacing: 12) {
-				VStack(alignment: .leading, spacing: 5) {
+			HStack(alignment: .top, spacing: rowHorizontalSpacing) {
+				VStack(alignment: .leading, spacing: rowTextSpacing) {
 					Text(session.listTitle)
 						.font(variant.sessionTitleFont)
 						.foregroundStyle(theme.primaryText)
@@ -433,7 +495,7 @@ struct SessionListContent: View {
 							Text("Never connected")
 						}
 					}
-					.font(.caption)
+					.font(.caption2)
 					.foregroundStyle(theme.tertiaryText)
 				}
 				Spacer(minLength: 0)
@@ -444,10 +506,13 @@ struct SessionListContent: View {
 				}
 			}
 			.frame(maxWidth: .infinity, alignment: .leading)
-			.padding(.vertical, 6)
+			.padding(.vertical, rowVerticalPadding)
 			.contentShape(Rectangle())
 		}
 		.buttonStyle(.plain)
+		.accessibilityIdentifier("row.session.\(session.normalizedTargetKey)")
+		.accessibilityValue(isSelected ? "selected" : "not selected")
+		.listRowInsets(denseRowInsets)
 		.listRowBackground(rowBackground(isSelected: isSelected))
 		.id(itemID)
 	}
@@ -464,10 +529,12 @@ struct SessionListContent: View {
 				.font(.body)
 				.foregroundStyle(isSelected ? theme.primaryText : theme.accent)
 				.frame(maxWidth: .infinity, alignment: .leading)
+				.padding(.vertical, rowVerticalPadding)
 				.contentShape(Rectangle())
 		}
 		.buttonStyle(.plain)
 		.keyboardShortcut("t", modifiers: .command)
+		.listRowInsets(denseRowInsets)
 		.listRowBackground(rowBackground(isSelected: isSelected))
 		.id(ItemID.newSession)
 	}
@@ -581,6 +648,7 @@ struct SessionListContent: View {
 			session.hostname,
 			session.username,
 			session.trimmedTmuxSessionName,
+			session.trimmedInitialWorkingDirectory,
 			String(session.port),
 		]
 		return searchableValues
@@ -637,6 +705,176 @@ private extension View {
 }
 
 #if canImport(UIKit)
+	import UIKit
+
+	private struct SessionFilterTextField: UIViewRepresentable {
+		@Binding var text: String
+		@Binding var isFocused: Bool
+		let placeholder: String
+		let textColor: PlatformColor
+		let onSubmit: () -> Void
+		let onMoveSelection: (Int) -> Void
+
+		func makeCoordinator() -> Coordinator {
+			Coordinator(text: $text, isFocused: $isFocused, onSubmit: onSubmit, onMoveSelection: onMoveSelection)
+		}
+
+		func makeUIView(context: Context) -> KeyHandlingTextField {
+			let textField = KeyHandlingTextField()
+			textField.borderStyle = .none
+			textField.backgroundColor = .clear
+			textField.autocorrectionType = .no
+			textField.autocapitalizationType = .none
+			textField.textContentType = .URL
+			textField.returnKeyType = .go
+			textField.font = .preferredFont(forTextStyle: .body)
+			textField.adjustsFontForContentSizeCategory = true
+			textField.delegate = context.coordinator
+			textField.addTarget(context.coordinator, action: #selector(Coordinator.textDidChange(_:)), for: .editingChanged)
+			return textField
+		}
+
+		func updateUIView(_ uiView: KeyHandlingTextField, context: Context) {
+			context.coordinator.text = $text
+			context.coordinator.isFocused = $isFocused
+			context.coordinator.onSubmit = onSubmit
+			context.coordinator.onMoveSelection = onMoveSelection
+			uiView.onMoveSelection = onMoveSelection
+			uiView.placeholder = placeholder
+			uiView.textColor = textColor
+			uiView.wantsFocus = isFocused
+			if uiView.text != text {
+				uiView.text = text
+			}
+			uiView.focusIfNeeded()
+		}
+
+		final class KeyHandlingTextField: UITextField {
+			var wantsFocus = false
+			var onMoveSelection: ((Int) -> Void)?
+
+			override var keyCommands: [UIKeyCommand]? {
+				[
+					command(input: "n", action: #selector(moveDown), title: "Move Selection Down"),
+					command(input: "p", action: #selector(moveUp), title: "Move Selection Up"),
+				]
+			}
+
+			override func didMoveToWindow() {
+				super.didMoveToWindow()
+				focusIfNeeded()
+			}
+
+			override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+				guard !handleControlPresses(presses) else { return }
+				super.pressesBegan(presses, with: event)
+			}
+
+			func focusIfNeeded() {
+				guard wantsFocus, window != nil, !isFirstResponder else { return }
+				DispatchQueue.main.async { [weak self] in
+					guard let self, self.wantsFocus, self.window != nil, !self.isFirstResponder else { return }
+					_ = self.becomeFirstResponder()
+				}
+			}
+
+			private func command(input: String, action: Selector, title: String) -> UIKeyCommand {
+				let command = UIKeyCommand(input: input, modifierFlags: .control, action: action)
+				command.wantsPriorityOverSystemBehavior = true
+				command.discoverabilityTitle = title
+				return command
+			}
+
+			private func handleControlPresses(_ presses: Set<UIPress>) -> Bool {
+				for press in presses {
+					guard let key = press.key else { continue }
+					let modifiers = key.modifierFlags.intersection([.command, .control, .alternate, .shift])
+					guard modifiers == .control else { continue }
+
+					switch key.keyCode {
+					case .keyboardN:
+						onMoveSelection?(1)
+						return true
+					case .keyboardP:
+						onMoveSelection?(-1)
+						return true
+					default:
+						break
+					}
+
+					switch key.charactersIgnoringModifiers.lowercased() {
+					case "n":
+						onMoveSelection?(1)
+						return true
+					case "p":
+						onMoveSelection?(-1)
+						return true
+					default:
+						break
+					}
+				}
+
+				return false
+			}
+
+			@objc private func moveDown() { onMoveSelection?(1) }
+			@objc private func moveUp() { onMoveSelection?(-1) }
+		}
+
+		final class Coordinator: NSObject, UITextFieldDelegate {
+			var text: Binding<String>
+			var isFocused: Binding<Bool>
+			var onSubmit: () -> Void
+			var onMoveSelection: (Int) -> Void
+
+			init(
+				text: Binding<String>,
+				isFocused: Binding<Bool>,
+				onSubmit: @escaping () -> Void,
+				onMoveSelection: @escaping (Int) -> Void
+			) {
+				self.text = text
+				self.isFocused = isFocused
+				self.onSubmit = onSubmit
+				self.onMoveSelection = onMoveSelection
+			}
+
+			@objc func textDidChange(_ sender: UITextField) {
+				text.wrappedValue = sender.text ?? ""
+			}
+
+			func textFieldDidBeginEditing(_: UITextField) {
+				isFocused.wrappedValue = true
+			}
+
+			func textFieldDidEndEditing(_: UITextField) {
+				isFocused.wrappedValue = false
+			}
+
+			func textField(
+				_: UITextField,
+				shouldChangeCharactersIn _: NSRange,
+				replacementString string: String
+			) -> Bool {
+				switch string {
+				case "\u{0E}":
+					onMoveSelection(1)
+					return false
+				case "\u{10}":
+					onMoveSelection(-1)
+					return false
+				default:
+					return true
+				}
+			}
+
+			func textFieldShouldReturn(_: UITextField) -> Bool {
+				onSubmit()
+				return false
+			}
+		}
+	}
+
 	private struct SessionListKeyboardHandler: UIViewRepresentable {
 		let isEnabled: Bool
 		let handlesClose: Bool
@@ -738,6 +976,117 @@ private extension View {
 
 #elseif canImport(AppKit)
 	import AppKit
+
+	private struct SessionFilterTextField: NSViewRepresentable {
+		@Binding var text: String
+		@Binding var isFocused: Bool
+		let placeholder: String
+		let textColor: PlatformColor
+		let onSubmit: () -> Void
+		let onMoveSelection: (Int) -> Void
+
+		func makeCoordinator() -> Coordinator {
+			Coordinator(text: $text, isFocused: $isFocused, onSubmit: onSubmit, onMoveSelection: onMoveSelection)
+		}
+
+		func makeNSView(context: Context) -> KeyHandlingTextField {
+			let textField = KeyHandlingTextField()
+			textField.isBordered = false
+			textField.drawsBackground = false
+			textField.focusRingType = .none
+			textField.font = .systemFont(ofSize: NSFont.systemFontSize)
+			textField.delegate = context.coordinator
+			return textField
+		}
+
+		func updateNSView(_ nsView: KeyHandlingTextField, context: Context) {
+			context.coordinator.text = $text
+			context.coordinator.isFocused = $isFocused
+			context.coordinator.onSubmit = onSubmit
+			context.coordinator.onMoveSelection = onMoveSelection
+			nsView.placeholderString = placeholder
+			nsView.textColor = textColor
+			nsView.wantsFocus = isFocused
+			if nsView.stringValue != text {
+				nsView.stringValue = text
+			}
+			nsView.focusIfNeeded()
+		}
+
+		final class KeyHandlingTextField: NSTextField {
+			var wantsFocus = false
+
+			override func viewDidMoveToWindow() {
+				super.viewDidMoveToWindow()
+				focusIfNeeded()
+			}
+
+			func focusIfNeeded() {
+				guard wantsFocus, let window else { return }
+				DispatchQueue.main.async { [weak self, weak window] in
+					guard let self, self.wantsFocus, let window, self.window === window else { return }
+					guard window.firstResponder !== self.currentEditor() else { return }
+					window.makeFirstResponder(self)
+				}
+			}
+		}
+
+		final class Coordinator: NSObject, NSTextFieldDelegate {
+			var text: Binding<String>
+			var isFocused: Binding<Bool>
+			var onSubmit: () -> Void
+			var onMoveSelection: (Int) -> Void
+
+			init(
+				text: Binding<String>,
+				isFocused: Binding<Bool>,
+				onSubmit: @escaping () -> Void,
+				onMoveSelection: @escaping (Int) -> Void
+			) {
+				self.text = text
+				self.isFocused = isFocused
+				self.onSubmit = onSubmit
+				self.onMoveSelection = onMoveSelection
+			}
+
+			func controlTextDidBeginEditing(_: Notification) {
+				isFocused.wrappedValue = true
+			}
+
+			func controlTextDidEndEditing(_: Notification) {
+				isFocused.wrappedValue = false
+			}
+
+			func controlTextDidChange(_ notification: Notification) {
+				guard let textField = notification.object as? NSTextField else { return }
+				text.wrappedValue = textField.stringValue
+			}
+
+			func control(_: NSControl, textView _: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+				let event = NSApp.currentEvent
+				let modifiers = event?.modifierFlags.intersection([.command, .control, .option, .shift]) ?? []
+				if modifiers == .control {
+					switch event?.charactersIgnoringModifiers?.lowercased() {
+					case "n":
+						onMoveSelection(1)
+						return true
+					case "p":
+						onMoveSelection(-1)
+						return true
+					default:
+						break
+					}
+				}
+
+				if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+					onSubmit()
+					return true
+				}
+
+				return false
+			}
+		}
+	}
 
 	private struct SessionListKeyboardHandler: NSViewRepresentable {
 		let isEnabled: Bool
@@ -862,6 +1211,21 @@ private extension View {
 		}
 	}
 #else
+	private struct SessionFilterTextField: View {
+		@Binding var text: String
+		@Binding var isFocused: Bool
+		let placeholder: String
+		let textColor: PlatformColor
+		let onSubmit: () -> Void
+		let onMoveSelection: (Int) -> Void
+
+		var body: some View {
+			TextField(placeholder, text: $text)
+				.onSubmit(onSubmit)
+				.onAppear { isFocused = true }
+		}
+	}
+
 	private struct SessionListKeyboardHandler: View {
 		let isEnabled: Bool
 		let handlesClose: Bool

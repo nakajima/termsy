@@ -260,9 +260,10 @@
 				host: session.hostname,
 				port: session.port,
 				username: session.username,
-				password: Keychain.password(for: session)
+				password: Keychain.password(for: session),
+				tmuxSessionName: session.trimmedTmuxSessionName,
+				initialWorkingDirectory: session.trimmedInitialWorkingDirectory
 			)
-			startTmuxIfNeeded()
 		}
 
 		func write(_ data: Data) {
@@ -275,24 +276,6 @@
 
 		func stop() {
 			sshSession.disconnect()
-		}
-
-		private func startTmuxIfNeeded() {
-			guard let rawName = session.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
-			      !rawName.isEmpty
-			else { return }
-
-			let escapedName = shellQuoted(rawName)
-			let command = Data("tmux new-session -A -s \(escapedName)\r".utf8)
-
-			Task { @MainActor [weak self] in
-				try? await Task.sleep(nanoseconds: 150_000_000)
-				self?.sshSession.connection.send(command)
-			}
-		}
-
-		private func shellQuoted(_ value: String) -> String {
-			"'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
 		}
 	}
 #endif

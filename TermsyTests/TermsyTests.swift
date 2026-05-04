@@ -156,6 +156,26 @@ struct TermsyTests {
 		}
 	}
 
+	@Test func sessionInitialWorkingDirectoryPersists() throws {
+		let db = DB.memory()
+		try db.migrate()
+
+		var session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: "api",
+			initialWorkingDirectory: "~/src/termsy",
+			port: 22,
+			autoconnect: false
+		)
+
+		try db.queue.write { database in
+			try session.save(database)
+			let savedSession = try Session.fetchOne(database, key: session.id)
+			#expect(savedSession?.initialWorkingDirectory == "~/src/termsy")
+		}
+	}
+
 	#if canImport(UIKit)
 		@MainActor
 		@Test func restoredOpenSessionLoadsPersistedSnapshot() throws {
@@ -184,7 +204,7 @@ struct TermsyTests {
 			let restoredSession = try db.queue.read { database in
 				try Session.fetchOne(database, key: session.id)
 			}
-			let tab = TerminalTab(session: try #require(restoredSession))
+			let tab = try TerminalTab(session: #require(restoredSession))
 			#expect(tab.isRestoring)
 			#expect(tab.restorationMode == .launch)
 			#expect(tab.showsRestoringProgress)
@@ -305,10 +325,55 @@ struct TermsyTests {
 	}
 
 	@Test func remoteStartupCommandDoesNotRunBootstrapShellAsLoginShell() {
-		let command = ShellTitleIntegration.remoteStartupCommand(tmuxSessionName: nil)
+		let command = ShellTitleIntegration.remoteStartupCommand(tmuxSessionName: nil, initialWorkingDirectory: nil)
 
 		#expect(command.hasPrefix("/bin/sh -c "))
 		#expect(!command.hasPrefix("/bin/sh -lc "))
+	}
+
+	@Test func remoteStartupCommandIncludesInitialWorkingDirectory() {
+		let command = ShellTitleIntegration.remoteStartupCommand(
+			tmuxSessionName: "api",
+			initialWorkingDirectory: "~/src/app"
+		)
+
+		#expect(command.contains("TERMSY_INITIAL_WORKING_DIRECTORY"))
+		#expect(command.contains("~/src/app"))
+		#expect(command.contains("termsy_initial_working_directory=\"$HOME/${termsy_initial_working_directory#~/}\""))
+	}
+
+	@Test func directSessionTargetParsesWorkingDirectoryTmuxAndDashPort() throws {
+		let target = try #require(DirectSessionTarget("fresh@example.com:pwd#work -2222"))
+
+		#expect(target.username == "fresh")
+		#expect(target.hostname == "example.com")
+		#expect(target.initialWorkingDirectory == "pwd")
+		#expect(target.tmuxSessionName == "work")
+		#expect(target.port == 2222)
+	}
+
+	@Test func directSessionTargetParsesPortFlagForms() throws {
+		let spacedPort = try #require(DirectSessionTarget("pat@example.com:src#api -p 2200"))
+		let compactPort = try #require(DirectSessionTarget("pat@example.com:src#api -p2201"))
+
+		#expect(spacedPort.initialWorkingDirectory == "src")
+		#expect(spacedPort.tmuxSessionName == "api")
+		#expect(spacedPort.port == 2200)
+		#expect(compactPort.port == 2201)
+	}
+
+	@Test func directSessionTargetKeepsLegacyColonPortSupport() throws {
+		let target = try #require(DirectSessionTarget("pat@example.com:2022#ops"))
+
+		#expect(target.hostname == "example.com")
+		#expect(target.initialWorkingDirectory == nil)
+		#expect(target.tmuxSessionName == "ops")
+		#expect(target.port == 2022)
+	}
+
+	@Test func directSessionTargetRejectsInvalidPort() {
+		#expect(DirectSessionTarget("pat@example.com:src -70000") == nil)
+		#expect(DirectSessionTarget("pat@example.com -p nope") == nil)
 	}
 
 	@Test func tmuxNameIsPrimarySavedSessionTitle() {
@@ -397,6 +462,32 @@ struct TermsyTests {
 
 			#expect(sessions.count == 2)
 			#expect(Set(sessions.map(\.normalizedTmuxSessionName)) == Set(["api", "worker"]))
+		}
+	}
+
+	@Test func sameTargetDifferentInitialWorkingDirectoriesPersistAsSeparateSessions() throws {
+		let db = DB.memory()
+		try db.migrate()
+
+		var homeSession = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: "api",
+			port: 22,
+			autoconnect: false
+		)
+		let worktreeSession = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: "api",
+			initialWorkingDirectory: "~/src/app",
+			port: 22,
+			autoconnect: false
+		)
+
+		try db.queue.write { database in
+			try homeSession.save(database)
+			#expect(try Session.existing(worktreeSession, in: database) == nil)
 		}
 	}
 
