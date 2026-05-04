@@ -40,6 +40,7 @@
 		private var theme: AppTheme
 		private var terminalView: TerminalView?
 		private var overlayHostController: UIHostingController<AnyView>?
+		private var recordingBadgeHostController: UIHostingController<AnyView>?
 
 		init(terminalTab: TerminalTab, theme: AppTheme) {
 			self.terminalTab = terminalTab
@@ -60,6 +61,7 @@
 			}
 			applyTheme(theme)
 			setupTerminal()
+			setupRecordingBadge()
 		}
 
 		override func viewDidAppear(_ animated: Bool) {
@@ -82,6 +84,7 @@
 			view.backgroundColor = theme.backgroundUIColor
 			terminalTab.applyTheme(theme)
 			updateOverlay()
+			updateRecordingBadgeTheme()
 		}
 
 		func setupTerminal() {
@@ -118,6 +121,30 @@
 			setupTerminal()
 			_ = terminalView?.syncSizeAndReadBack()
 			terminalTab.hostDidAppear()
+		}
+
+		private func setupRecordingBadge() {
+			guard recordingBadgeHostController == nil else { return }
+			let host = UIHostingController(rootView: recordingBadgeView())
+			host.view.backgroundColor = .clear
+			host.view.translatesAutoresizingMaskIntoConstraints = false
+			host.view.isUserInteractionEnabled = false
+			addChild(host)
+			view.addSubview(host.view)
+			host.didMove(toParent: self)
+			NSLayoutConstraint.activate([
+				host.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
+				host.view.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -10),
+			])
+			recordingBadgeHostController = host
+		}
+
+		private func updateRecordingBadgeTheme() {
+			recordingBadgeHostController?.rootView = recordingBadgeView()
+		}
+
+		private func recordingBadgeView() -> AnyView {
+			AnyView(TerminalRecordingBadge(tab: terminalTab).environment(\.appTheme, theme))
 		}
 
 		private func updateOverlay() {
@@ -166,5 +193,63 @@
 			guard let size = terminalView.syncSizeAndReadBack() else { return }
 			terminalTab.updateTerminalSize(size)
 		}
+	}
+
+	private struct TerminalRecordingBadge: View {
+		let tab: TerminalTab
+
+		var body: some View {
+			TerminalRecordingBadgeContent(
+				isRecording: tab.isRecording,
+				dataByteCount: tab.recordingDataByteCount
+			)
+		}
+	}
+
+	private struct TerminalRecordingBadgeContent: View {
+		@Environment(\.appTheme) private var theme
+		let isRecording: Bool
+		let dataByteCount: Int64
+		@State private var pulse = false
+
+		private var dataSizeText: String {
+			TerminalRecordingByteCountFormatter.string(for: dataByteCount)
+		}
+
+		var body: some View {
+			if isRecording {
+				HStack(spacing: 6) {
+					Image(systemName: "record.circle.fill")
+						.foregroundStyle(theme.error)
+						.opacity(pulse ? 0.35 : 1)
+						.animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulse)
+
+					Text("REC \(dataSizeText)")
+						.font(.caption.monospacedDigit().weight(.semibold))
+						.foregroundStyle(theme.primaryText)
+				}
+				.padding(.horizontal, 10)
+				.padding(.vertical, 6)
+				.background(theme.cardBackground.opacity(0.92), in: Capsule())
+				.overlay {
+					Capsule()
+						.stroke(theme.divider, lineWidth: 1)
+				}
+				.shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
+				.onAppear {
+					pulse = true
+				}
+				.onDisappear {
+					pulse = false
+				}
+			}
+		}
+	}
+
+	#Preview("Recording Badge") {
+		TerminalRecordingBadgeContent(isRecording: true, dataByteCount: 18_432)
+			.padding()
+			.background(TerminalTheme.mocha.appTheme.background)
+			.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 	}
 #endif

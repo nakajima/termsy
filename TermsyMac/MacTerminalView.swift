@@ -11,6 +11,9 @@
 		var onResize: ((UInt16, UInt16) -> Void)?
 		var onTitleChange: ((String) -> Void)?
 		var onRenameTabRequest: (() -> Void)?
+		var onStartRecordingRequest: (() -> Void)?
+		var onStopRecordingRequest: (() -> Void)?
+		var isRecording = false
 
 		private enum ClipboardConfirmationAction {
 			case read(state: UnsafeMutableRawPointer, request: ghostty_clipboard_request_e)
@@ -708,6 +711,10 @@
 				return surface != nil
 			case #selector(renameTab(_:)):
 				return true
+			case #selector(startRecording(_:)):
+				return !isRecording
+			case #selector(stopRecording(_:)):
+				return isRecording
 			default:
 				return false
 			}
@@ -729,6 +736,14 @@
 			onRenameTabRequest?()
 		}
 
+		@IBAction func startRecording(_: Any?) {
+			onStartRecordingRequest?()
+		}
+
+		@IBAction func stopRecording(_: Any?) {
+			onStopRecordingRequest?()
+		}
+
 		override func menu(for _: NSEvent) -> NSMenu? {
 			guard surface != nil else { return nil }
 			let menu = NSMenu()
@@ -741,6 +756,11 @@
 			menu.addItem(.separator())
 			let selectAll = menu.addItem(withTitle: "Select All", action: #selector(selectAll(_:)), keyEquivalent: "")
 			selectAll.target = self
+			menu.addItem(.separator())
+			let recordingTitle = isRecording ? "Stop Recording" : "Start Recording"
+			let recordingAction = isRecording ? #selector(stopRecording(_:)) : #selector(startRecording(_:))
+			let recording = menu.addItem(withTitle: recordingTitle, action: recordingAction, keyEquivalent: "")
+			recording.target = self
 			menu.addItem(.separator())
 			let rename = menu.addItem(withTitle: "Rename Tab", action: #selector(renameTab(_:)), keyEquivalent: "")
 			rename.target = self

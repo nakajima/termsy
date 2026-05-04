@@ -26,7 +26,8 @@
 					customTitle: tab.customTitle,
 					automaticTitle: tab.automaticTitle,
 					isConnected: tab.isConnected,
-					hasError: tab.connectionError != nil
+					hasError: tab.connectionError != nil,
+					isRecording: tab.isRecording
 				)
 			}
 		}
@@ -45,6 +46,8 @@
 				onRenameTab: { id, title in
 					persistRename(for: id, title: title, coordinator: currentCoordinator, dbContext: currentDBContext)
 				},
+				onStartRecording: { id in currentCoordinator.startRecording(tabID: id) != nil },
+				onStopRecording: { id in currentCoordinator.stopRecording(tabID: id) },
 				onReorderTabs: { ids in currentCoordinator.reorderTabs(ids) },
 				onAddTab: { currentCoordinator.openNewTabUI() },
 				onSettings: { currentCoordinator.openSettings() }
@@ -79,6 +82,8 @@
 		let onCloseTab: (UUID) -> Void
 		let onCloseOtherTabs: (UUID) -> Void
 		let onRenameTab: (UUID, String?) -> Void
+		let onStartRecording: (UUID) -> Bool
+		let onStopRecording: (UUID) -> URL?
 		let onReorderTabs: ([UUID]) -> Void
 		let onAddTab: () -> Void
 		let onSettings: () -> Void
@@ -102,6 +107,8 @@
 			view.onCloseTab = onCloseTab
 			view.onCloseOtherTabs = onCloseOtherTabs
 			view.onRenameTab = onRenameTab
+			view.onStartRecording = onStartRecording
+			view.onStopRecording = onStopRecording
 			view.onReorderTabs = onReorderTabs
 			view.onAddTab = onAddTab
 			view.onSettings = onSettings
@@ -117,6 +124,7 @@
 		let automaticTitle: String
 		let isConnected: Bool
 		let hasError: Bool
+		let isRecording: Bool
 	}
 
 	// MARK: - Collection View
@@ -131,6 +139,8 @@
 		var onCloseTab: ((UUID) -> Void)?
 		var onCloseOtherTabs: ((UUID) -> Void)?
 		var onRenameTab: ((UUID, String?) -> Void)?
+		var onStartRecording: ((UUID) -> Bool)?
+		var onStopRecording: ((UUID) -> URL?)?
 		var onReorderTabs: (([UUID]) -> Void)?
 		var onAddTab: (() -> Void)?
 		var onSettings: (() -> Void)?
@@ -307,6 +317,16 @@
 			}
 		}
 
+		private func presentShareSheet(for url: URL) {
+			guard let presenter = presentingViewController else { return }
+			let activityController = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+			if let popover = activityController.popoverPresentationController {
+				popover.sourceView = self
+				popover.sourceRect = bounds
+			}
+			presenter.present(activityController, animated: true)
+		}
+
 		private var presentingViewController: UIViewController? {
 			if let responder = sequence(first: self as UIResponder?, next: { $0?.next }).first(where: { $0 is UIViewController }) as? UIViewController {
 				return topPresentedViewController(startingAt: responder)
@@ -352,10 +372,23 @@
 				let rename = UIAction(title: "Rename Tab", image: UIImage(systemName: "pencil")) { _ in
 					self?.presentRenameAlert(for: item)
 				}
+				let recordingAction: UIAction
+				if item.isRecording {
+					recordingAction = UIAction(title: "Stop Recording", image: UIImage(systemName: "stop.circle")) { _ in
+						guard let url = self?.onStopRecording?(item.id) else { return }
+						DispatchQueue.main.async { [weak self] in
+							self?.presentShareSheet(for: url)
+						}
+					}
+				} else {
+					recordingAction = UIAction(title: "Start Recording", image: UIImage(systemName: "record.circle")) { _ in
+						_ = self?.onStartRecording?(item.id)
+					}
+				}
 				let close = UIAction(title: "Close Tab", image: UIImage(systemName: "xmark")) { _ in
 					self?.onCloseTab?(item.id)
 				}
-				var actions: [UIMenuElement] = [rename, close]
+				var actions: [UIMenuElement] = [rename, recordingAction, close]
 				if (self?.items.count ?? 0) > 1 {
 					let closeOthers = UIAction(title: "Close Other Tabs", image: UIImage(systemName: "xmark.circle")) { _ in
 						self?.onCloseOtherTabs?(item.id)
@@ -402,6 +435,7 @@
 	private final class TabBarCell: UICollectionViewCell {
 		var onClose: (() -> Void)?
 
+		private let recordingPulseAnimationKey = "termsy.recordingPulse"
 		private var theme: AppTheme = TerminalTheme.current.appTheme
 		private let pillContainer = UIView()
 		private let glassView = UIVisualEffectView(effect: UIGlassEffect())
@@ -518,13 +552,17 @@
 
 		func configure(item: TabBarItem, isSelected: Bool) {
 			isCurrentlySelected = isSelected
+			stopRecordingPulse()
 
 			titleLabel.text = item.title
 			titleLabel.font = .systemFont(ofSize: 13, weight: isSelected ? .semibold : .medium)
 			titleLabel.textColor = isSelected ? theme.primaryTextUIColor : theme.secondaryTextUIColor
 
-			if !item.isConnected && !item.hasError {
-				statusView.isHidden = true
+			if item.isRecording {
+				statusView.image = UIImage(systemName: "record.circle.fill")
+				statusView.tintColor = PlatformColor(theme.error)
+				statusView.isHidden = false
+				startRecordingPulse()
 			} else if item.hasError {
 				statusView.image = UIImage(systemName: "exclamationmark.triangle.fill")
 				statusView.tintColor = theme.warningUIColor
@@ -550,6 +588,23 @@
 			}
 		}
 
+		private func startRecordingPulse() {
+			guard statusView.layer.animation(forKey: recordingPulseAnimationKey) == nil else { return }
+			let animation = CABasicAnimation(keyPath: "opacity")
+			animation.fromValue = 1
+			animation.toValue = 0.35
+			animation.duration = 0.8
+			animation.autoreverses = true
+			animation.repeatCount = .infinity
+			animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+			statusView.layer.add(animation, forKey: recordingPulseAnimationKey)
+		}
+
+		private func stopRecordingPulse() {
+			statusView.layer.removeAnimation(forKey: recordingPulseAnimationKey)
+			statusView.alpha = 1
+		}
+
 		@objc private func handleHover(_ recognizer: UIHoverGestureRecognizer) {
 			switch recognizer.state {
 			case .began, .changed:
@@ -568,6 +623,7 @@
 		override func prepareForReuse() {
 			super.prepareForReuse()
 			titleLabel.text = nil
+			stopRecordingPulse()
 			statusView.image = nil
 			statusView.isHidden = true
 			closeButton.alpha = 0

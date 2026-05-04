@@ -36,6 +36,19 @@
 						await terminal.startIfNeeded()
 					}
 
+				VStack {
+					HStack {
+						Spacer()
+						MacTerminalRecordingBadge(
+							isRecording: terminal.isRecording,
+							dataByteCount: terminal.recordingDataByteCount
+						)
+						.padding(12)
+					}
+					Spacer()
+				}
+				.allowsHitTesting(false)
+
 				if terminal.isStarting {
 					ProgressView(terminal.title)
 						.controlSize(.large)
@@ -170,6 +183,46 @@
 		}
 	}
 
+	private struct MacTerminalRecordingBadge: View {
+		@Environment(\.appTheme) private var theme
+		let isRecording: Bool
+		let dataByteCount: Int64
+		@State private var pulse = false
+
+		private var dataSizeText: String {
+			TerminalRecordingByteCountFormatter.string(for: dataByteCount)
+		}
+
+		var body: some View {
+			if isRecording {
+				HStack(spacing: 6) {
+					Image(systemName: "record.circle.fill")
+						.foregroundStyle(theme.error)
+						.opacity(pulse ? 0.35 : 1)
+						.animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulse)
+
+					Text("REC \(dataSizeText)")
+						.font(.caption.monospacedDigit().weight(.semibold))
+						.foregroundStyle(theme.primaryText)
+				}
+				.padding(.horizontal, 10)
+				.padding(.vertical, 6)
+				.background(theme.cardBackground.opacity(0.92), in: Capsule())
+				.overlay {
+					Capsule()
+						.stroke(theme.divider, lineWidth: 1)
+				}
+				.shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
+				.onAppear {
+					pulse = true
+				}
+				.onDisappear {
+					pulse = false
+				}
+			}
+		}
+	}
+
 	#Preview {
 		let db = DB.memory()
 		try? db.migrate()
@@ -181,5 +234,12 @@
 			onWindowAppearanceChange: {}
 		)
 		.databaseContext(.readWrite { db.queue })
+	}
+
+	#Preview("Recording Badge") {
+		MacTerminalRecordingBadge(isRecording: true, dataByteCount: 1_248_768)
+			.padding()
+			.background(TerminalTheme.mocha.appTheme.background)
+			.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 	}
 #endif

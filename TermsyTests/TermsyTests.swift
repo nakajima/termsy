@@ -543,6 +543,49 @@ struct TermsyTests {
 	}
 
 	@MainActor
+	@Test func inactiveConnectedSessionUsesBackgroundRestorationOnAppActivation() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+		tab.isConnected = true
+
+		tab.noteAppDidBecomeActive()
+
+		#expect(tab.isRestoring)
+		#expect(tab.restorationMode == .backgroundReconnect)
+		#expect(!tab.showsRestoringProgress)
+		#expect(!tab.showsConnectingOverlay)
+	}
+
+	@MainActor
+	@Test func connectedSessionErrorReconnectUsesBackgroundRestoration() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+		tab.isConnected = true
+
+		ApplicationActivity.isActive = false
+		defer { ApplicationActivity.isActive = true }
+		tab.sshSession.onClose?(.error("connection reset"))
+
+		#expect(tab.connectionError == nil)
+		#expect(tab.isRestoring)
+		#expect(tab.restorationMode == .backgroundReconnect)
+		#expect(!tab.showsRestoringProgress)
+		#expect(!tab.showsConnectingOverlay)
+	}
+
+	@MainActor
 	@Test func cleanSSHExitWhileActiveStillClosesTab() {
 		let session = Session(
 			hostname: "prod.example.com",

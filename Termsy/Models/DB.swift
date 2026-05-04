@@ -66,6 +66,30 @@ struct DB {
 			}
 		}
 
+		migrator.registerMigration("CreateTerminalRecording") { db in
+			try db.create(table: "terminalRecording") { t in
+				t.autoIncrementedPrimaryKey("id")
+				t.column("sessionID", .integer).references("session", onDelete: .setNull)
+				t.column("source", .text).notNull()
+				t.column("targetDescription", .text).notNull()
+				t.column("title", .text).notNull()
+				t.column("startedAt", .datetime).notNull()
+				t.column("endedAt", .datetime)
+				t.column("initialColumns", .integer).notNull()
+				t.column("initialRows", .integer).notNull()
+				t.column("fileName", .text).notNull().unique()
+				t.column("eventCount", .integer).notNull().defaults(to: 0)
+				t.column("outputByteCount", .integer).notNull().defaults(to: 0)
+				t.column("createdAt", .datetime).notNull()
+			}
+		}
+
+		migrator.registerMigration("AddTerminalRecordingInputByteCount") { db in
+			try db.alter(table: "terminalRecording") { t in
+				t.add(column: "inputByteCount", .integer).notNull().defaults(to: 0)
+			}
+		}
+
 		try migrator.migrate(queue)
 	}
 }

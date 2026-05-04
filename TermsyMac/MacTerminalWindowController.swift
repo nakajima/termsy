@@ -3,6 +3,7 @@
 	import GRDB
 	import GRDBQuery
 	import SwiftUI
+	import UniformTypeIdentifiers
 
 	@MainActor
 	final class MacTerminalWindowController: NSWindowController, NSWindowDelegate {
@@ -54,6 +55,12 @@
 			}
 			terminal.onRequestRename = { [weak self] in
 				self?.presentRenameAlert()
+			}
+			terminal.onRequestStartRecording = { [weak self] in
+				self?.startRecording()
+			}
+			terminal.onRequestStopRecording = { [weak self] in
+				self?.stopRecordingAndOfferExport()
 			}
 			window.onRenameTabRequest = { [weak self] in
 				self?.presentRenameAlert()
@@ -156,6 +163,63 @@
 			window?.tab.toolTip = title
 		}
 
+		func startRecording() {
+			guard !terminal.isRecording else { return }
+			var recording = terminal.makeRecordingMetadata(startedAt: Date())
+			do {
+				try db.queue.write { database in
+					try recording.save(database)
+				}
+				let recorder = try TerminalSessionRecorder(recording: recording)
+				terminal.startRecording(recorder)
+			} catch {
+				if let id = recording.id {
+					try? db.queue.write { database in
+						_ = try TerminalRecording.deleteOne(database, key: id)
+					}
+				}
+				print("[Recording] failed to start: \(error)")
+			}
+		}
+
+		func stopRecordingAndOfferExport() {
+			guard let url = stopRecording() else { return }
+			presentRecordingSavePanel(for: url)
+		}
+
+		@discardableResult
+		private func stopRecording() -> URL? {
+			guard let completed = terminal.stopRecording() else { return nil }
+			do {
+				try db.queue.write { database in
+					let recording = completed.recording
+					try recording.update(database)
+				}
+			} catch {
+				print("[Recording] failed to persist completed recording: \(error)")
+			}
+			return completed.fileURL
+		}
+
+		private func presentRecordingSavePanel(for sourceURL: URL) {
+			guard let window else { return }
+			let panel = NSSavePanel()
+			panel.nameFieldStringValue = sourceURL.lastPathComponent
+			panel.allowedContentTypes = [UTType(filenameExtension: "cast") ?? .data]
+			panel.canCreateDirectories = true
+			panel.beginSheetModal(for: window) { response in
+				guard response == .OK, let destinationURL = panel.url else { return }
+				do {
+					if FileManager.default.fileExists(atPath: destinationURL.path) {
+						try FileManager.default.removeItem(at: destinationURL)
+					}
+					try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+				} catch {
+					print("[Recording] failed to export recording: \(error)")
+				}
+			}
+		}
+
 		func applyWindowAppearance() {
 			guard let window else { return }
 			let defaults = UserDefaults.standard
@@ -245,6 +309,7 @@
 		}
 
 		func windowWillClose(_: Notification) {
+			stopRecording()
 			terminal.close()
 			manager?.controllerDidClose(self)
 		}

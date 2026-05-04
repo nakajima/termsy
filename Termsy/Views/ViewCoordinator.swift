@@ -278,6 +278,7 @@ class ViewCoordinator {
 	func closeTab(_ id: UUID?) {
 		guard let id, let index = tabs.firstIndex(where: { $0.id == id }) else { return }
 		let tab = tabs[index]
+		stopRecording(tabID: id)
 		tab.close()
 		tabs.remove(at: index)
 
@@ -296,6 +297,7 @@ class ViewCoordinator {
 	func closeOtherTabs(_ id: UUID?) {
 		let toClose = tabs.filter { $0.id != id }
 		for tab in toClose {
+			stopRecording(tabID: tab.id)
 			tab.close()
 		}
 		tabs.removeAll { $0.id != id }
@@ -311,6 +313,51 @@ class ViewCoordinator {
 	func renameTab(_ id: UUID?, to title: String?) {
 		guard let id, let tab = tabs.first(where: { $0.id == id }) else { return }
 		tab.rename(to: title)
+	}
+
+	@discardableResult
+	func startRecording(tabID: UUID) -> URL? {
+		guard let databaseContext else { return nil }
+		guard let tab = tabs.first(where: { $0.id == tabID }) else { return nil }
+		guard !tab.isRecording else { return tab.recordingFileURL }
+
+		var recording = tab.makeRecordingMetadata(startedAt: Date())
+		do {
+			try databaseContext.writer.write { db in
+				try recording.save(db)
+			}
+			let recorder = try TerminalSessionRecorder(recording: recording)
+			tab.startRecording(recorder)
+			return recorder.fileURL
+		} catch {
+			if let id = recording.id {
+				try? databaseContext.writer.write { db in
+					_ = try TerminalRecording.deleteOne(db, key: id)
+				}
+			}
+			print("[Recording] failed to start: \(error)")
+			return nil
+		}
+	}
+
+	@discardableResult
+	func stopRecording(tabID: UUID) -> URL? {
+		guard let tab = tabs.first(where: { $0.id == tabID }) else { return nil }
+		guard let completed = tab.stopRecording() else { return nil }
+		persistCompletedRecording(completed)
+		return completed.fileURL
+	}
+
+	private func persistCompletedRecording(_ completed: TerminalSessionRecorder.Completed) {
+		guard let databaseContext else { return }
+		do {
+			try databaseContext.writer.write { db in
+				let recording = completed.recording
+				try recording.update(db)
+			}
+		} catch {
+			print("[Recording] failed to persist completed recording: \(error)")
+		}
 	}
 
 	func moveTab(from source: IndexSet, to destination: Int) {
@@ -478,6 +525,8 @@ class TerminalTab: Identifiable {
 	var onTerminalViewReplacementRequested: (() -> Void)?
 	var reportedTitle = ""
 	var connectionLog: [String] = []
+	private(set) var isRecording = false
+	private(set) var recordingDataByteCount: Int64 = 0
 	#if canImport(UIKit)
 		@ObservationIgnored private var restorationSnapshot: UIImage?
 		var displaySnapshot: UIImage? {
@@ -497,6 +546,7 @@ class TerminalTab: Identifiable {
 	@ObservationIgnored private let reconnectRetryDelayNanoseconds: UInt64 = 2_000_000_000
 	@ObservationIgnored private var remoteConnectAttempt = 0
 	@ObservationIgnored private var wantsConnection = true
+	@ObservationIgnored private var terminalRecorder: TerminalSessionRecorder?
 
 	let id = UUID()
 
@@ -537,6 +587,7 @@ class TerminalTab: Identifiable {
 
 			configureTerminalView()
 			localShellSession?.onRemoteOutput = { [weak self] data in
+				self?.recordTerminalOutput(data)
 				self?.terminalView.feedData(data)
 			}
 			localShellSession?.onClose = { [weak self] reason in
@@ -579,6 +630,19 @@ class TerminalTab: Identifiable {
 			return "\(session.username)@\(session.hostname)"
 		case let .localShell(profile):
 			return profile.detailText
+		}
+	}
+
+	var recordingFileURL: URL? {
+		terminalRecorder?.fileURL
+	}
+
+	var recordingSource: TerminalRecording.Source {
+		switch endpoint {
+		case .remote:
+			.remote
+		case .localShell:
+			.localShell
 		}
 	}
 
@@ -942,10 +1006,16 @@ class TerminalTab: Identifiable {
 			if self.restorationMode != nil || self.restorationPresentationMode != nil {
 				self.finishRestorationPresentation()
 			}
+			if self.connectionState == .connecting {
+				self.connectionState = .connected
+				self.connectionError = nil
+				self.notifyOverlayStateChanged()
+			}
 			if let onFirstRemoteOutput = self.onFirstRemoteOutput {
 				self.onFirstRemoteOutput = nil
 				onFirstRemoteOutput()
 			}
+			self.recordTerminalOutput(data)
 			self.terminalView.feedData(data)
 		}
 		sshSession.onClose = { [weak self, weak sshSession] reason in
@@ -1045,6 +1115,7 @@ class TerminalTab: Identifiable {
 	}
 
 	func close() {
+		_ = stopRecording()
 		disconnect()
 		terminalView.stop()
 		terminalView.removeFromSuperview()
@@ -1207,8 +1278,13 @@ class TerminalTab: Identifiable {
 	func noteAppDidBecomeActive() {
 		guard wantsConnection else { return }
 		if connectionState == .connected, !connectionIsActive {
-			logConnectionEvent("App became active; connection was inactive")
-			connectionState = .idle
+			logConnectionEvent("App became active; connection was inactive; preparing background reconnect")
+			#if canImport(UIKit)
+				prepareForReconnectAfterBackgroundLoss(snapshot: restorationSnapshot)
+			#else
+				prepareForReconnectAfterBackgroundLoss()
+			#endif
+			return
 		}
 		if connectionState == .idle || connectionState == .connecting {
 			logConnectionEvent("App became active; reconciling connection")
@@ -1289,6 +1365,7 @@ class TerminalTab: Identifiable {
 	}
 
 	func updateTerminalSize(_ size: TerminalWindowSize) {
+		recordTerminalResize(size)
 		switch endpoint {
 		case .remote:
 			sshSession.updateTerminalSize(size)
@@ -1341,6 +1418,7 @@ class TerminalTab: Identifiable {
 		}
 		terminalView.onWrite = { [weak self] data in
 			guard let self else { return }
+			self.recordTerminalInput(data)
 			switch self.endpoint {
 			case .remote:
 				self.sshSession.connection.send(data)
@@ -1363,6 +1441,57 @@ class TerminalTab: Identifiable {
 		let normalizedTitle = Self.normalizedTabTitle(title)
 		customTitle = normalizedTitle
 		session?.customTitle = normalizedTitle
+	}
+
+	func makeRecordingMetadata(startedAt: Date) -> TerminalRecording {
+		let size = terminalView.currentTerminalSize() ?? sshSession.terminalSize
+		let safeColumns = max(size.columns, 1)
+		let safeRows = max(size.rows, 1)
+		let title = displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+		let recordingTitle = title.isEmpty ? automaticTitle : title
+		return TerminalRecording(
+			sessionID: session?.id,
+			source: recordingSource,
+			targetDescription: detailText,
+			title: recordingTitle,
+			startedAt: startedAt,
+			initialColumns: safeColumns,
+			initialRows: safeRows,
+			fileName: TerminalRecordingStorage.makeFileName(startedAt: startedAt, title: recordingTitle)
+		)
+	}
+
+	func startRecording(_ recorder: TerminalSessionRecorder) {
+		guard terminalRecorder == nil else { return }
+		recordingDataByteCount = 0
+		terminalRecorder = recorder
+		isRecording = true
+		if let size = terminalView.currentTerminalSize() {
+			recorder.recordResize(columns: size.columns, rows: size.rows)
+		}
+	}
+
+	func stopRecording() -> TerminalSessionRecorder.Completed? {
+		guard let recorder = terminalRecorder else { return nil }
+		terminalRecorder = nil
+		isRecording = false
+		return recorder.stop()
+	}
+
+	private func recordTerminalInput(_ data: Data) {
+		guard let terminalRecorder, !data.isEmpty else { return }
+		recordingDataByteCount += Int64(data.count)
+		terminalRecorder.recordInput(data)
+	}
+
+	private func recordTerminalOutput(_ data: Data) {
+		guard let terminalRecorder, !data.isEmpty else { return }
+		recordingDataByteCount += Int64(data.count)
+		terminalRecorder.recordOutput(data)
+	}
+
+	private func recordTerminalResize(_ size: TerminalWindowSize) {
+		terminalRecorder?.recordResize(columns: size.columns, rows: size.rows)
 	}
 
 	private static func normalizedTabTitle(_ title: String?) -> String? {
@@ -1444,12 +1573,23 @@ class TerminalTab: Identifiable {
 		case let .error(message):
 			logConnectionEvent("SSH session closed with error: \(message)")
 			connectionState = .idle
-			connectionError = message
-			finishRestorationPresentation()
-			notifyOverlayStateChanged()
 			if shouldReconnectAfterClose(message: message, wasConnectedBeforeClose: wasConnectedBeforeClose) {
+				connectionError = nil
+				if wasConnectedBeforeClose {
+					#if canImport(UIKit)
+						beginRestoration(.backgroundReconnect, snapshot: displaySnapshot ?? terminalView.captureSnapshot())
+					#else
+						beginRestoration(.backgroundReconnect)
+					#endif
+				} else {
+					notifyOverlayStateChanged()
+				}
 				logConnectionEvent("Scheduling reconnect after SSH close")
 				ensureConnectionIfNeeded(after: ApplicationActivity.isActive ? activationReconnectDelayNanoseconds : 0)
+			} else {
+				connectionError = message
+				finishRestorationPresentation()
+				notifyOverlayStateChanged()
 			}
 		}
 	}

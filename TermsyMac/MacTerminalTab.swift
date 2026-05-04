@@ -20,14 +20,19 @@
 		var connectionError: String?
 		var isStarting = false
 		var hasStarted = false
+		private(set) var isRecording = false
+		private(set) var recordingDataByteCount: Int64 = 0
 		var onRequestClose: (() -> Void)?
 		var onRequestRename: (() -> Void)?
+		var onRequestStartRecording: (() -> Void)?
+		var onRequestStopRecording: (() -> Void)?
 
 		@ObservationIgnored private var currentTerminalSize = TerminalWindowSize(columns: 80, rows: 24, pixelWidth: 0, pixelHeight: 0)
 		@ObservationIgnored private var localShellSession: LocalShellSession?
 		@ObservationIgnored private var sshSession: MacSSHTerminalSession?
 		@ObservationIgnored private var acceptsTerminalOutput = true
 		@ObservationIgnored private var terminalDidFinish = false
+		@ObservationIgnored private var terminalRecorder: TerminalSessionRecorder?
 		@ObservationIgnored private static var didLogTerminalIOActivation = false
 
 		init(source: Source) {
@@ -74,6 +79,19 @@
 			terminalView.needsCloseConfirmation
 		}
 
+		var recordingFileURL: URL? {
+			terminalRecorder?.fileURL
+		}
+
+		var recordingSource: TerminalRecording.Source {
+			switch source {
+			case .localShell:
+				.localShell
+			case .ssh:
+				.remote
+			}
+		}
+
 		func applyTheme(_ theme: AppTheme) {
 			terminalView.applyTheme(theme)
 		}
@@ -110,6 +128,7 @@
 		}
 
 		func close() {
+			_ = stopRecording()
 			acceptsTerminalOutput = false
 			terminalView.stop()
 			localShellSession?.stop()
@@ -118,6 +137,73 @@
 
 		func rename(to title: String?) {
 			customTitle = Self.normalizedTabTitle(title)
+		}
+
+		func makeRecordingMetadata(startedAt: Date) -> TerminalRecording {
+			let safeColumns = max(currentTerminalSize.columns, 1)
+			let safeRows = max(currentTerminalSize.rows, 1)
+			let recordingTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? automaticTitle : title
+			return TerminalRecording(
+				sessionID: sessionIDForRecording,
+				source: recordingSource,
+				targetDescription: detailTextForRecording,
+				title: recordingTitle,
+				startedAt: startedAt,
+				initialColumns: safeColumns,
+				initialRows: safeRows,
+				fileName: TerminalRecordingStorage.makeFileName(startedAt: startedAt, title: recordingTitle)
+			)
+		}
+
+		func startRecording(_ recorder: TerminalSessionRecorder) {
+			guard terminalRecorder == nil else { return }
+			recordingDataByteCount = 0
+			terminalRecorder = recorder
+			isRecording = true
+			terminalView.isRecording = true
+			recorder.recordResize(columns: currentTerminalSize.columns, rows: currentTerminalSize.rows)
+		}
+
+		func stopRecording() -> TerminalSessionRecorder.Completed? {
+			guard let recorder = terminalRecorder else { return nil }
+			terminalRecorder = nil
+			isRecording = false
+			terminalView.isRecording = false
+			return recorder.stop()
+		}
+
+		private var sessionIDForRecording: Int64? {
+			switch source {
+			case .localShell:
+				nil
+			case let .ssh(session):
+				session.id
+			}
+		}
+
+		private var detailTextForRecording: String {
+			switch source {
+			case .localShell:
+				LocalShellProfile.default.detailText
+			case let .ssh(session):
+				"\(session.username)@\(session.hostname)"
+			}
+		}
+
+		private func recordTerminalInput(_ data: Data) {
+			guard let terminalRecorder, !data.isEmpty else { return }
+			recordingDataByteCount += Int64(data.count)
+			terminalRecorder.recordInput(data)
+		}
+
+		private func recordTerminalOutput(_ data: Data) {
+			guard let terminalRecorder, !data.isEmpty else { return }
+			recordingDataByteCount += Int64(data.count)
+			terminalRecorder.recordOutput(data)
+		}
+
+		private func recordTerminalResize(_ size: TerminalWindowSize) {
+			terminalRecorder?.recordResize(columns: size.columns, rows: size.rows)
 		}
 
 		private func configureTerminalView() {
@@ -134,6 +220,13 @@
 			terminalView.onRenameTabRequest = { [weak self] in
 				self?.onRequestRename?()
 			}
+			terminalView.onStartRecordingRequest = { [weak self] in
+				self?.onRequestStartRecording?()
+			}
+			terminalView.onStopRecordingRequest = { [weak self] in
+				self?.onRequestStopRecording?()
+			}
+			terminalView.isRecording = isRecording
 		}
 
 		private func configureTransport() {
@@ -186,17 +279,20 @@
 				}
 				print("[TerminalIO] host <- terminal \(MacDebugLogging.describe(data))")
 			}
+			recordTerminalInput(data)
 			localShellSession?.send(data)
 			sshSession?.write(data)
 		}
 
 		private func handleTerminalOutput(_ data: Data) {
 			guard acceptsTerminalOutput, !terminalDidFinish, !data.isEmpty else { return }
+			recordTerminalOutput(data)
 			terminalView.feedData(data)
 		}
 
 		private func handleViewport(_ size: TerminalWindowSize) {
 			currentTerminalSize = size
+			recordTerminalResize(size)
 			localShellSession?.updateTerminalSize(size)
 			sshSession?.resize(size)
 		}
