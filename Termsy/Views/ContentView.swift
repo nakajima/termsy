@@ -178,6 +178,9 @@ struct ContentView: View {
 			announceScreenshotReadiness(readinessLabel)
 		}
 		coordinator.selectTab(primaryTab.id)
+		if launchConfiguration.startsTerminalRecording {
+			coordinator.startRecording(tabID: primaryTab.id)
+		}
 	}
 
 	private func openScreenshotBackgroundReconnect(using sessions: [Session], readinessLabel: String) {

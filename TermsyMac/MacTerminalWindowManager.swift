@@ -54,11 +54,7 @@
 				_ = openLocalShellWindow()
 				return
 			}
-			hostWindow.makeKeyAndOrderFront(nil)
-			let sent = NSApp.sendAction(#selector(NSResponder.newWindowForTab(_:)), to: nil, from: nil)
-			if !sent {
-				_ = openWindow(source: .localShell, hostWindow: hostWindow)
-			}
+			_ = openWindow(source: .localShell, hostWindow: hostWindow)
 		}
 
 		func showNewSSHSessionSheet() {
@@ -84,13 +80,7 @@
 				return
 			}
 
-			pendingTabSource = .ssh(session)
-			hostWindow.makeKeyAndOrderFront(nil)
-			let sent = NSApp.sendAction(#selector(NSResponder.newWindowForTab(_:)), to: nil, from: nil)
-			if !sent {
-				pendingTabSource = nil
-				_ = openWindow(source: .ssh(session), hostWindow: hostWindow)
-			}
+			_ = openWindow(source: .ssh(session), hostWindow: hostWindow)
 		}
 
 		func openNewTabFromSystemRequest() {
@@ -190,6 +180,9 @@
 			}
 
 			controller.showWindow(nil)
+			if let hostWindow, let window = controller.window, window !== hostWindow {
+				hostWindow.addTabbedWindow(window, ordered: .above)
+			}
 			if activate {
 				controller.revealWindow()
 			}

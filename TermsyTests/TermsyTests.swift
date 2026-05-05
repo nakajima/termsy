@@ -586,6 +586,26 @@ struct TermsyTests {
 	}
 
 	@MainActor
+	@Test func restoringReconnectKeepsPresentationAfterRecoverableClose() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+
+		tab.prepareForReconnectAfterBackgroundLoss()
+		tab.sshSession.onClose?(.error("connection reset"))
+
+		#expect(tab.connectionError == nil)
+		#expect(tab.isRestoring)
+		#expect(tab.restorationMode == .backgroundReconnect)
+		#expect(!tab.showsConnectingOverlay)
+	}
+
+	@MainActor
 	@Test func cleanSSHExitWhileActiveStillClosesTab() {
 		let session = Session(
 			hostname: "prod.example.com",

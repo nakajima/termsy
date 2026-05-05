@@ -1,0 +1,35 @@
+diff --git a/src/renderer/Metal.zig b/src/renderer/Metal.zig
+index 6c7432d21..d7f84ee6c 100644
+--- a/src/renderer/Metal.zig
++++ b/src/renderer/Metal.zig
+@@ -169,6 +169,10 @@ pub fn loopEnter(self: *Metal) void {
+     );
+ }
+ 
++pub fn loopExit(self: *Metal) void {
++    self.layer.clearDisplayCallback();
++}
++
+ fn displayCallback(renderer: *Renderer) align(8) void {
+     renderer.drawFrame(true) catch |err| {
+         log.warn("Error drawing frame in display callback, err={}", .{err});
+diff --git a/src/renderer/metal/IOSurfaceLayer.zig b/src/renderer/metal/IOSurfaceLayer.zig
+index 34fbfbed5..ac084ec4b 100644
+--- a/src/renderer/metal/IOSurfaceLayer.zig
++++ b/src/renderer/metal/IOSurfaceLayer.zig
+@@ -40,9 +40,15 @@ pub fn init() !IOSurfaceLayer {
+ }
+ 
+ pub fn release(self: *IOSurfaceLayer) void {
++    self.clearDisplayCallback();
+     self.layer.release();
+ }
+ 
++pub fn clearDisplayCallback(self: *IOSurfaceLayer) void {
++    self.layer.setInstanceVariable("display_cb", .{ .value = null });
++    self.layer.setInstanceVariable("display_ctx", .{ .value = null });
++}
++
+ /// Sets the layer's `contents` to the provided IOSurface.
+ ///
+ /// Makes sure to do so on the main thread to avoid visual artifacts.

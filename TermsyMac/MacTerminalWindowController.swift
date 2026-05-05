@@ -27,6 +27,7 @@
 		private weak var manager: MacTerminalWindowManager?
 		private var bypassesCloseConfirmation = false
 		private var isShowingCloseConfirmation = false
+		private var isClosedByTabGroup = false
 
 		init(sceneValue: MacTerminalSceneValue, db: DB, manager: MacTerminalWindowManager) {
 			self.sceneID = sceneValue.id
@@ -273,10 +274,10 @@
 			guard !isShowingCloseConfirmation else { return false }
 
 			let alert = NSAlert()
-			alert.messageText = "Close Tab?"
-			alert.informativeText = "A process may still be running in this tab. Close it anyway?"
+			alert.messageText = sender.tabGroup == nil ? "Close Window?" : "Close Tab?"
+			alert.informativeText = "A process may still be running in this terminal. Close it anyway?"
 			alert.alertStyle = .warning
-			alert.addButton(withTitle: "Close Tab")
+			alert.addButton(withTitle: sender.tabGroup == nil ? "Close Window" : "Close Tab")
 			alert.addButton(withTitle: "Cancel")
 
 			isShowingCloseConfirmation = true
@@ -308,7 +309,29 @@
 			manager?.windowLayoutDidChange()
 		}
 
-		func windowWillClose(_: Notification) {
+		func windowWillClose(_ notification: Notification) {
+			guard !isClosedByTabGroup else { return }
+			isClosedByTabGroup = true
+
+			let closingWindow = notification.object as? NSWindow
+			let siblingControllers = closingWindow?.tabGroup?.windows.compactMap { window in
+				window === closingWindow ? nil : manager?.controller(for: window)
+			} ?? []
+
+			stopRecording()
+			terminal.close()
+			manager?.controllerDidClose(self)
+
+			for controller in siblingControllers {
+				controller.closeFromTabGroupTeardown()
+			}
+		}
+
+		func closeFromTabGroupTeardown() {
+			guard !isClosedByTabGroup else { return }
+			isClosedByTabGroup = true
+			bypassesCloseConfirmation = true
+			window?.close()
 			stopRecording()
 			terminal.close()
 			manager?.controllerDidClose(self)

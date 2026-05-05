@@ -488,6 +488,11 @@ class TerminalTab: Identifiable {
 		case closedByUser
 	}
 
+	private enum ConnectionAttemptPresentation {
+		case initial
+		case restoringSnapshot
+	}
+
 	let endpoint: TerminalEndpoint
 	var session: Session?
 	var sshSession = SSHTerminalSession()
@@ -747,10 +752,27 @@ class TerminalTab: Identifiable {
 	func hostDidAppear() {
 		renderPendingPreviewIfNeeded()
 		wantsConnection = true
-		ensureConnectionIfNeeded()
+		beginConnectionAttemptIfNeeded(presentation: connectionPresentationForCurrentState)
 	}
 
 	func retryConnection(preservingRestoration: Bool = false) {
+		restartConnection(
+			presentation: preservingRestoration ? .restoringSnapshot : .initial,
+			preservingRestoration: preservingRestoration
+		)
+	}
+
+	private var connectionPresentationForCurrentState: ConnectionAttemptPresentation {
+		if case .backgroundReconnect = restorationPresentationMode {
+			return .restoringSnapshot
+		}
+		return .initial
+	}
+
+	private func restartConnection(
+		presentation: ConnectionAttemptPresentation,
+		preservingRestoration: Bool
+	) {
 		guard !isPassivePreview else { return }
 		logConnectionEvent("Reconnect requested")
 		connectTask?.cancel()
@@ -772,17 +794,20 @@ class TerminalTab: Identifiable {
 		}
 		connectionState = .idle
 		notifyOverlayStateChanged()
-		ensureConnectionIfNeeded()
+		beginConnectionAttemptIfNeeded(presentation: presentation)
 	}
 
-	private func ensureConnectionIfNeeded(after delayNanoseconds: UInt64 = 0) {
+	private func beginConnectionAttemptIfNeeded(
+		after delayNanoseconds: UInt64 = 0,
+		presentation: ConnectionAttemptPresentation
+	) {
 		guard !isPassivePreview else {
 			renderPendingPreviewIfNeeded()
 			return
 		}
 		guard wantsConnection else { return }
 		if delayNanoseconds > 0 {
-			scheduleConnectionAttempt(after: delayNanoseconds)
+			scheduleConnectionAttempt(after: delayNanoseconds, presentation: presentation)
 			return
 		}
 		guard terminalView.hasAttachedWindow else { return }
@@ -797,6 +822,7 @@ class TerminalTab: Identifiable {
 			return
 		}
 
+		applyConnectionPresentation(presentation)
 		connectionState = .connecting
 		notifyOverlayStateChanged()
 		connectTask = Task { @MainActor [weak self] in
@@ -810,22 +836,25 @@ class TerminalTab: Identifiable {
 				self.logConnectionEvent("Deferred pending connection because app is inactive")
 				return
 			}
-			await self.connect()
+			await self.connect(presentation: presentation)
 		}
 	}
 
-	private func scheduleConnectionAttempt(after delayNanoseconds: UInt64) {
+	private func scheduleConnectionAttempt(
+		after delayNanoseconds: UInt64,
+		presentation: ConnectionAttemptPresentation
+	) {
 		guard wantsConnection else { return }
 		scheduledConnectionTask?.cancel()
 		scheduledConnectionTask = Task { @MainActor [weak self] in
 			try? await Task.sleep(nanoseconds: delayNanoseconds)
 			guard !Task.isCancelled else { return }
 			self?.scheduledConnectionTask = nil
-			self?.ensureConnectionIfNeeded()
+			self?.beginConnectionAttemptIfNeeded(presentation: presentation)
 		}
 	}
 
-	func connect() async {
+	private func connect(presentation: ConnectionAttemptPresentation) async {
 		if isPassivePreview {
 			renderPendingPreviewIfNeeded()
 			return
@@ -841,7 +870,7 @@ class TerminalTab: Identifiable {
 		logConnectionEvent("Connect requested")
 		switch endpoint {
 		case .remote:
-			await connectRemote()
+			await connectRemote(presentation: presentation)
 		case .localShell:
 			#if os(macOS)
 				await connectLocalShell()
@@ -849,7 +878,7 @@ class TerminalTab: Identifiable {
 		}
 	}
 
-	private func connectRemote() async {
+	private func connectRemote(presentation: ConnectionAttemptPresentation) async {
 		guard let session else { return }
 		remoteConnectAttempt += 1
 		let attempt = remoteConnectAttempt
@@ -905,9 +934,15 @@ class TerminalTab: Identifiable {
 			notifyOverlayStateChanged()
 		} catch {
 			guard self.sshSession === sshSession else { return }
-			finishRestorationPresentation()
 			connectionState = .idle
-			connectionError = "\(error)"
+			switch presentation {
+			case .initial:
+				finishRestorationPresentation()
+				connectionError = "\(error)"
+			case .restoringSnapshot:
+				connectionError = nil
+				applyConnectionPresentation(.restoringSnapshot)
+			}
 			if shouldDeferRemoteConnectionUntilAppActive {
 				logConnectionEvent("Attempt \(attempt): connection failed while app inactive; reconnect deferred: \(error)")
 				notifyOverlayStateChanged()
@@ -915,7 +950,7 @@ class TerminalTab: Identifiable {
 			}
 			logConnectionEvent("Attempt \(attempt): connection failed: \(error)")
 			notifyOverlayStateChanged()
-			ensureConnectionIfNeeded(after: reconnectRetryDelayNanoseconds)
+			beginConnectionAttemptIfNeeded(after: reconnectRetryDelayNanoseconds, presentation: presentation)
 		}
 	}
 
@@ -964,6 +999,26 @@ class TerminalTab: Identifiable {
 		}
 		logConnectionEvent("Attempt \(attempt): created fresh SSH transport")
 		return newSession
+	}
+
+	private func applyConnectionPresentation(_ presentation: ConnectionAttemptPresentation) {
+		switch presentation {
+		case .initial:
+			return
+		case .restoringSnapshot:
+			guard case .remote = endpoint else { return }
+			#if canImport(UIKit)
+				if case .backgroundReconnect = restorationPresentationMode, restorationSnapshot != nil {
+					return
+				}
+				beginRestoration(.backgroundReconnect, snapshot: restorationSnapshot ?? terminalView.captureSnapshot())
+			#else
+				if case .backgroundReconnect = restorationPresentationMode {
+					return
+				}
+				beginRestoration(.backgroundReconnect)
+			#endif
+		}
 	}
 
 	private func clearRestorationState() {
@@ -1085,7 +1140,7 @@ class TerminalTab: Identifiable {
 			connectionState = .idle
 			connectionError = "\(error)"
 			notifyOverlayStateChanged()
-			ensureConnectionIfNeeded(after: reconnectRetryDelayNanoseconds)
+			beginConnectionAttemptIfNeeded(after: reconnectRetryDelayNanoseconds, presentation: .initial)
 		}
 	}
 
@@ -1291,7 +1346,10 @@ class TerminalTab: Identifiable {
 			if connectionState == .connecting, connectTask == nil, !connectionIsActive {
 				connectionState = .idle
 			}
-			ensureConnectionIfNeeded(after: activationReconnectDelayNanoseconds)
+			beginConnectionAttemptIfNeeded(
+				after: activationReconnectDelayNanoseconds,
+				presentation: connectionPresentationForCurrentState
+			)
 		}
 	}
 
@@ -1546,7 +1604,10 @@ class TerminalTab: Identifiable {
 			logConnectionEvent("SSH session closed locally")
 			if wantsConnection {
 				notifyOverlayStateChanged()
-				ensureConnectionIfNeeded(after: activationReconnectDelayNanoseconds)
+				beginConnectionAttemptIfNeeded(
+					after: activationReconnectDelayNanoseconds,
+					presentation: connectionPresentationForCurrentState
+				)
 			} else {
 				connectionState = .closedByUser
 				finishRestorationPresentation()
@@ -1585,7 +1646,10 @@ class TerminalTab: Identifiable {
 					notifyOverlayStateChanged()
 				}
 				logConnectionEvent("Scheduling reconnect after SSH close")
-				ensureConnectionIfNeeded(after: ApplicationActivity.isActive ? activationReconnectDelayNanoseconds : 0)
+				beginConnectionAttemptIfNeeded(
+					after: ApplicationActivity.isActive ? activationReconnectDelayNanoseconds : 0,
+					presentation: wasConnectedBeforeClose ? .restoringSnapshot : connectionPresentationForCurrentState
+				)
 			} else {
 				connectionError = message
 				finishRestorationPresentation()
