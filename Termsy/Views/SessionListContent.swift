@@ -236,9 +236,7 @@ struct SessionListContent: View {
 	}
 
 	private var directConnectTarget: DirectSessionTarget? {
-		guard let parsedDirectTarget else { return nil }
-		guard existingSession(for: parsedDirectTarget) == nil else { return nil }
-		return parsedDirectTarget
+		parsedDirectTarget
 	}
 
 	private var shouldShowLocalShellRow: Bool {
@@ -262,7 +260,7 @@ struct SessionListContent: View {
 			ids.append(.directConnection(directConnectTarget.normalizedTargetKey))
 		}
 		for group in groupedSessions {
-			ids.append(contentsOf: group.sessions.map { .session($0.normalizedTargetKey) })
+			ids.append(contentsOf: group.sessions.map { itemID(for: $0) })
 		}
 		if variant.showsNewSessionRow {
 			ids.append(.newSession)
@@ -467,7 +465,7 @@ struct SessionListContent: View {
 
 	@ViewBuilder
 	private func sessionRow(for session: Session) -> some View {
-		let itemID = ItemID.session(session.normalizedTargetKey)
+		let itemID = itemID(for: session)
 		let isSelected = selectedItemID == itemID
 		let isOpen = variant.showsOpenIndicator && isSessionOpen(session)
 
@@ -583,8 +581,8 @@ struct SessionListContent: View {
 				return
 			}
 			connect(to: target)
-		case let .session(key):
-			guard let session = sessions.first(where: { $0.normalizedTargetKey == key }) else {
+		case .session:
+			guard let session = sessions.first(where: { itemID(for: $0) == selectedItemID }) else {
 				ensureValidSelection()
 				return
 			}
@@ -596,11 +594,7 @@ struct SessionListContent: View {
 
 	private func submitFilter() {
 		if let parsedDirectTarget {
-			if let existingSession = existingSession(for: parsedDirectTarget) {
-				onOpenSession(existingSession)
-			} else {
-				connect(to: parsedDirectTarget)
-			}
+			connect(to: parsedDirectTarget)
 			return
 		}
 
@@ -635,8 +629,11 @@ struct SessionListContent: View {
 		}
 	}
 
-	private func existingSession(for target: DirectSessionTarget) -> Session? {
-		sessions.first { $0.normalizedTargetKey == target.normalizedTargetKey }
+	private func itemID(for session: Session) -> ItemID {
+		if let id = session.id {
+			return .session("id:\(id)")
+		}
+		return .session("target:\(session.normalizedTargetKey)")
 	}
 
 	private func sessionMatchesFilter(_ session: Session) -> Bool {
@@ -662,11 +659,7 @@ struct SessionListContent: View {
 
 		do {
 			try dbContext.writer.write { db in
-				if let existingSession = try Session.existing(session, in: db) {
-					session = existingSession
-				} else {
-					try session.save(db)
-				}
+				try session.save(db)
 			}
 			directConnectError = nil
 			onOpenSession(session)

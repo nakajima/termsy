@@ -19,7 +19,13 @@ struct SessionPickerView: View {
 			SessionListContent(
 				variant: .picker,
 				isSessionOpen: { session in
-					coordinator.tabs.contains { $0.session?.normalizedTargetKey == session.normalizedTargetKey }
+					coordinator.tabs.contains { tab in
+						guard let openSession = tab.session else { return false }
+						if let openID = openSession.id, let sessionID = session.id {
+							return openID == sessionID
+						}
+						return openSession.normalizedTargetKey == session.normalizedTargetKey
+					}
 				},
 				onOpenSession: openSession,
 				onOpenLocalShell: {

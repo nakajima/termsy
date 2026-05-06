@@ -51,6 +51,22 @@ final class TermsyUITests: XCTestCase {
 	}
 
 	@MainActor
+	func testDirectSessionInputShowsDirectRowForExistingSession() throws {
+		let app = XCUIApplication()
+		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.savedSessions.scenario)
+		XCUIDevice.shared.orientation = .landscapeLeft
+		app.launch()
+		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not reach foreground")
+
+		let filterField = app.textFields["field.sessionFilter"]
+		XCTAssertTrue(filterField.waitForExistence(timeout: 10), "Session filter field did not appear")
+		filterField.typeText("root@pimux")
+
+		XCTAssertTrue(app.buttons["row.directSession"].waitForExistence(timeout: 5), "Direct session row did not appear for an existing target")
+		XCTAssertTrue(app.buttons["row.session.root@pimux:22#-"].exists, "Matching saved session row disappeared")
+	}
+
+	@MainActor
 	func testSessionFilterControlNAndControlPMoveSelection() throws {
 		let app = XCUIApplication()
 		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.savedSessions.scenario)
