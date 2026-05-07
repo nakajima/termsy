@@ -42,6 +42,10 @@
 		private var overlayHostController: UIHostingController<AnyView>?
 		private var recordingBadgeHostController: UIHostingController<AnyView>?
 
+		override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge {
+			[.bottom]
+		}
+
 		init(terminalTab: TerminalTab, theme: AppTheme) {
 			self.terminalTab = terminalTab
 			self.theme = theme
@@ -53,6 +57,7 @@
 
 		override func viewDidLoad() {
 			super.viewDidLoad()
+			setNeedsUpdateOfScreenEdgesDeferringSystemGestures()
 			terminalTab.onOverlayStateChange = { [weak self] in
 				self?.updateOverlay()
 			}
@@ -66,6 +71,7 @@
 
 		override func viewDidAppear(_ animated: Bool) {
 			super.viewDidAppear(animated)
+			setNeedsUpdateOfScreenEdgesDeferringSystemGestures()
 			if terminalView == nil {
 				setupTerminal()
 			}

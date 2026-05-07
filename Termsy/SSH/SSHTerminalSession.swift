@@ -73,15 +73,13 @@ final class SSHTerminalSession {
 		tmuxSessionName: String? = nil,
 		initialWorkingDirectory: String? = nil
 	) async throws {
-		let startupOutputGraceNanoseconds: UInt64 = tmuxSessionName == nil ? 500_000_000 : 2_000_000_000
 		try await connection.connect(host: host, port: port, username: username, password: password)
 		try await connection.startShell(
 			size: terminalSize,
 			startupCommand: ShellTitleIntegration.remoteStartupCommand(
 				tmuxSessionName: tmuxSessionName,
 				initialWorkingDirectory: initialWorkingDirectory
-			),
-			startupOutputGraceNanoseconds: startupOutputGraceNanoseconds
+			)
 		)
 	}
 

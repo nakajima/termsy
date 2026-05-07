@@ -78,6 +78,49 @@ struct TermsyTests {
 		#expect(coordinator.selectedTabID == ids[2])
 	}
 
+	#if canImport(UIKit)
+		@MainActor
+		@Test func terminalTabNavigationCommandsTakePriorityOverSystemKeyboardHandling() {
+			let coordinator = ViewCoordinator()
+			let sessions = [
+				Session(hostname: "one.example.com", username: "pat", tmuxSessionName: nil, port: 22, autoconnect: false),
+				Session(hostname: "two.example.com", username: "pat", tmuxSessionName: nil, port: 22, autoconnect: false),
+			]
+			sessions.forEach { coordinator.openTab(for: $0) }
+			let ids = coordinator.tabs.map(\.id)
+			coordinator.selectTab(ids[0])
+
+			let view = coordinator.selectedTab?.terminalView
+			let commands = view?.keyCommands ?? []
+			let previousCommand = commands.first { command in
+				command.input == "[" &&
+					command.modifierFlags.contains(.command) &&
+					command.modifierFlags.contains(.shift) &&
+					command.wantsPriorityOverSystemBehavior
+			}
+			let nextCommand = commands.first { command in
+				command.input == "]" &&
+					command.modifierFlags.contains(.command) &&
+					command.modifierFlags.contains(.shift) &&
+					command.wantsPriorityOverSystemBehavior
+			}
+
+			#expect(previousCommand != nil)
+			#expect(nextCommand != nil)
+
+			if let view, let nextCommand, let action = nextCommand.action {
+				let didSend = UIApplication.shared.sendAction(action, to: view, from: nextCommand, for: nil)
+				#expect(didSend)
+				#expect(coordinator.selectedTabID == ids[1])
+			}
+			if let view, let previousCommand, let action = previousCommand.action {
+				let didSend = UIApplication.shared.sendAction(action, to: view, from: previousCommand, for: nil)
+				#expect(didSend)
+				#expect(coordinator.selectedTabID == ids[0])
+			}
+		}
+	#endif
+
 	@MainActor
 	@Test func customTabTitlesOverrideAutomaticTitlesUntilReset() {
 		let session = Session(

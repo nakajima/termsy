@@ -1149,8 +1149,40 @@
 			guard presentationMode == .interactive else { return nil }
 			return showsSoftwareKeyboardAccessory ? keyboardAccessoryBar : nil
 		}
+
 		override var canBecomeFirstResponder: Bool { presentationMode == .interactive }
+
+		override var keyCommands: [UIKeyCommand]? {
+			guard presentationMode == .interactive else { return nil }
+			return [
+				appShortcutCommand(input: "[", modifiers: [.command, .shift], action: #selector(selectPreviousTabFromKeyCommand(_:)), title: "Previous Tab"),
+				appShortcutCommand(input: "]", modifiers: [.command, .shift], action: #selector(selectNextTabFromKeyCommand(_:)), title: "Next Tab"),
+				appShortcutCommand(input: "{", modifiers: [.command, .shift], action: #selector(selectPreviousTabFromKeyCommand(_:)), title: nil),
+				appShortcutCommand(input: "}", modifiers: [.command, .shift], action: #selector(selectNextTabFromKeyCommand(_:)), title: nil),
+			]
+		}
+
 		var hasText: Bool { true }
+
+		private func appShortcutCommand(
+			input: String,
+			modifiers: UIKeyModifierFlags,
+			action: Selector,
+			title: String?
+		) -> UIKeyCommand {
+			let command = UIKeyCommand(input: input, modifierFlags: modifiers, action: action)
+			command.wantsPriorityOverSystemBehavior = true
+			command.discoverabilityTitle = title
+			return command
+		}
+
+		@objc private func selectPreviousTabFromKeyCommand(_: UIKeyCommand) {
+			onMoveTabSelectionRequest?(-1)
+		}
+
+		@objc private func selectNextTabFromKeyCommand(_: UIKeyCommand) {
+			onMoveTabSelectionRequest?(1)
+		}
 
 		override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
 			switch action {
@@ -1417,10 +1449,6 @@
 			if key.charactersIgnoringModifiers.compare("c", options: .caseInsensitive) == .orderedSame {
 				return performCopyToClipboard()
 			}
-			if let tabSelectionOffset = tabSelectionOffset(for: key) {
-				onMoveTabSelectionRequest?(tabSelectionOffset)
-				return true
-			}
 			if let digit = Int(key.charactersIgnoringModifiers), (1 ... 9).contains(digit) {
 				onSelectTabRequest?(digit)
 				return true
@@ -1512,28 +1540,6 @@
 			selectAll.attributes = surface == nil ? [.disabled] : []
 
 			return UIMenu(children: [copy, paste, selectAll])
-		}
-
-		private func tabSelectionOffset(for key: UIKey) -> Int? {
-			guard key.modifierFlags.contains(.command), key.modifierFlags.contains(.shift) else { return nil }
-
-			switch key.keyCode {
-			case .keyboardOpenBracket:
-				return -1
-			case .keyboardCloseBracket:
-				return 1
-			default:
-				break
-			}
-
-			switch key.charactersIgnoringModifiers {
-			case "[":
-				return -1
-			case "]":
-				return 1
-			default:
-				return nil
-			}
 		}
 
 		private func shouldRepeatHardwareKey(_ key: UIKey) -> Bool {
