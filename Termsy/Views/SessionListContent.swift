@@ -123,6 +123,12 @@ private struct RemoteTmuxSessionLookupTarget: Hashable, Sendable {
 		port = target.port
 	}
 
+	nonisolated init(_ session: Session) {
+		username = session.username
+		hostname = session.hostname
+		port = session.port
+	}
+
 	var normalizedUsername: String {
 		username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 	}
@@ -300,7 +306,14 @@ struct SessionListContent: View {
 	}
 
 	private var remoteTmuxLookupTarget: RemoteTmuxSessionLookupTarget? {
-		parsedDirectTarget.map(RemoteTmuxSessionLookupTarget.init)
+		if let parsedDirectTarget {
+			return RemoteTmuxSessionLookupTarget(parsedDirectTarget)
+		}
+
+		guard !normalizedFilterText.isEmpty else { return nil }
+		let matchingTargets = Set(filteredSessions.map(RemoteTmuxSessionLookupTarget.init))
+		guard matchingTargets.count == 1 else { return nil }
+		return matchingTargets.first
 	}
 
 	private var remoteTmuxNameFilter: String? {

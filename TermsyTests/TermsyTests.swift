@@ -394,7 +394,8 @@ struct TermsyTests {
 	}
 
 	@Test func remoteTmuxSessionDiscoveryParsesSessionNames() {
-		let output = "api\nworker\r\ndeploy app\n\napi\n  ops  \n"
+		let output = "Welcome\n__TERMSY_TMUX_SESSION__=api\n__TERMSY_TMUX_SESSION__=worker\r\n" +
+			"__TERMSY_TMUX_SESSION__=deploy app\n\n__TERMSY_TMUX_SESSION__=api\n  __TERMSY_TMUX_SESSION__=ops  \n"
 
 		#expect(RemoteTmuxSessionDiscovery.parseListSessionsOutput(output) == ["api", "worker", "deploy app", "ops"])
 	}

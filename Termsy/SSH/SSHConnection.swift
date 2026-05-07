@@ -42,7 +42,10 @@ enum RemoteTmuxSessionDiscovery {
 		var names: [String] = []
 
 		for line in output.components(separatedBy: .newlines) {
-			let name = line.trimmingCharacters(in: .whitespacesAndNewlines)
+			let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+			guard trimmedLine.hasPrefix(outputPrefix) else { continue }
+			let name = String(trimmedLine.dropFirst(outputPrefix.count))
+				.trimmingCharacters(in: .whitespacesAndNewlines)
 			guard !name.isEmpty, seenNames.insert(name).inserted else { continue }
 			names.append(name)
 		}
@@ -50,12 +53,23 @@ enum RemoteTmuxSessionDiscovery {
 		return names
 	}
 
+	private static let outputPrefix = "__TERMSY_TMUX_SESSION__="
+
 	private static let listSessionsCommand: String = {
-		let script = #"""
+		let tmuxListScript = #"""
+		PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$HOME/.local/bin:$HOME/.nix-profile/bin:/run/current-system/sw/bin"
+		export PATH
 		if command -v tmux >/dev/null 2>&1; then
-		  tmux list-sessions -F '#{session_name}' 2>/dev/null || true
+		  tmux list-sessions -F '__TERMSY_TMUX_SESSION__=#{session_name}' 2>/dev/null || true
 		fi
 		"""#
+		let loginShellCommand = "exec /bin/sh -c \(shellQuoted(tmuxListScript))"
+		let script = tmuxListScript + "\n" + #"""
+		if [ -n "${SHELL-}" ] && [ -x "$SHELL" ]; then
+		  "$SHELL" -l -i -c LOGIN_SHELL_COMMAND 2>/dev/null || true
+		fi
+		"""#
+		.replacingOccurrences(of: "LOGIN_SHELL_COMMAND", with: shellQuoted(loginShellCommand))
 		return "/bin/sh -c \(shellQuoted(script))"
 	}()
 
