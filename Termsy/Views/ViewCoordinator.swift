@@ -604,24 +604,31 @@ class TerminalTab: Identifiable {
 	private(set) var customTitle: String?
 
 	var automaticTitle: String {
-		let dynamicTitle = reportedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-		if !dynamicTitle.isEmpty {
-			return dynamicTitle
-		}
-
 		switch endpoint {
 		case .remote:
 			guard let session else { return "Session" }
-			let baseTitle = "\(session.username)@\(session.hostname)"
-			if let tmuxName = session.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
-			   !tmuxName.isEmpty
-			{
-				return "\(tmuxName) • \(baseTitle)"
+			if let tmuxTitle = startupTmuxTabTitle(for: session) {
+				return tmuxTitle
 			}
-			return baseTitle
+			let dynamicTitle = reportedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+			if !dynamicTitle.isEmpty {
+				return dynamicTitle
+			}
+			return "\(session.username)@\(session.hostname)"
 		case let .localShell(profile):
+			let dynamicTitle = reportedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+			if !dynamicTitle.isEmpty {
+				return dynamicTitle
+			}
 			return profile.titleFallback
 		}
+	}
+
+	private func startupTmuxTabTitle(for session: Session) -> String? {
+		guard let tmuxName = session.trimmedTmuxSessionName else { return nil }
+		let trimmedHostname = session.hostname.trimmingCharacters(in: .whitespacesAndNewlines)
+		let hostname = trimmedHostname.isEmpty ? session.hostname : trimmedHostname
+		return "\(hostname)#\(tmuxName)"
 	}
 
 	var displayTitle: String {

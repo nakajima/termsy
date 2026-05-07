@@ -112,6 +112,64 @@ struct DirectSessionTarget: Hashable {
 	}
 }
 
+private struct RemoteTmuxSessionLookupTarget: Hashable, Sendable {
+	let username: String
+	let hostname: String
+	let port: Int
+
+	nonisolated init(_ target: DirectSessionTarget) {
+		username = target.username
+		hostname = target.hostname
+		port = target.port
+	}
+
+	var normalizedUsername: String {
+		username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+	}
+
+	var normalizedHostname: String {
+		hostname.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+	}
+
+	var displayTarget: String {
+		let baseTitle = "\(username)@\(hostname)"
+		guard port != 22 else { return baseTitle }
+		return "\(baseTitle):\(port)"
+	}
+
+	func session(tmuxSessionName: String, initialWorkingDirectory: String?) -> Session {
+		Session(
+			hostname: hostname,
+			username: username,
+			tmuxSessionName: tmuxSessionName,
+			initialWorkingDirectory: initialWorkingDirectory,
+			port: port,
+			autoconnect: false
+		)
+	}
+}
+
+private struct RemoteTmuxSessionCandidate: Identifiable, Hashable, Sendable {
+	let lookupTarget: RemoteTmuxSessionLookupTarget
+	let name: String
+	let initialWorkingDirectory: String?
+
+	var session: Session {
+		lookupTarget.session(tmuxSessionName: name, initialWorkingDirectory: initialWorkingDirectory)
+	}
+
+	var id: String {
+		session.normalizedTargetKey
+	}
+}
+
+private enum RemoteTmuxSessionLookupState: Equatable {
+	case idle
+	case loading(RemoteTmuxSessionLookupTarget)
+	case loaded(RemoteTmuxSessionLookupTarget, [String])
+	case failed(RemoteTmuxSessionLookupTarget)
+}
+
 struct SessionListContent: View {
 	enum Variant {
 		case savedSessions
@@ -175,6 +233,7 @@ struct SessionListContent: View {
 	private enum ItemID: Hashable {
 		case localShell
 		case directConnection(String)
+		case remoteTmuxSession(String)
 		case session(String)
 		case newSession
 	}
@@ -184,6 +243,7 @@ struct SessionListContent: View {
 	@Query(SessionsRequest()) private var sessions: [Session]
 	@State private var filterText = ""
 	@State private var directConnectError: String?
+	@State private var remoteTmuxLookupState: RemoteTmuxSessionLookupState = .idle
 	@State private var selectedItemID: ItemID?
 	@State private var isFilterFocused = true
 
@@ -239,6 +299,52 @@ struct SessionListContent: View {
 		parsedDirectTarget
 	}
 
+	private var remoteTmuxLookupTarget: RemoteTmuxSessionLookupTarget? {
+		parsedDirectTarget.map(RemoteTmuxSessionLookupTarget.init)
+	}
+
+	private var remoteTmuxNameFilter: String? {
+		guard let filter = parsedDirectTarget?.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+		      !filter.isEmpty
+		else {
+			return nil
+		}
+		return filter.lowercased()
+	}
+
+	private var remoteTmuxSessions: [RemoteTmuxSessionCandidate] {
+		guard let lookupTarget = remoteTmuxLookupTarget,
+		      case let .loaded(loadedTarget, names) = remoteTmuxLookupState,
+		      loadedTarget == lookupTarget
+		else {
+			return []
+		}
+
+		let savedTargetKeys = Set(sessions.map(\.normalizedTargetKey))
+		return names.compactMap { name in
+			if let remoteTmuxNameFilter, !name.lowercased().contains(remoteTmuxNameFilter) {
+				return nil
+			}
+
+			let candidate = RemoteTmuxSessionCandidate(
+				lookupTarget: lookupTarget,
+				name: name,
+				initialWorkingDirectory: parsedDirectTarget?.initialWorkingDirectory
+			)
+			guard !savedTargetKeys.contains(candidate.session.normalizedTargetKey) else { return nil }
+			return candidate
+		}
+	}
+
+	private var isLoadingRemoteTmuxSessions: Bool {
+		guard let lookupTarget = remoteTmuxLookupTarget,
+		      case let .loading(loadingTarget) = remoteTmuxLookupState
+		else {
+			return false
+		}
+		return loadingTarget == lookupTarget
+	}
+
 	private var shouldShowLocalShellRow: Bool {
 		#if os(macOS)
 			guard !normalizedFilterText.isEmpty else { return true }
@@ -259,6 +365,7 @@ struct SessionListContent: View {
 		if let directConnectTarget {
 			ids.append(.directConnection(directConnectTarget.normalizedTargetKey))
 		}
+		ids.append(contentsOf: remoteTmuxSessions.map { .remoteTmuxSession($0.id) })
 		for group in groupedSessions {
 			ids.append(contentsOf: group.sessions.map { itemID(for: $0) })
 		}
@@ -286,6 +393,18 @@ struct SessionListContent: View {
 				if let directConnectTarget {
 					Section {
 						directConnectionRow(for: directConnectTarget)
+					}
+				}
+
+				if isLoadingRemoteTmuxSessions {
+					Section("Running tmux") {
+						remoteTmuxLoadingRow()
+					}
+				} else if !remoteTmuxSessions.isEmpty {
+					Section("Running tmux") {
+						ForEach(remoteTmuxSessions) { remoteSession in
+							remoteTmuxSessionRow(for: remoteSession)
+						}
 					}
 				}
 
@@ -348,6 +467,9 @@ struct SessionListContent: View {
 			}
 			.onChange(of: selectedItemID, initial: false) { _, _ in
 				scrollSelectionIfNeeded(using: proxy, animated: true)
+			}
+			.task(id: remoteTmuxLookupTarget) {
+				await refreshRemoteTmuxSessions(for: remoteTmuxLookupTarget)
 			}
 		}
 	}
@@ -414,6 +536,64 @@ struct SessionListContent: View {
 		}
 		.buttonStyle(.plain)
 		.accessibilityIdentifier("row.directSession")
+		.accessibilityValue(isSelected ? "selected" : "not selected")
+		.listRowInsets(denseRowInsets)
+		.listRowBackground(rowBackground(isSelected: isSelected))
+		.id(itemID)
+	}
+
+	@ViewBuilder
+	private func remoteTmuxLoadingRow() -> some View {
+		HStack(spacing: rowHorizontalSpacing) {
+			ProgressView()
+				.controlSize(.small)
+			Text("Checking for tmux sessions...")
+				.font(variant.sessionSubtitleFont)
+				.foregroundStyle(theme.secondaryText)
+		}
+		.frame(maxWidth: .infinity, alignment: .leading)
+		.padding(.vertical, rowVerticalPadding)
+		.listRowInsets(denseRowInsets)
+		.listRowBackground(theme.cardBackground)
+	}
+
+	@ViewBuilder
+	private func remoteTmuxSessionRow(for remoteSession: RemoteTmuxSessionCandidate) -> some View {
+		let itemID = ItemID.remoteTmuxSession(remoteSession.id)
+		let isSelected = selectedItemID == itemID
+		let session = remoteSession.session
+
+		Button {
+			selectedItemID = itemID
+			connect(to: session)
+		} label: {
+			HStack(alignment: .top, spacing: rowHorizontalSpacing) {
+				Image(systemName: "terminal")
+					.foregroundStyle(theme.accent)
+				VStack(alignment: .leading, spacing: rowTextSpacing) {
+					Text(remoteSession.name)
+						.font(variant.sessionTitleFont)
+						.foregroundStyle(theme.primaryText)
+						.lineLimit(1)
+					Text("Running tmux on \(remoteSession.lookupTarget.displayTarget)")
+						.font(variant.sessionSubtitleFont)
+						.foregroundStyle(theme.secondaryText)
+						.lineLimit(1)
+					if let initialWorkingDirectory = remoteSession.initialWorkingDirectory {
+						Text("cwd: \(initialWorkingDirectory)")
+							.font(variant.sessionSubtitleFont)
+							.foregroundStyle(theme.secondaryText)
+							.lineLimit(1)
+					}
+				}
+				Spacer(minLength: 0)
+			}
+			.frame(maxWidth: .infinity, alignment: .leading)
+			.padding(.vertical, rowVerticalPadding)
+			.contentShape(Rectangle())
+		}
+		.buttonStyle(.plain)
+		.accessibilityIdentifier("row.remoteTmuxSession.\(session.normalizedTargetKey)")
 		.accessibilityValue(isSelected ? "selected" : "not selected")
 		.listRowInsets(denseRowInsets)
 		.listRowBackground(rowBackground(isSelected: isSelected))
@@ -581,6 +761,12 @@ struct SessionListContent: View {
 				return
 			}
 			connect(to: target)
+		case let .remoteTmuxSession(key):
+			guard let remoteSession = remoteTmuxSessions.first(where: { $0.id == key }) else {
+				ensureValidSelection()
+				return
+			}
+			connect(to: remoteSession.session)
 		case .session:
 			guard let session = sessions.first(where: { itemID(for: $0) == selectedItemID }) else {
 				ensureValidSelection()
@@ -654,8 +840,63 @@ struct SessionListContent: View {
 	}
 
 	@MainActor
+	private func refreshRemoteTmuxSessions(for lookupTarget: RemoteTmuxSessionLookupTarget?) async {
+		guard let lookupTarget else {
+			remoteTmuxLookupState = .idle
+			return
+		}
+
+		remoteTmuxLookupState = .loading(lookupTarget)
+
+		do {
+			try await Task.sleep(nanoseconds: 300_000_000)
+		} catch {
+			return
+		}
+
+		do {
+			let names = try await RemoteTmuxSessionDiscovery.fetchSessionNames(
+				host: lookupTarget.hostname,
+				port: lookupTarget.port,
+				username: lookupTarget.username,
+				password: passwordForRemoteTmuxLookup(lookupTarget)
+			)
+			guard !Task.isCancelled else { return }
+			remoteTmuxLookupState = .loaded(lookupTarget, names)
+		} catch {
+			guard !Task.isCancelled else { return }
+			remoteTmuxLookupState = .failed(lookupTarget)
+		}
+	}
+
+	private func passwordForRemoteTmuxLookup(_ lookupTarget: RemoteTmuxSessionLookupTarget) -> String? {
+		for savedMatch in sessions where savedMatch.normalizedUsername == lookupTarget.normalizedUsername
+			&& savedMatch.normalizedHostname == lookupTarget.normalizedHostname
+			&& savedMatch.port == lookupTarget.port
+		{
+			if let password = Keychain.password(for: savedMatch) {
+				return password
+			}
+		}
+
+		let baseSession = Session(
+			hostname: lookupTarget.hostname,
+			username: lookupTarget.username,
+			tmuxSessionName: nil,
+			port: lookupTarget.port,
+			autoconnect: false
+		)
+		return Keychain.password(for: baseSession)
+	}
+
+	@MainActor
 	private func connect(to target: DirectSessionTarget) {
-		var session = target.session
+		connect(to: target.session)
+	}
+
+	@MainActor
+	private func connect(to session: Session) {
+		var session = session
 
 		do {
 			try dbContext.writer.write { db in

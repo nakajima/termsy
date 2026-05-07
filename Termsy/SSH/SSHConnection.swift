@@ -23,6 +23,47 @@ struct SSHCommandResult: Sendable {
 	let exitSignal: String?
 }
 
+enum RemoteTmuxSessionDiscovery {
+	static func fetchSessionNames(host: String, port: Int, username: String, password: String?) async throws -> [String] {
+		let connection = SSHConnection(
+			onData: { _ in },
+			onClose: { _ in },
+			onEvent: { _ in }
+		)
+		defer { connection.disconnect() }
+
+		try await connection.connect(host: host, port: port, username: username, password: password)
+		let result = try await connection.runDetachedCommand(listSessionsCommand)
+		return parseListSessionsOutput(result.output)
+	}
+
+	static func parseListSessionsOutput(_ output: String) -> [String] {
+		var seenNames = Set<String>()
+		var names: [String] = []
+
+		for line in output.components(separatedBy: .newlines) {
+			let name = line.trimmingCharacters(in: .whitespacesAndNewlines)
+			guard !name.isEmpty, seenNames.insert(name).inserted else { continue }
+			names.append(name)
+		}
+
+		return names
+	}
+
+	private static let listSessionsCommand: String = {
+		let script = #"""
+		if command -v tmux >/dev/null 2>&1; then
+		  tmux list-sessions -F '#{session_name}' 2>/dev/null || true
+		fi
+		"""#
+		return "/bin/sh -c \(shellQuoted(script))"
+	}()
+
+	private static func shellQuoted(_ value: String) -> String {
+		"'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+	}
+}
+
 enum SSHConnectionError: Error, LocalizedError, CustomStringConvertible {
 	case notConnected
 	case invalidChannelType

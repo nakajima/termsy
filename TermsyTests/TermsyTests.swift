@@ -106,6 +106,23 @@ struct TermsyTests {
 		#expect(tab.displayTitle == "htop")
 	}
 
+	@MainActor
+	@Test func startupTmuxTabTitleIgnoresPromptDirectoryTitle() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: "api",
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+
+		tab.reportedTitle = "~"
+
+		#expect(tab.automaticTitle == "prod.example.com#api")
+		#expect(tab.displayTitle == "prod.example.com#api")
+	}
+
 	@Test func screenshotTerminalTranscriptUsesCRLFLineEndings() {
 		let transcript = AppStoreScreenshotFixtures.terminalTranscript
 		let transcriptWithoutCRLF = transcript.replacingOccurrences(of: "\r\n", with: "")
@@ -374,6 +391,12 @@ struct TermsyTests {
 	@Test func directSessionTargetRejectsInvalidPort() {
 		#expect(DirectSessionTarget("pat@example.com:src -70000") == nil)
 		#expect(DirectSessionTarget("pat@example.com -p nope") == nil)
+	}
+
+	@Test func remoteTmuxSessionDiscoveryParsesSessionNames() {
+		let output = "api\nworker\r\ndeploy app\n\napi\n  ops  \n"
+
+		#expect(RemoteTmuxSessionDiscovery.parseListSessionsOutput(output) == ["api", "worker", "deploy app", "ops"])
 	}
 
 	@Test func tmuxNameIsPrimarySavedSessionTitle() {
