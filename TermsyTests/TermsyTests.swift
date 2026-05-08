@@ -428,6 +428,15 @@ struct TermsyTests {
 		#expect(command.contains("passwd_shell=$(termsy_passwd_shell || true)"))
 		#expect(command.contains("if [ -z \"$shell_path\" ] || [ ! -x \"$shell_path\" ]; then"))
 		#expect(command.contains("shell_path=/bin/sh"))
+		#expect(command.contains("export SHELL=\"$shell_path\""))
+	}
+
+	@Test func remoteStartupTmuxDoesNotOverrideNewSessionShellCommand() {
+		let command = ShellTitleIntegration.remoteStartupCommand(tmuxSessionName: "api", initialWorkingDirectory: nil)
+
+		#expect(command.contains("exec tmux new-session -A -s \"$session\""))
+		#expect(command.contains("exec tmux new-session -A -s \"$__termsy_tmux_session\""))
+		#expect(!command.contains("TERMSY_TMUX_SHELL_COMMAND"))
 	}
 
 	@Test func tmuxStartupRequiresBootstrapCommandInsteadOfPlainShellFallback() {

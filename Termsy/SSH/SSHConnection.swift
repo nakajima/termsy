@@ -226,18 +226,13 @@ enum ShellTitleIntegration {
 
 	if [[ -n "${TERMSY_STARTUP_TMUX_SESSION-}" ]]; then
 	  __termsy_tmux_session=$TERMSY_STARTUP_TMUX_SESSION
-	  __termsy_tmux_command=${TERMSY_TMUX_SHELL_COMMAND-}
-	  builtin unset TERMSY_STARTUP_TMUX_SESSION TERMSY_TMUX_SHELL_COMMAND
+	  builtin unset TERMSY_STARTUP_TMUX_SESSION
 	  if command -v tmux >/dev/null 2>&1; then
-	    if [[ -n "$__termsy_tmux_command" ]]; then
-	      exec tmux new-session -A -s "$__termsy_tmux_session" "$__termsy_tmux_command"
-	    else
-	      exec tmux new-session -A -s "$__termsy_tmux_session"
-	    fi
+	    exec tmux new-session -A -s "$__termsy_tmux_session"
 	  else
 	    printf 'Termsy: tmux not found after bash startup; continuing with login shell\n' >&2
 	  fi
-	  builtin unset __termsy_tmux_session __termsy_tmux_command
+	  builtin unset __termsy_tmux_session
 	fi
 
 	if [[ -n "${TERMSY_TITLE_HOOKS_ACTIVE-}" ]]; then
@@ -324,15 +319,10 @@ enum ShellTitleIntegration {
 	function __termsy_maybe_start_tmux --on-event fish_prompt
 	    if set -q TERMSY_STARTUP_TMUX_SESSION
 	        set -l session "$TERMSY_STARTUP_TMUX_SESSION"
-	        set -l shell_command "$TERMSY_TMUX_SHELL_COMMAND"
-	        set -e TERMSY_STARTUP_TMUX_SESSION TERMSY_TMUX_SHELL_COMMAND
+	        set -e TERMSY_STARTUP_TMUX_SESSION
 	        functions -e __termsy_maybe_start_tmux
 	        if command -sq tmux
-	            if test -n "$shell_command"
-	                exec tmux new-session -A -s "$session" "$shell_command"
-	            else
-	                exec tmux new-session -A -s "$session"
-	            end
+	            exec tmux new-session -A -s "$session"
 	        else
 	            printf 'Termsy: tmux not found after fish startup; continuing with login shell\n' >&2
 	        end
@@ -475,19 +465,14 @@ enum ShellTitleIntegration {
 	  emulate -L zsh
 	  [[ -n "${TERMSY_STARTUP_TMUX_SESSION-}" ]] || return 0
 	  local session=$TERMSY_STARTUP_TMUX_SESSION
-	  local shell_command=${TERMSY_TMUX_SHELL_COMMAND-}
-	  unset TERMSY_STARTUP_TMUX_SESSION TERMSY_TMUX_SHELL_COMMAND
+	  unset TERMSY_STARTUP_TMUX_SESSION
 	  if (( $+functions[add-zsh-hook] )); then
 	    add-zsh-hook -d precmd _termsy_maybe_start_tmux 2>/dev/null
 	  else
 	    precmd_functions=(${precmd_functions:#_termsy_maybe_start_tmux})
 	  fi
 	  if (( $+commands[tmux] )); then
-	    if [[ -n "$shell_command" ]]; then
-	      exec tmux new-session -A -s "$session" "$shell_command"
-	    else
-	      exec tmux new-session -A -s "$session"
-	    fi
+	    exec tmux new-session -A -s "$session"
 	  else
 	    print -ru2 -- 'Termsy: tmux not found after zsh startup; continuing with login shell'
 	  fi
@@ -597,6 +582,7 @@ enum ShellTitleIntegration {
 		  shell_path=/bin/sh
 		fi
 		shell_name=${shell_path##*/}
+		export SHELL="$shell_path"
 
 		termsy_exec_user_shell() {
 		  case "$shell_name" in
@@ -667,7 +653,6 @@ enum ShellTitleIntegration {
 		__TERMSY_BASH_SCRIPT__
 		__TERMSY_BASH__
 		    ); then
-		      export TERMSY_TMUX_SHELL_COMMAND="exec \"$shell_path\" --noprofile --norc --rcfile \"$bash_dir/termsy-title.bash\" -i"
 		      exec "$shell_path" --noprofile --norc --rcfile "$bash_dir/termsy-title.bash" -i
 		    fi
 		    termsy_log 'failed to prepare bash integration; starting normal shell'
@@ -687,7 +672,6 @@ enum ShellTitleIntegration {
 		      else
 		        export XDG_DATA_DIRS="$fish_dir:/usr/local/share:/usr/share"
 		      fi
-		      export TERMSY_TMUX_SHELL_COMMAND="exec \"$shell_path\" -i -l"
 		      exec "$shell_path" -i -l
 		    fi
 		    termsy_log 'failed to prepare fish integration; starting normal shell'
@@ -721,7 +705,6 @@ enum ShellTitleIntegration {
 		      fi
 		      export TERMSY_TITLE_ZSH_INTEGRATION_FILE="$zsh_dir/termsy-title.zsh"
 		      export ZDOTDIR="$zsh_dir"
-		      export TERMSY_TMUX_SHELL_COMMAND="exec \"$shell_path\" -i -l"
 		      exec "$shell_path" -i -l
 		    fi
 		    termsy_log 'failed to prepare zsh integration; starting normal shell'
