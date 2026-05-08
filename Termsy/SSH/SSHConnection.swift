@@ -56,20 +56,13 @@ enum RemoteTmuxSessionDiscovery {
 	private static let outputPrefix = "__TERMSY_TMUX_SESSION__="
 
 	private static let listSessionsCommand: String = {
-		let tmuxListScript = #"""
+		let script = #"""
 		PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$HOME/.local/bin:$HOME/.nix-profile/bin:/run/current-system/sw/bin"
 		export PATH
 		if command -v tmux >/dev/null 2>&1; then
 		  tmux list-sessions -F '__TERMSY_TMUX_SESSION__=#{session_name}' 2>/dev/null || true
 		fi
 		"""#
-		let loginShellCommand = "exec /bin/sh -c \(shellQuoted(tmuxListScript))"
-		let script = tmuxListScript + "\n" + #"""
-		if [ -n "${SHELL-}" ] && [ -x "$SHELL" ]; then
-		  "$SHELL" -l -i -c LOGIN_SHELL_COMMAND 2>/dev/null || true
-		fi
-		"""#
-		.replacingOccurrences(of: "LOGIN_SHELL_COMMAND", with: shellQuoted(loginShellCommand))
 		return "/bin/sh -c \(shellQuoted(script))"
 	}()
 
@@ -128,7 +121,7 @@ enum ShellTitleIntegration {
 		return String(cString: version)
 	}()
 
-	static func localLaunch(shellPath: String, environment: [String: String]) throws -> LocalLaunch? {
+	static func localLaunch(shellPath: String, environment: [String: String]) -> LocalLaunch? {
 		guard let shell = Shell(shellPath: shellPath) else { return nil }
 
 		let fileManager = FileManager.default
@@ -170,8 +163,14 @@ enum ShellTitleIntegration {
 
 			case .zsh:
 				let envfile = root.appendingPathComponent(".zshenv")
+				let profileFile = root.appendingPathComponent(".zprofile")
+				let rcFile = root.appendingPathComponent(".zshrc")
+				let loginFile = root.appendingPathComponent(".zlogin")
 				let integrationFile = root.appendingPathComponent("termsy-title.zsh")
 				try zshEnvScript.write(to: envfile, atomically: true, encoding: .utf8)
+				try zshProfileScript.write(to: profileFile, atomically: true, encoding: .utf8)
+				try zshRcScript.write(to: rcFile, atomically: true, encoding: .utf8)
+				try zshLoginScript.write(to: loginFile, atomically: true, encoding: .utf8)
 				try zshIntegrationScript.write(to: integrationFile, atomically: true, encoding: .utf8)
 				launchEnvironment["ZDOTDIR"] = root.path
 				launchEnvironment["TERMSY_TITLE_ZSH_INTEGRATION_FILE"] = integrationFile.path
@@ -186,7 +185,7 @@ enum ShellTitleIntegration {
 			}
 		} catch {
 			try? fileManager.removeItem(at: root)
-			throw error
+			return nil
 		}
 	}
 
@@ -356,21 +355,114 @@ enum ShellTitleIntegration {
 	private static let zshEnvScript = #"""
 	if [[ -n "${TERMSY_TITLE_ORIGINAL_ZDOTDIR+X}" ]]; then
 	  builtin export ZDOTDIR="$TERMSY_TITLE_ORIGINAL_ZDOTDIR"
-	  builtin unset TERMSY_TITLE_ORIGINAL_ZDOTDIR
 	else
 	  builtin unset ZDOTDIR
 	fi
 
-	{
-	  builtin typeset _termsy_file=${ZDOTDIR-$HOME}/.zshenv
+	builtin typeset _termsy_wrapper_zdotdir="${${(%):-%x}:A:h}"
+	builtin typeset _termsy_user_zdotdir="${ZDOTDIR:-$HOME}"
+	builtin typeset _termsy_file="$_termsy_user_zdotdir/.zshenv"
+	[[ ! -r "$_termsy_file" ]] || builtin source -- "$_termsy_file"
+
+	if [[ -n "${ZDOTDIR+X}" ]]; then
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR="$ZDOTDIR"
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR_SET=1
+	else
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR="$HOME"
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR_SET=0
+	fi
+	builtin export TERMSY_TITLE_WRAPPER_ZDOTDIR="$_termsy_wrapper_zdotdir"
+	builtin export ZDOTDIR="$_termsy_wrapper_zdotdir"
+	builtin unset _termsy_file _termsy_user_zdotdir _termsy_wrapper_zdotdir
+	"""#
+
+	private static let zshProfileScript = #"""
+	builtin typeset _termsy_wrapper_zdotdir="${TERMSY_TITLE_WRAPPER_ZDOTDIR:-${${(%):-%x}:A:h}}"
+	builtin typeset _termsy_user_zdotdir="${TERMSY_TITLE_USER_ZDOTDIR:-$HOME}"
+	if [[ "${TERMSY_TITLE_USER_ZDOTDIR_SET:-0}" == 1 ]]; then
+	  builtin export ZDOTDIR="$_termsy_user_zdotdir"
+	else
+	  builtin unset ZDOTDIR
+	fi
+
+	builtin typeset _termsy_file="$_termsy_user_zdotdir/.zprofile"
+	[[ ! -r "$_termsy_file" ]] || builtin source -- "$_termsy_file"
+
+	if [[ -n "${ZDOTDIR+X}" ]]; then
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR="$ZDOTDIR"
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR_SET=1
+	else
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR="$HOME"
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR_SET=0
+	fi
+	builtin export ZDOTDIR="$_termsy_wrapper_zdotdir"
+	builtin unset _termsy_file _termsy_user_zdotdir _termsy_wrapper_zdotdir
+	"""#
+
+	private static let zshRcScript = #"""
+	builtin typeset _termsy_wrapper_zdotdir="${TERMSY_TITLE_WRAPPER_ZDOTDIR:-${${(%):-%x}:A:h}}"
+	builtin typeset _termsy_user_zdotdir="${TERMSY_TITLE_USER_ZDOTDIR:-$HOME}"
+	if [[ "${TERMSY_TITLE_USER_ZDOTDIR_SET:-0}" == 1 ]]; then
+	  builtin export ZDOTDIR="$_termsy_user_zdotdir"
+	else
+	  builtin unset ZDOTDIR
+	fi
+
+	builtin typeset _termsy_file="$_termsy_user_zdotdir/.zshrc"
+	[[ ! -r "$_termsy_file" ]] || builtin source -- "$_termsy_file"
+
+	if [[ -n "${ZDOTDIR+X}" ]]; then
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR="$ZDOTDIR"
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR_SET=1
+	else
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR="$HOME"
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR_SET=0
+	fi
+
+	if [[ -o login ]]; then
+	  builtin export ZDOTDIR="$_termsy_wrapper_zdotdir"
+	else
+	  _termsy_file="${TERMSY_TITLE_ZSH_INTEGRATION_FILE:-$_termsy_wrapper_zdotdir/termsy-title.zsh}"
 	  [[ ! -r "$_termsy_file" ]] || builtin source -- "$_termsy_file"
-	} always {
-	  if [[ -o interactive ]]; then
-	    builtin typeset _termsy_file="${TERMSY_TITLE_ZSH_INTEGRATION_FILE:-${${(%):-%x}:A:h}/termsy-title.zsh}"
-	    [[ ! -r "$_termsy_file" ]] || builtin source -- "$_termsy_file"
+	  if [[ "${TERMSY_TITLE_USER_ZDOTDIR_SET:-0}" == 1 ]]; then
+	    builtin export ZDOTDIR="$TERMSY_TITLE_USER_ZDOTDIR"
+	  else
+	    builtin unset ZDOTDIR
 	  fi
-	  builtin unset _termsy_file
-	}
+	  builtin unset TERMSY_TITLE_ORIGINAL_ZDOTDIR TERMSY_TITLE_USER_ZDOTDIR TERMSY_TITLE_USER_ZDOTDIR_SET TERMSY_TITLE_WRAPPER_ZDOTDIR TERMSY_TITLE_ZSH_INTEGRATION_FILE
+	fi
+	builtin unset _termsy_file _termsy_user_zdotdir _termsy_wrapper_zdotdir
+	"""#
+
+	private static let zshLoginScript = #"""
+	builtin typeset _termsy_wrapper_zdotdir="${TERMSY_TITLE_WRAPPER_ZDOTDIR:-${${(%):-%x}:A:h}}"
+	builtin typeset _termsy_user_zdotdir="${TERMSY_TITLE_USER_ZDOTDIR:-$HOME}"
+	if [[ "${TERMSY_TITLE_USER_ZDOTDIR_SET:-0}" == 1 ]]; then
+	  builtin export ZDOTDIR="$_termsy_user_zdotdir"
+	else
+	  builtin unset ZDOTDIR
+	fi
+
+	builtin typeset _termsy_file="$_termsy_user_zdotdir/.zlogin"
+	[[ ! -r "$_termsy_file" ]] || builtin source -- "$_termsy_file"
+
+	if [[ -n "${ZDOTDIR+X}" ]]; then
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR="$ZDOTDIR"
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR_SET=1
+	else
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR="$HOME"
+	  builtin export TERMSY_TITLE_USER_ZDOTDIR_SET=0
+	fi
+	_termsy_file="${TERMSY_TITLE_ZSH_INTEGRATION_FILE:-$_termsy_wrapper_zdotdir/termsy-title.zsh}"
+	[[ ! -r "$_termsy_file" ]] || builtin source -- "$_termsy_file"
+
+	if [[ "${TERMSY_TITLE_USER_ZDOTDIR_SET:-0}" == 1 ]]; then
+	  builtin export ZDOTDIR="$TERMSY_TITLE_USER_ZDOTDIR"
+	else
+	  builtin unset ZDOTDIR
+	fi
+	builtin unset TERMSY_TITLE_ORIGINAL_ZDOTDIR TERMSY_TITLE_USER_ZDOTDIR TERMSY_TITLE_USER_ZDOTDIR_SET TERMSY_TITLE_WRAPPER_ZDOTDIR TERMSY_TITLE_ZSH_INTEGRATION_FILE
+	builtin unset _termsy_file _termsy_user_zdotdir _termsy_wrapper_zdotdir
 	"""#
 
 	private static let zshIntegrationScript = #"""
@@ -464,25 +556,6 @@ enum ShellTitleIntegration {
 			"export TERM_PROGRAM_VERSION=\(shellQuoted(termProgramVersion))\n"
 		}
 
-		let terminfoSetupScript = """
-		ready=0
-		if command -v infocmp >/dev/null 2>&1 && infocmp xterm-ghostty >/dev/null 2>&1; then
-		  ready=1
-		elif command -v tic >/dev/null 2>&1; then
-		  mkdir -p ~/.terminfo 2>/dev/null || true
-		  if cat <<'__TERMSY_GHOSTTY_TERMINFO__' | tic -x - >/dev/null 2>&1; then
-		\(GhosttyTerminfo.source)
-		__TERMSY_GHOSTTY_TERMINFO__
-		    ready=1
-		  fi
-		fi
-		if [ "$ready" = 1 ]; then
-		  export TERM=xterm-ghostty
-		else
-		  export TERM=xterm-256color
-		fi
-		"""
-
 		let tmuxStartupExport = if let tmuxSessionName, !tmuxSessionName.isEmpty {
 			"export TERMSY_STARTUP_TMUX_SESSION=\(shellQuoted(tmuxSessionName))\n"
 		} else {
@@ -498,13 +571,48 @@ enum ShellTitleIntegration {
 			""
 		}
 
-		let cacheRootScript = #"""
+		let bootstrapEnvironment = """
+		export TERM_PROGRAM=ghostty
+		export COLORTERM=truecolor
+		\(termProgramVersionExport)\(tmuxStartupExport)\(initialWorkingDirectoryExport)
+		"""
+
+		return #"""
+		termsy_log() {
+		  printf 'Termsy: %s\n' "$*" >&2
+		}
+
+		termsy_passwd_shell() {
+		  [ -n "${USER:-}" ] || return 1
+		  [ -r /etc/passwd ] || return 1
+		  awk -F: -v user="$USER" '$1 == user { print $7; exit }' /etc/passwd 2>/dev/null
+		}
+
 		shell_path=${SHELL:-}
-		if [ -z "$shell_path" ] && [ -n "${USER:-}" ] && [ -r /etc/passwd ]; then
-		  shell_path=$(awk -F: -v user="$USER" '$1 == user { print $7; exit }' /etc/passwd 2>/dev/null)
+		passwd_shell=$(termsy_passwd_shell || true)
+		if [ -z "$shell_path" ] || [ ! -x "$shell_path" ]; then
+		  shell_path=$passwd_shell
 		fi
-		[ -n "$shell_path" ] || shell_path=/bin/sh
+		if [ -z "$shell_path" ] || [ ! -x "$shell_path" ]; then
+		  shell_path=/bin/sh
+		fi
 		shell_name=${shell_path##*/}
+
+		termsy_exec_user_shell() {
+		  case "$shell_name" in
+		    bash)
+		      exec "$shell_path" -l -i
+		      ;;
+		    fish|zsh)
+		      exec "$shell_path" -i -l
+		      ;;
+		    *)
+		      exec "$shell_path"
+		      ;;
+		  esac
+		  exec /bin/sh
+		}
+
 		cache_root=${XDG_CACHE_HOME:-}
 		if [ -z "$cache_root" ]; then
 		  if [ -n "${HOME:-}" ]; then
@@ -514,9 +622,9 @@ enum ShellTitleIntegration {
 		  fi
 		fi
 		cache_root="$cache_root/termsy-shell-title"
-		export TERM_PROGRAM=ghostty
-		export COLORTERM=truecolor
-		"""# + termProgramVersionExport + tmuxStartupExport + initialWorkingDirectoryExport + #"""
+
+		__TERMSY_BOOTSTRAP_ENVIRONMENT__
+
 		if [ -n "${TERMSY_INITIAL_WORKING_DIRECTORY:-}" ]; then
 		  termsy_initial_working_directory=$TERMSY_INITIAL_WORKING_DIRECTORY
 		  unset TERMSY_INITIAL_WORKING_DIRECTORY
@@ -531,57 +639,108 @@ enum ShellTitleIntegration {
 		  cd "$termsy_initial_working_directory" 2>/dev/null || true
 		  unset termsy_initial_working_directory
 		fi
-		"""#
 
-		return """
-		\(cacheRootScript)
-		\(terminfoSetupScript)
+		ready=0
+		if command -v infocmp >/dev/null 2>&1 && infocmp xterm-ghostty >/dev/null 2>&1; then
+		  ready=1
+		elif [ -n "${HOME:-}" ] && command -v tic >/dev/null 2>&1; then
+		  mkdir -p "$HOME/.terminfo" 2>/dev/null || true
+		  if cat <<'__TERMSY_GHOSTTY_TERMINFO__' | tic -x - >/dev/null 2>&1; then
+		__TERMSY_GHOSTTY_TERMINFO_SOURCE__
+		__TERMSY_GHOSTTY_TERMINFO__
+		    ready=1
+		  fi
+		fi
+		if [ "$ready" = 1 ]; then
+		  export TERM=xterm-ghostty
+		else
+		  export TERM=xterm-256color
+		fi
+
 		case "$shell_name" in
 		  bash)
 		    bash_dir="$cache_root/bash"
-		    mkdir -p "$bash_dir"
-		    cat >"$bash_dir/termsy-title.bash" <<'__TERMSY_BASH__'
-		\(bashScript)
+		    if (
+		      set -e
+		      mkdir -p "$bash_dir"
+		      cat >"$bash_dir/termsy-title.bash" <<'__TERMSY_BASH__'
+		__TERMSY_BASH_SCRIPT__
 		__TERMSY_BASH__
-		    export TERMSY_TMUX_SHELL_COMMAND="exec \"$shell_path\" --noprofile --norc --rcfile \"$bash_dir/termsy-title.bash\" -i"
-		    exec "$shell_path" --noprofile --norc --rcfile "$bash_dir/termsy-title.bash" -i
+		    ); then
+		      export TERMSY_TMUX_SHELL_COMMAND="exec \"$shell_path\" --noprofile --norc --rcfile \"$bash_dir/termsy-title.bash\" -i"
+		      exec "$shell_path" --noprofile --norc --rcfile "$bash_dir/termsy-title.bash" -i
+		    fi
+		    termsy_log 'failed to prepare bash integration; starting normal shell'
+		    termsy_exec_user_shell
 		    ;;
 		  fish)
 		    fish_dir="$cache_root/fish"
-		    mkdir -p "$fish_dir/fish/vendor_conf.d"
-		    cat >"$fish_dir/fish/vendor_conf.d/termsy-title.fish" <<'__TERMSY_FISH__'
-		\(fishScript)
+		    if (
+		      set -e
+		      mkdir -p "$fish_dir/fish/vendor_conf.d"
+		      cat >"$fish_dir/fish/vendor_conf.d/termsy-title.fish" <<'__TERMSY_FISH__'
+		__TERMSY_FISH_SCRIPT__
 		__TERMSY_FISH__
-		    if [ -n "${XDG_DATA_DIRS:-}" ]; then
-		      export XDG_DATA_DIRS="$fish_dir:$XDG_DATA_DIRS"
-		    else
-		      export XDG_DATA_DIRS="$fish_dir:/usr/local/share:/usr/share"
+		    ); then
+		      if [ -n "${XDG_DATA_DIRS:-}" ]; then
+		        export XDG_DATA_DIRS="$fish_dir:$XDG_DATA_DIRS"
+		      else
+		        export XDG_DATA_DIRS="$fish_dir:/usr/local/share:/usr/share"
+		      fi
+		      export TERMSY_TMUX_SHELL_COMMAND="exec \"$shell_path\" -i -l"
+		      exec "$shell_path" -i -l
 		    fi
-		    export TERMSY_TMUX_SHELL_COMMAND="exec \"$shell_path\" -i -l"
-		    exec "$shell_path" -i -l
+		    termsy_log 'failed to prepare fish integration; starting normal shell'
+		    termsy_exec_user_shell
 		    ;;
 		  zsh)
 		    zsh_dir="$cache_root/zsh"
-		    mkdir -p "$zsh_dir"
-		    cat >"$zsh_dir/.zshenv" <<'__TERMSY_ZSHENV__'
-		\(zshEnvScript)
+		    if (
+		      set -e
+		      mkdir -p "$zsh_dir"
+		      cat >"$zsh_dir/.zshenv" <<'__TERMSY_ZSHENV__'
+		__TERMSY_ZSH_ENV_SCRIPT__
 		__TERMSY_ZSHENV__
-		    cat >"$zsh_dir/termsy-title.zsh" <<'__TERMSY_ZSH__'
-		\(zshIntegrationScript)
+		      cat >"$zsh_dir/.zprofile" <<'__TERMSY_ZPROFILE__'
+		__TERMSY_ZSH_PROFILE_SCRIPT__
+		__TERMSY_ZPROFILE__
+		      cat >"$zsh_dir/.zshrc" <<'__TERMSY_ZSHRC__'
+		__TERMSY_ZSH_RC_SCRIPT__
+		__TERMSY_ZSHRC__
+		      cat >"$zsh_dir/.zlogin" <<'__TERMSY_ZLOGIN__'
+		__TERMSY_ZSH_LOGIN_SCRIPT__
+		__TERMSY_ZLOGIN__
+		      cat >"$zsh_dir/termsy-title.zsh" <<'__TERMSY_ZSH__'
+		__TERMSY_ZSH_INTEGRATION_SCRIPT__
 		__TERMSY_ZSH__
-		    if [ "${ZDOTDIR+set}" = set ]; then
-		      export TERMSY_TITLE_ORIGINAL_ZDOTDIR="$ZDOTDIR"
+		    ); then
+		      if [ "${ZDOTDIR+set}" = set ]; then
+		        export TERMSY_TITLE_ORIGINAL_ZDOTDIR="$ZDOTDIR"
+		      else
+		        unset TERMSY_TITLE_ORIGINAL_ZDOTDIR
+		      fi
+		      export TERMSY_TITLE_ZSH_INTEGRATION_FILE="$zsh_dir/termsy-title.zsh"
+		      export ZDOTDIR="$zsh_dir"
+		      export TERMSY_TMUX_SHELL_COMMAND="exec \"$shell_path\" -i -l"
+		      exec "$shell_path" -i -l
 		    fi
-		    export TERMSY_TITLE_ZSH_INTEGRATION_FILE="$zsh_dir/termsy-title.zsh"
-		    export ZDOTDIR="$zsh_dir"
-		    export TERMSY_TMUX_SHELL_COMMAND="exec \"$shell_path\" -i -l"
-		    exec "$shell_path" -i -l
+		    termsy_log 'failed to prepare zsh integration; starting normal shell'
+		    termsy_exec_user_shell
 		    ;;
 		  *)
-		    exec "$shell_path"
+		    termsy_exec_user_shell
 		    ;;
 		esac
-		"""
+		"""#
+		.replacingOccurrences(of: "__TERMSY_BOOTSTRAP_ENVIRONMENT__", with: bootstrapEnvironment)
+		.replacingOccurrences(of: "__TERMSY_GHOSTTY_TERMINFO_SOURCE__", with: GhosttyTerminfo.source)
+		.replacingOccurrences(of: "__TERMSY_BASH_SCRIPT__", with: bashScript)
+		.replacingOccurrences(of: "__TERMSY_FISH_SCRIPT__", with: fishScript)
+		.replacingOccurrences(of: "__TERMSY_ZSH_ENV_SCRIPT__", with: zshEnvScript)
+		.replacingOccurrences(of: "__TERMSY_ZSH_PROFILE_SCRIPT__", with: zshProfileScript)
+		.replacingOccurrences(of: "__TERMSY_ZSH_RC_SCRIPT__", with: zshRcScript)
+		.replacingOccurrences(of: "__TERMSY_ZSH_LOGIN_SCRIPT__", with: zshLoginScript)
+		.replacingOccurrences(of: "__TERMSY_ZSH_INTEGRATION_SCRIPT__", with: zshIntegrationScript)
 	}
 }
 
@@ -673,120 +832,147 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		log("startShell \(size.columns)x\(size.rows) px=\(size.pixelWidth)x\(size.pixelHeight)")
 		guard let channel else { throw SSHConnectionError.notConnected }
 
-		let onData = self.onData
-		let onClose = self.onClose
-
 		do {
-			// All channel/pipeline operations must run on the NIO event loop.
-			let authDelegate = self.authDelegate
-			let childChannel: Channel = try await withTimeout(
-				channel.eventLoop.flatSubmit {
-					self.log("creating session channel...")
-					let sshHandler = try! channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
-					let promise = channel.eventLoop.makePromise(of: Channel.self)
-
-					// If auth already failed before we got here, fail immediately.
-					if authDelegate?.hasFailed == true {
-						promise.fail(SSHConnectionError.authenticationFailed)
-						return promise.futureResult
-					}
-
-					// If auth fails after this point, fail the promise so we don't hang.
-					authDelegate?.onExhausted = {
-						promise.fail(SSHConnectionError.authenticationFailed)
-					}
-
-					sshHandler.createChannel(promise) { childChannel, channelType in
-						self.log("child channel init, type=\(channelType)")
-						guard channelType == .session else {
-							return childChannel.eventLoop.makeFailedFuture(SSHConnectionError.invalidChannelType)
-						}
-						return childChannel.pipeline.addHandlers([
-							SSHChannelDataHandler(onData: onData),
-							SSHChannelLifecycleHandler(
-								isDisconnecting: { [weak self] in self?.isDisconnecting ?? false },
-								onClose: { [weak self] reason in
-									self?.sshChildChannel = nil
-									self?.channel = nil
-									self?.authDelegate = nil
-									onClose(reason)
-								}
-							),
-						])
-					}
-					return promise.futureResult
-				},
-				on: channel.eventLoop,
-				timeout: Self.sessionStartupTimeout,
-				error: .timedOut("establishing the SSH session")
-			).get()
-
-			sshChildChannel = childChannel
-			log("session channel open")
-
-			// Request PTY
-			let ptySize = pendingTerminalSize
-			let ptyReq = SSHChannelRequestEvent.PseudoTerminalRequest(
-				wantReply: true,
-				term: "xterm-256color",
-				terminalCharacterWidth: ptySize.columns,
-				terminalRowHeight: ptySize.rows,
-				terminalPixelWidth: ptySize.pixelWidth,
-				terminalPixelHeight: ptySize.pixelHeight,
-				terminalModes: .init([:])
-			)
-			try await withTimeout(
-				childChannel.triggerUserOutboundEvent(ptyReq),
-				on: childChannel.eventLoop,
-				timeout: Self.channelRequestTimeout,
-				error: .timedOut("allocating a remote PTY")
-			).get()
-			log("PTY allocated")
-
 			if let startupCommand {
-				let execReq = SSHChannelRequestEvent.ExecRequest(command: startupCommand, wantReply: true)
 				do {
-					try await withTimeout(
-						childChannel.triggerUserOutboundEvent(execReq),
-						on: childChannel.eventLoop,
-						timeout: Self.channelRequestTimeout,
-						error: .timedOut("starting the remote shell")
-					).get()
+					let childChannel = try await openPreparedSessionChannel(on: channel)
+					sshChildChannel = childChannel
+					try await requestExec(startupCommand, on: childChannel)
 					log("remote shell bootstrap started")
 					sendWindowChange(pendingTerminalSize, force: true)
 				} catch {
+					closeActiveStartupChannelIfNeeded()
 					switch startupFallbackPolicy {
 					case .plainShellOnBootstrapFailure:
-						log("remote shell bootstrap failed, falling back to plain shell: \(error)")
-						let shellReq = SSHChannelRequestEvent.ShellRequest(wantReply: true)
-						try await withTimeout(
-							childChannel.triggerUserOutboundEvent(shellReq),
-							on: childChannel.eventLoop,
-							timeout: Self.channelRequestTimeout,
-							error: .timedOut("starting the remote shell")
-						).get()
-						log("shell started (fallback)")
-						sendWindowChange(pendingTerminalSize, force: true)
+						log("remote shell bootstrap failed, opening fresh plain shell channel: \(error)")
+						try await startPlainShell(on: channel, fallback: true)
 					case .requireStartupCommand:
 						log("remote shell bootstrap failed and plain shell fallback is disabled: \(error)")
 						throw error
 					}
 				}
 			} else {
-				let shellReq = SSHChannelRequestEvent.ShellRequest(wantReply: true)
-				try await withTimeout(
-					childChannel.triggerUserOutboundEvent(shellReq),
-					on: childChannel.eventLoop,
-					timeout: Self.channelRequestTimeout,
-					error: .timedOut("starting the remote shell")
-				).get()
-				log("shell started")
-				sendWindowChange(pendingTerminalSize, force: true)
+				try await startPlainShell(on: channel, fallback: false)
 			}
 		} catch {
 			disconnect()
 			throw error
 		}
+	}
+
+	private func startPlainShell(on channel: Channel, fallback: Bool) async throws {
+		let childChannel = try await openPreparedSessionChannel(on: channel)
+		sshChildChannel = childChannel
+		try await requestShell(on: childChannel)
+		log(fallback ? "shell started (fresh fallback channel)" : "shell started")
+		sendWindowChange(pendingTerminalSize, force: true)
+	}
+
+	private func openPreparedSessionChannel(on channel: Channel) async throws -> Channel {
+		let childChannel = try await openSessionChannel(on: channel)
+		do {
+			try await requestPTY(on: childChannel, size: pendingTerminalSize)
+			log("PTY allocated")
+			return childChannel
+		} catch {
+			childChannel.close(mode: .all, promise: nil)
+			throw error
+		}
+	}
+
+	private func openSessionChannel(on channel: Channel) async throws -> Channel {
+		let authDelegate = self.authDelegate
+		let onData = self.onData
+		let onClose = self.onClose
+		return try await withTimeout(
+			channel.eventLoop.flatSubmit {
+				self.log("creating session channel...")
+				let sshHandler = try! channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
+				let promise = channel.eventLoop.makePromise(of: Channel.self)
+
+				if authDelegate?.hasFailed == true {
+					promise.fail(SSHConnectionError.authenticationFailed)
+					return promise.futureResult
+				}
+
+				authDelegate?.onExhausted = {
+					promise.fail(SSHConnectionError.authenticationFailed)
+				}
+
+				sshHandler.createChannel(promise) { childChannel, channelType in
+					self.log("child channel init, type=\(channelType)")
+					guard channelType == .session else {
+						return childChannel.eventLoop.makeFailedFuture(SSHConnectionError.invalidChannelType)
+					}
+
+					let childID = ObjectIdentifier(childChannel)
+					return childChannel.pipeline.addHandlers([
+						SSHChannelDataHandler(onData: onData),
+						SSHChannelLifecycleHandler(
+							isDisconnecting: { [weak self] in self?.isDisconnecting ?? false },
+							onClose: { [weak self] reason in
+								guard let self,
+								      let activeChannel = self.sshChildChannel,
+								      ObjectIdentifier(activeChannel) == childID
+								else { return }
+								self.sshChildChannel = nil
+								self.channel = nil
+								self.authDelegate = nil
+								onClose(reason)
+							}
+						),
+					])
+				}
+				return promise.futureResult
+			},
+			on: channel.eventLoop,
+			timeout: Self.sessionStartupTimeout,
+			error: .timedOut("establishing the SSH session")
+		).get()
+	}
+
+	private func requestPTY(on childChannel: Channel, size: TerminalWindowSize) async throws {
+		let request = SSHChannelRequestEvent.PseudoTerminalRequest(
+			wantReply: true,
+			term: "xterm-256color",
+			terminalCharacterWidth: size.columns,
+			terminalRowHeight: size.rows,
+			terminalPixelWidth: size.pixelWidth,
+			terminalPixelHeight: size.pixelHeight,
+			terminalModes: .init([:])
+		)
+		try await withTimeout(
+			childChannel.triggerUserOutboundEvent(request),
+			on: childChannel.eventLoop,
+			timeout: Self.channelRequestTimeout,
+			error: .timedOut("allocating a remote PTY")
+		).get()
+	}
+
+	private func requestExec(_ command: String, on childChannel: Channel) async throws {
+		let request = SSHChannelRequestEvent.ExecRequest(command: command, wantReply: true)
+		try await withTimeout(
+			childChannel.triggerUserOutboundEvent(request),
+			on: childChannel.eventLoop,
+			timeout: Self.channelRequestTimeout,
+			error: .timedOut("starting the remote shell")
+		).get()
+	}
+
+	private func requestShell(on childChannel: Channel) async throws {
+		let request = SSHChannelRequestEvent.ShellRequest(wantReply: true)
+		try await withTimeout(
+			childChannel.triggerUserOutboundEvent(request),
+			on: childChannel.eventLoop,
+			timeout: Self.channelRequestTimeout,
+			error: .timedOut("starting the remote shell")
+		).get()
+	}
+
+	private func closeActiveStartupChannelIfNeeded() {
+		guard let childChannel = sshChildChannel else { return }
+		sshChildChannel = nil
+		childChannel.close(mode: .all, promise: nil)
 	}
 
 	func send(_ data: Data) {

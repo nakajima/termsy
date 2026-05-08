@@ -388,6 +388,48 @@ struct TermsyTests {
 		#expect(command.contains("termsy_initial_working_directory=\"$HOME/${termsy_initial_working_directory#~/}\""))
 	}
 
+	@Test func remoteStartupCommandExpandsInternalTemplatePlaceholders() {
+		let command = ShellTitleIntegration.remoteStartupCommand(tmuxSessionName: nil, initialWorkingDirectory: nil)
+
+		#expect(!command.contains("__TERMSY_BOOTSTRAP_ENVIRONMENT__"))
+		#expect(!command.contains("__TERMSY_GHOSTTY_TERMINFO_SOURCE__"))
+		#expect(!command.contains("__TERMSY_BASH_SCRIPT__"))
+		#expect(!command.contains("__TERMSY_FISH_SCRIPT__"))
+		#expect(!command.contains("__TERMSY_ZSH_ENV_SCRIPT__"))
+		#expect(!command.contains("__TERMSY_ZSH_PROFILE_SCRIPT__"))
+		#expect(!command.contains("__TERMSY_ZSH_RC_SCRIPT__"))
+		#expect(!command.contains("__TERMSY_ZSH_LOGIN_SCRIPT__"))
+		#expect(!command.contains("__TERMSY_ZSH_INTEGRATION_SCRIPT__"))
+	}
+
+	@Test func remoteStartupCommandFailsOpenWhenIntegrationPreparationFails() {
+		let command = ShellTitleIntegration.remoteStartupCommand(tmuxSessionName: nil, initialWorkingDirectory: nil)
+
+		#expect(command.contains("termsy_exec_user_shell()"))
+		#expect(command.contains("failed to prepare bash integration; starting normal shell"))
+		#expect(command.contains("failed to prepare fish integration; starting normal shell"))
+		#expect(command.contains("failed to prepare zsh integration; starting normal shell"))
+	}
+
+	@Test func remoteStartupCommandWritesFullZshStartupWrapperChain() {
+		let command = ShellTitleIntegration.remoteStartupCommand(tmuxSessionName: nil, initialWorkingDirectory: nil)
+
+		#expect(command.contains("cat >\"$zsh_dir/.zshenv\""))
+		#expect(command.contains("cat >\"$zsh_dir/.zprofile\""))
+		#expect(command.contains("cat >\"$zsh_dir/.zshrc\""))
+		#expect(command.contains("cat >\"$zsh_dir/.zlogin\""))
+		#expect(command.contains("cat >\"$zsh_dir/termsy-title.zsh\""))
+		#expect(command.contains("builtin typeset _termsy_file=\"$_termsy_user_zdotdir/.zshrc\""))
+	}
+
+	@Test func remoteStartupCommandValidatesShellBeforeUsingIt() {
+		let command = ShellTitleIntegration.remoteStartupCommand(tmuxSessionName: nil, initialWorkingDirectory: nil)
+
+		#expect(command.contains("passwd_shell=$(termsy_passwd_shell || true)"))
+		#expect(command.contains("if [ -z \"$shell_path\" ] || [ ! -x \"$shell_path\" ]; then"))
+		#expect(command.contains("shell_path=/bin/sh"))
+	}
+
 	@Test func tmuxStartupRequiresBootstrapCommandInsteadOfPlainShellFallback() {
 		#expect(SSHTerminalSession.startupFallbackPolicy(tmuxSessionName: "api") == .requireStartupCommand)
 		#expect(SSHTerminalSession.startupFallbackPolicy(tmuxSessionName: "  api  ") == .requireStartupCommand)

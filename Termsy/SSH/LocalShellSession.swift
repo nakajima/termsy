@@ -38,7 +38,7 @@
 			cleanupShellIntegrationDirectory()
 			let shellPath = profile.shellPath
 			let shellName = URL(fileURLWithPath: shellPath).lastPathComponent
-			let shellLaunch = try ShellTitleIntegration.localLaunch(
+			let shellLaunch = ShellTitleIntegration.localLaunch(
 				shellPath: shellPath,
 				environment: ProcessInfo.processInfo.environment
 			)
