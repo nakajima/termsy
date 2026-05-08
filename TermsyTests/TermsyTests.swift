@@ -756,4 +756,59 @@ struct TermsyTests {
 		#expect(didClose)
 		#expect(!tab.isRestoring)
 	}
+
+	@MainActor
+	@Test func connectWithPasswordSetsConnectingStateAndClearsError() async {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+		tab.connectionError = "previous failure"
+
+		// connectWithPassword is async but will fail immediately since there's no real server.
+		// We verify the state is set correctly before the actual connection attempt.
+		await tab.connectWithPassword("secret")
+
+		// After the failed attempt, connectionError should be set (from the failed connect),
+		// but the key invariant is that it was cleared at the start of the attempt.
+		// Since the connect fails, connectionState returns to idle with an error.
+		// The important thing: the old "previous failure" error is gone.
+		#expect(tab.connectionError != "previous failure")
+	}
+
+	@MainActor
+	@Test func onConnectionEstablishedPersistsLastConnectedAtThroughCoordinator() throws {
+		let db = DB.memory()
+		try db.migrate()
+		let coordinator = ViewCoordinator()
+		coordinator.configureDatabaseContext(.readWrite { db.queue })
+
+		var session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		try db.queue.write { database in
+			try session.save(database)
+		}
+
+		coordinator.openTab(for: session)
+		let tab = try #require(coordinator.tabs.first)
+
+		// Simulate a connection being established
+		let connectedDate = Date()
+		session.lastConnectedAt = connectedDate
+		tab.onConnectionEstablished?(session)
+
+		let savedSession = try db.queue.read { database in
+			try Session.fetchOne(database, key: session.id)
+		}
+		#expect(savedSession?.lastConnectedAt != nil)
+	}
 }

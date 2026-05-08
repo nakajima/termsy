@@ -214,37 +214,21 @@ struct ContentView: View {
 
 private struct TerminalContainer: View {
 	@Environment(ViewCoordinator.self) var coordinator
-	@Environment(\.databaseContext) private var dbContext
 
 	var body: some View {
 		ZStack {
 			ForEach(coordinator.tabs) { tab in
 				let isSelected = tab.id == coordinator.selectedTabID
-				TerminalHostRepresentable(tab: tab) { session in
-					markSessionConnected(session)
-				}
-				.ignoresSafeArea(.container, edges: .bottom)
-				.opacity(isSelected ? 1 : 0)
-				.allowsHitTesting(isSelected)
-				.accessibilityHidden(!isSelected)
-				.zIndex(isSelected ? 1 : 0)
+				TerminalHostRepresentable(tab: tab)
+					.ignoresSafeArea(.container, edges: .bottom)
+					.opacity(isSelected ? 1 : 0)
+					.allowsHitTesting(isSelected)
+					.accessibilityHidden(!isSelected)
+					.zIndex(isSelected ? 1 : 0)
 			}
 		}
 		.frame(maxWidth: .infinity, maxHeight: .infinity)
 		.accessibilityIdentifier("screen.terminal")
-	}
-
-	private func markSessionConnected(_ session: Session) {
-		do {
-			try dbContext.writer.write { db in
-				try db.execute(
-					sql: "UPDATE session SET lastConnectedAt = ? WHERE id = ?",
-					arguments: [session.lastConnectedAt ?? Date(), session.id]
-				)
-			}
-		} catch {
-			print("[DB] failed to persist lastConnectedAt for \(session.username)@\(session.hostname): \(error)")
-		}
 	}
 }
 

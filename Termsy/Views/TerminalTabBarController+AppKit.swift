@@ -5,15 +5,12 @@
 	struct TerminalHostRepresentable: NSViewControllerRepresentable {
 		@Environment(\.appTheme) private var theme
 		let tab: TerminalTab
-		let onConnectionEstablished: (Session) -> Void
 
 		func makeNSViewController(context _: Context) -> TerminalHostController {
-			tab.onConnectionEstablished = onConnectionEstablished
-			return TerminalHostController(terminalTab: tab, theme: theme)
+			TerminalHostController(terminalTab: tab, theme: theme)
 		}
 
 		func updateNSViewController(_ controller: TerminalHostController, context _: Context) {
-			tab.onConnectionEstablished = onConnectionEstablished
 			controller.applyTheme(theme)
 		}
 
