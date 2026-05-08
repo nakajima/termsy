@@ -90,6 +90,34 @@ final class TermsyUITests: XCTestCase {
 		waitForSelected(firstRow)
 	}
 
+	@MainActor
+	func testTerminalCommandShiftBracketSwitchesTabs() throws {
+		let app = XCUIApplication()
+		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.terminal.scenario)
+		XCUIDevice.shared.orientation = .landscapeLeft
+		app.launch()
+		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not reach foreground")
+
+		let firstTab = app.descendants(matching: .any)["tab.user@my.teletype.computer -p 2222"]
+		let secondTab = app.descendants(matching: .any)["tab.luke@starwarstel.net"]
+		XCTAssertTrue(firstTab.waitForExistence(timeout: 10), "First tab did not appear")
+		XCTAssertTrue(secondTab.waitForExistence(timeout: 10), "Second tab did not appear")
+
+		waitForSelected(firstTab)
+
+		app.typeKey("]", modifierFlags: [.command, .shift])
+		waitForSelected(secondTab)
+
+		app.typeKey("[", modifierFlags: [.command, .shift])
+		waitForSelected(firstTab)
+
+		app.typeKey("}", modifierFlags: .command)
+		waitForSelected(secondTab)
+
+		app.typeKey("{", modifierFlags: .command)
+		waitForSelected(firstTab)
+	}
+
 	private func waitForSelected(
 		_ element: XCUIElement,
 		timeout: TimeInterval = 5,

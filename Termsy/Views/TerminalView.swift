@@ -93,9 +93,6 @@
 		/// Called when the user requests selecting a tab by 1-based index.
 		var onSelectTabRequest: ((Int) -> Void)?
 
-		/// Called when the user requests moving the current tab selection by a relative offset.
-		var onMoveTabSelectionRequest: ((Int) -> Void)?
-
 		/// Called when the user requests opening app settings.
 		var onShowSettingsRequest: (() -> Void)?
 
@@ -1152,37 +1149,7 @@
 
 		override var canBecomeFirstResponder: Bool { presentationMode == .interactive }
 
-		override var keyCommands: [UIKeyCommand]? {
-			guard presentationMode == .interactive else { return nil }
-			return [
-				appShortcutCommand(input: "[", modifiers: [.command, .shift], action: #selector(selectPreviousTabFromKeyCommand(_:)), title: "Previous Tab"),
-				appShortcutCommand(input: "]", modifiers: [.command, .shift], action: #selector(selectNextTabFromKeyCommand(_:)), title: "Next Tab"),
-				appShortcutCommand(input: "{", modifiers: [.command, .shift], action: #selector(selectPreviousTabFromKeyCommand(_:)), title: nil),
-				appShortcutCommand(input: "}", modifiers: [.command, .shift], action: #selector(selectNextTabFromKeyCommand(_:)), title: nil),
-			]
-		}
-
 		var hasText: Bool { true }
-
-		private func appShortcutCommand(
-			input: String,
-			modifiers: UIKeyModifierFlags,
-			action: Selector,
-			title: String?
-		) -> UIKeyCommand {
-			let command = UIKeyCommand(input: input, modifierFlags: modifiers, action: action)
-			command.wantsPriorityOverSystemBehavior = true
-			command.discoverabilityTitle = title
-			return command
-		}
-
-		@objc private func selectPreviousTabFromKeyCommand(_: UIKeyCommand) {
-			onMoveTabSelectionRequest?(-1)
-		}
-
-		@objc private func selectNextTabFromKeyCommand(_: UIKeyCommand) {
-			onMoveTabSelectionRequest?(1)
-		}
 
 		override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
 			switch action {

@@ -90,8 +90,9 @@ struct TermsyTests {
 			let ids = coordinator.tabs.map(\.id)
 			coordinator.selectTab(ids[0])
 
-			let view = coordinator.selectedTab?.terminalView
-			let commands = view?.keyCommands ?? []
+			let tab = coordinator.selectedTab!
+			let host = TerminalHostController(terminalTab: tab, theme: TerminalTheme.mocha.appTheme)
+			let commands = host.keyCommands ?? []
 			let previousCommand = commands.first { command in
 				command.input == "[" &&
 					command.modifierFlags.contains(.command) &&
@@ -104,17 +105,29 @@ struct TermsyTests {
 					command.modifierFlags.contains(.shift) &&
 					command.wantsPriorityOverSystemBehavior
 			}
+			let shiftedPreviousCommand = commands.first { command in
+				command.input == "{" &&
+					command.modifierFlags == .command &&
+					command.wantsPriorityOverSystemBehavior
+			}
+			let shiftedNextCommand = commands.first { command in
+				command.input == "}" &&
+					command.modifierFlags == .command &&
+					command.wantsPriorityOverSystemBehavior
+			}
 
 			#expect(previousCommand != nil)
 			#expect(nextCommand != nil)
+			#expect(shiftedPreviousCommand != nil)
+			#expect(shiftedNextCommand != nil)
 
-			if let view, let nextCommand, let action = nextCommand.action {
-				let didSend = UIApplication.shared.sendAction(action, to: view, from: nextCommand, for: nil)
+			if let nextCommand, let action = nextCommand.action {
+				let didSend = UIApplication.shared.sendAction(action, to: host, from: nextCommand, for: nil)
 				#expect(didSend)
 				#expect(coordinator.selectedTabID == ids[1])
 			}
-			if let view, let previousCommand, let action = previousCommand.action {
-				let didSend = UIApplication.shared.sendAction(action, to: view, from: previousCommand, for: nil)
+			if let previousCommand, let action = previousCommand.action {
+				let didSend = UIApplication.shared.sendAction(action, to: host, from: previousCommand, for: nil)
 				#expect(didSend)
 				#expect(coordinator.selectedTabID == ids[0])
 			}
@@ -400,6 +413,13 @@ struct TermsyTests {
 		#expect(command.contains("TERMSY_INITIAL_WORKING_DIRECTORY"))
 		#expect(command.contains("~/src/app"))
 		#expect(command.contains("termsy_initial_working_directory=\"$HOME/${termsy_initial_working_directory#~/}\""))
+	}
+
+	@Test func tmuxStartupRequiresBootstrapCommandInsteadOfPlainShellFallback() {
+		#expect(SSHTerminalSession.startupFallbackPolicy(tmuxSessionName: "api") == .requireStartupCommand)
+		#expect(SSHTerminalSession.startupFallbackPolicy(tmuxSessionName: "  api  ") == .requireStartupCommand)
+		#expect(SSHTerminalSession.startupFallbackPolicy(tmuxSessionName: nil) == .plainShellOnBootstrapFailure)
+		#expect(SSHTerminalSession.startupFallbackPolicy(tmuxSessionName: "   ") == .plainShellOnBootstrapFailure)
 	}
 
 	@Test func directSessionTargetParsesWorkingDirectoryTmuxAndDashPort() throws {

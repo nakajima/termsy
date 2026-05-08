@@ -46,6 +46,15 @@
 			[.bottom]
 		}
 
+		override var keyCommands: [UIKeyCommand]? {
+			[
+				appShortcutCommand(input: "[", modifiers: [.command, .shift], action: #selector(selectPreviousTabFromKeyCommand(_:)), title: "Previous Tab"),
+				appShortcutCommand(input: "]", modifiers: [.command, .shift], action: #selector(selectNextTabFromKeyCommand(_:)), title: "Next Tab"),
+				appShortcutCommand(input: "{", modifiers: .command, action: #selector(selectPreviousTabFromKeyCommand(_:)), title: nil),
+				appShortcutCommand(input: "}", modifiers: .command, action: #selector(selectNextTabFromKeyCommand(_:)), title: nil),
+			]
+		}
+
 		init(terminalTab: TerminalTab, theme: AppTheme) {
 			self.terminalTab = terminalTab
 			self.theme = theme
@@ -54,6 +63,26 @@
 
 		@available(*, unavailable)
 		required init?(coder _: NSCoder) { fatalError() }
+
+		private func appShortcutCommand(
+			input: String,
+			modifiers: UIKeyModifierFlags,
+			action: Selector,
+			title: String?
+		) -> UIKeyCommand {
+			let command = UIKeyCommand(input: input, modifierFlags: modifiers, action: action)
+			command.wantsPriorityOverSystemBehavior = true
+			command.discoverabilityTitle = title
+			return command
+		}
+
+		@objc private func selectPreviousTabFromKeyCommand(_: UIKeyCommand) {
+			terminalTab.requestMoveTabSelection(-1)
+		}
+
+		@objc private func selectNextTabFromKeyCommand(_: UIKeyCommand) {
+			terminalTab.requestMoveTabSelection(1)
+		}
 
 		override func viewDidLoad() {
 			super.viewDidLoad()

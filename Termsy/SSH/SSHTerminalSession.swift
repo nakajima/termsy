@@ -65,6 +65,15 @@ final class SSHTerminalSession {
 		connection.resize(size)
 	}
 
+	nonisolated static func startupFallbackPolicy(tmuxSessionName: String?) -> SSHConnection.StartupCommandFallbackPolicy {
+		guard let tmuxSessionName = tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+		      !tmuxSessionName.isEmpty
+		else {
+			return .plainShellOnBootstrapFailure
+		}
+		return .requireStartupCommand
+	}
+
 	func connect(
 		host: String,
 		port: Int,
@@ -79,7 +88,8 @@ final class SSHTerminalSession {
 			startupCommand: ShellTitleIntegration.remoteStartupCommand(
 				tmuxSessionName: tmuxSessionName,
 				initialWorkingDirectory: initialWorkingDirectory
-			)
+			),
+			startupFallbackPolicy: Self.startupFallbackPolicy(tmuxSessionName: tmuxSessionName)
 		)
 	}
 

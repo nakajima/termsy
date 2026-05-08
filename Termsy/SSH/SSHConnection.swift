@@ -592,6 +592,11 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		case error(String)
 	}
 
+	enum StartupCommandFallbackPolicy: Sendable, Equatable {
+		case plainShellOnBootstrapFailure
+		case requireStartupCommand
+	}
+
 	private static let sessionStartupTimeout: TimeAmount = .seconds(10)
 	private static let channelRequestTimeout: TimeAmount = .seconds(10)
 
@@ -661,7 +666,8 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 	func startShell(
 		size: TerminalWindowSize,
-		startupCommand: String? = nil
+		startupCommand: String? = nil,
+		startupFallbackPolicy: StartupCommandFallbackPolicy = .plainShellOnBootstrapFailure
 	) async throws {
 		pendingTerminalSize = size
 		log("startShell \(size.columns)x\(size.rows) px=\(size.pixelWidth)x\(size.pixelHeight)")
@@ -749,16 +755,22 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 					log("remote shell bootstrap started")
 					sendWindowChange(pendingTerminalSize, force: true)
 				} catch {
-					log("remote shell bootstrap failed, falling back to plain shell: \(error)")
-					let shellReq = SSHChannelRequestEvent.ShellRequest(wantReply: true)
-					try await withTimeout(
-						childChannel.triggerUserOutboundEvent(shellReq),
-						on: childChannel.eventLoop,
-						timeout: Self.channelRequestTimeout,
-						error: .timedOut("starting the remote shell")
-					).get()
-					log("shell started (fallback)")
-					sendWindowChange(pendingTerminalSize, force: true)
+					switch startupFallbackPolicy {
+					case .plainShellOnBootstrapFailure:
+						log("remote shell bootstrap failed, falling back to plain shell: \(error)")
+						let shellReq = SSHChannelRequestEvent.ShellRequest(wantReply: true)
+						try await withTimeout(
+							childChannel.triggerUserOutboundEvent(shellReq),
+							on: childChannel.eventLoop,
+							timeout: Self.channelRequestTimeout,
+							error: .timedOut("starting the remote shell")
+						).get()
+						log("shell started (fallback)")
+						sendWindowChange(pendingTerminalSize, force: true)
+					case .requireStartupCommand:
+						log("remote shell bootstrap failed and plain shell fallback is disabled: \(error)")
+						throw error
+					}
 				}
 			} else {
 				let shellReq = SSHChannelRequestEvent.ShellRequest(wantReply: true)

@@ -554,6 +554,11 @@
 			isCurrentlySelected = isSelected
 			stopRecordingPulse()
 
+			isAccessibilityElement = true
+			accessibilityIdentifier = "tab.\(item.title)"
+			accessibilityLabel = item.title
+			accessibilityValue = isSelected ? "selected" : "not selected"
+
 			titleLabel.text = item.title
 			titleLabel.font = .systemFont(ofSize: 13, weight: isSelected ? .semibold : .medium)
 			titleLabel.textColor = isSelected ? theme.primaryTextUIColor : theme.secondaryTextUIColor
