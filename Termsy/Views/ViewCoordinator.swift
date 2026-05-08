@@ -227,6 +227,9 @@ class ViewCoordinator {
 			tab.noteAppDidBecomeActive()
 		}
 		refreshDisplayActivity()
+		#if canImport(UIKit)
+			selectedTab?.restoreKeyboardFocusAfterAppActivation()
+		#endif
 	}
 
 	private func noteBackgroundExecutionExpired(remaining: TimeInterval?) {
@@ -1264,6 +1267,13 @@ class TerminalTab: Identifiable {
 		isDisplayActive = isActive
 		terminalView.setDisplayActive(isActive)
 	}
+
+	#if canImport(UIKit)
+		func restoreKeyboardFocusAfterAppActivation() {
+			guard isDisplayActive else { return }
+			terminalView.restoreKeyboardFocusAfterAppActivation()
+		}
+	#endif
 
 	func enterForeground() {
 		switch endpoint {

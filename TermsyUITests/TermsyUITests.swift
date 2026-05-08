@@ -123,6 +123,36 @@ final class TermsyUITests: XCTestCase {
 		waitForSelected(firstTab)
 	}
 
+	@MainActor
+	func testTerminalKeyboardFocusRestoresAfterForegrounding() throws {
+		let app = XCUIApplication()
+		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.terminal.scenario)
+		app.launchEnvironment["TERMSY_UI_TEST_INTERACTIVE_TERMINAL"] = "1"
+		XCUIDevice.shared.orientation = .landscapeLeft
+		app.launch()
+		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not reach foreground")
+
+		let firstTab = app.descendants(matching: .any)["tab.user@my.teletype.computer -p 2222"]
+		let secondTab = app.descendants(matching: .any)["tab.luke@starwarstel.net"]
+		XCTAssertTrue(firstTab.waitForExistence(timeout: 10), "First tab did not appear")
+		XCTAssertTrue(secondTab.waitForExistence(timeout: 10), "Second tab did not appear")
+
+		let terminal = app.otherElements.matching(identifier: "screen.terminal").firstMatch
+		XCTAssertTrue(terminal.waitForExistence(timeout: 10), "Terminal screen did not appear")
+		app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+		waitForSelected(firstTab)
+
+		XCUIDevice.shared.press(.home)
+		waitForBackgrounded(app)
+
+		app.activate()
+		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not return to foreground")
+		XCTAssertTrue(terminal.waitForExistence(timeout: 10), "Terminal screen did not reappear")
+
+		app.typeKey("]", modifierFlags: [.command, .shift])
+		waitForSelected(secondTab)
+	}
+
 	private func waitForSelected(
 		_ element: XCUIElement,
 		timeout: TimeInterval = 5,
@@ -133,6 +163,21 @@ final class TermsyUITests: XCTestCase {
 		let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
 		let result = XCTWaiter.wait(for: [expectation], timeout: timeout)
 		XCTAssertEqual(result, .completed, "Element did not become selected", file: file, line: line)
+	}
+
+	private func waitForBackgrounded(
+		_ app: XCUIApplication,
+		timeout: TimeInterval = 10,
+		file: StaticString = #filePath,
+		line: UInt = #line
+	) {
+		let predicate = NSPredicate { _, _ in
+			let state = app.state
+			return state == .runningBackground || state == .runningBackgroundSuspended
+		}
+		let expectation = XCTNSPredicateExpectation(predicate: predicate, object: app)
+		let result = XCTWaiter.wait(for: [expectation], timeout: timeout)
+		XCTAssertEqual(result, .completed, "App did not enter background", file: file, line: line)
 	}
 
 	private enum ScreenshotPlan {

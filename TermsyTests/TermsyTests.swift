@@ -386,6 +386,24 @@ struct TermsyTests {
 		#expect(command.contains("TERMSY_INITIAL_WORKING_DIRECTORY"))
 		#expect(command.contains("~/src/app"))
 		#expect(command.contains("termsy_initial_working_directory=\"$HOME/${termsy_initial_working_directory#~/}\""))
+		#expect(command.contains("export TERMSY_TMUX_START_DIRECTORY=\"$PWD\""))
+	}
+
+	@Test func remoteStartupTmuxUsesInitialWorkingDirectoryAsStartDirectory() {
+		let command = ShellTitleIntegration.remoteStartupCommand(
+			tmuxSessionName: "api",
+			initialWorkingDirectory: "~/src/app"
+		)
+
+		#expect(
+			command.contains("__termsy_tmux_attach_or_create \"$__termsy_tmux_session\" \"$__termsy_tmux_start_directory\"")
+		)
+		#expect(command.contains("set -l start_directory"))
+		#expect(command.contains("local start_directory=${TERMSY_TMUX_START_DIRECTORY-}"))
+		#expect(command.contains("tmux new-session -d -s \"$session\" -c \"$start_directory\""))
+		#expect(command.contains("__termsy_tmux_attach_or_create \"$session\" \"$start_directory\""))
+		#expect(command.contains("_termsy_tmux_attach_or_create() {"))
+		#expect(command.contains("unset TERMSY_STARTUP_TMUX_SESSION TERMSY_TMUX_START_DIRECTORY"))
 	}
 
 	@Test func remoteStartupCommandExpandsInternalTemplatePlaceholders() {
@@ -431,11 +449,13 @@ struct TermsyTests {
 		#expect(command.contains("export SHELL=\"$shell_path\""))
 	}
 
-	@Test func remoteStartupTmuxDoesNotOverrideNewSessionShellCommand() {
+	@Test func remoteStartupTmuxPreparesSessionShellForNewWindows() {
 		let command = ShellTitleIntegration.remoteStartupCommand(tmuxSessionName: "api", initialWorkingDirectory: nil)
 
-		#expect(command.contains("exec tmux new-session -A -s \"$session\""))
-		#expect(command.contains("exec tmux new-session -A -s \"$__termsy_tmux_session\""))
+		#expect(command.contains("tmux set-option -q -t \"$session\" default-shell \"$SHELL\""))
+		#expect(command.contains("tmux set-environment -t \"$session\" SHELL \"$SHELL\""))
+		#expect(command.contains("tmux set-environment -rt \"$session\" ZDOTDIR"))
+		#expect(command.contains("exec tmux attach-session -t \"$session\""))
 		#expect(!command.contains("TERMSY_TMUX_SHELL_COMMAND"))
 	}
 

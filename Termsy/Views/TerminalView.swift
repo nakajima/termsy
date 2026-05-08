@@ -610,13 +610,21 @@
 			presentationMode == .interactive && isDisplayActive && window != nil && surface != nil
 		}
 
-		private func requestFirstResponder(retryCount: Int = 20) {
+		private func requestFirstResponder(
+			retryCount: Int = 20,
+			forceReacquire: Bool = false,
+			keepCheckingAfterSuccess: Bool = false
+		) {
 			cancelFirstResponderRequest()
 			guard shouldHoldFirstResponder else { return }
-			if isFirstResponder { return }
+			if isFirstResponder {
+				guard forceReacquire else { return }
+				resignFirstResponder()
+			}
 
 			_ = becomeFirstResponder()
-			guard !isFirstResponder, retryCount > 0 else { return }
+			guard retryCount > 0 else { return }
+			guard keepCheckingAfterSuccess || !isFirstResponder else { return }
 
 			firstResponderTask = Task { @MainActor [weak self] in
 				guard let self else { return }
@@ -624,10 +632,13 @@
 					try? await Task.sleep(nanoseconds: 50_000_000)
 					guard !Task.isCancelled else { return }
 					guard self.shouldHoldFirstResponder else { return }
-					if self.isFirstResponder { return }
-					// New tabs often become active while a sheet/panel dismissal animation
-					// is still finishing. Keep retrying long enough for UIKit to release
-					// first responder from the transient UI and hand it back to the terminal.
+					if self.isFirstResponder {
+						if keepCheckingAfterSuccess { continue }
+						return
+					}
+					// New tabs and foreground transitions can become active while UIKit is
+					// still finishing responder changes. Keep retrying long enough for
+					// transient UI to release first responder back to the terminal.
 					_ = self.becomeFirstResponder()
 				}
 			}
@@ -635,6 +646,14 @@
 
 		func restoreKeyboardFocusIfNeeded(retryCount: Int = 20) {
 			requestFirstResponder(retryCount: retryCount)
+		}
+
+		func restoreKeyboardFocusAfterAppActivation(retryCount: Int = 30) {
+			requestFirstResponder(
+				retryCount: retryCount,
+				forceReacquire: true,
+				keepCheckingAfterSuccess: true
+			)
 		}
 
 		private func cancelFirstResponderRequest() {

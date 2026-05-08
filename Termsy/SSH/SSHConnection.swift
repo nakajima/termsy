@@ -224,15 +224,44 @@ enum ShellTitleIntegration {
 	done
 	builtin unset _termsy_rcfile
 
+	__termsy_tmux_attach_or_create() {
+	  local session=$1
+	  local start_directory=${2-}
+	  local -a shell_command=(env "SHELL=$SHELL")
+	  if [[ -n "${ZDOTDIR+X}" ]]; then
+	    shell_command+=("ZDOTDIR=$ZDOTDIR")
+	  fi
+	  shell_command+=("$SHELL" -l -i)
+
+	  if ! tmux has-session -t "$session" 2>/dev/null; then
+	    if [[ -n "$start_directory" ]]; then
+	      tmux new-session -d -s "$session" -c "$start_directory" "${shell_command[@]}" 2>/dev/null || true
+	    else
+	      tmux new-session -d -s "$session" "${shell_command[@]}" 2>/dev/null || true
+	    fi
+	  fi
+	  tmux set-option -q -t "$session" default-shell "$SHELL" 2>/dev/null || true
+	  tmux set-environment -t "$session" SHELL "$SHELL" 2>/dev/null || true
+	  if [[ -n "${ZDOTDIR+X}" ]]; then
+	    tmux set-environment -t "$session" ZDOTDIR "$ZDOTDIR" 2>/dev/null || true
+	  else
+	    tmux set-environment -rt "$session" ZDOTDIR 2>/dev/null || true
+	  fi
+	  tmux set-environment -rt "$session" TERMSY_STARTUP_TMUX_SESSION 2>/dev/null || true
+	  tmux set-environment -rt "$session" TERMSY_TMUX_START_DIRECTORY 2>/dev/null || true
+	  exec tmux attach-session -t "$session"
+	}
+
 	if [[ -n "${TERMSY_STARTUP_TMUX_SESSION-}" ]]; then
 	  __termsy_tmux_session=$TERMSY_STARTUP_TMUX_SESSION
-	  builtin unset TERMSY_STARTUP_TMUX_SESSION
+	  __termsy_tmux_start_directory=${TERMSY_TMUX_START_DIRECTORY-}
+	  builtin unset TERMSY_STARTUP_TMUX_SESSION TERMSY_TMUX_START_DIRECTORY
 	  if command -v tmux >/dev/null 2>&1; then
-	    exec tmux new-session -A -s "$__termsy_tmux_session"
+	    __termsy_tmux_attach_or_create "$__termsy_tmux_session" "$__termsy_tmux_start_directory"
 	  else
 	    printf 'Termsy: tmux not found after bash startup; continuing with login shell\n' >&2
 	  fi
-	  builtin unset __termsy_tmux_session
+	  builtin unset __termsy_tmux_session __termsy_tmux_start_directory
 	fi
 
 	if [[ -n "${TERMSY_TITLE_HOOKS_ACTIVE-}" ]]; then
@@ -316,13 +345,43 @@ enum ShellTitleIntegration {
 	    end
 	end
 
+	function __termsy_tmux_attach_or_create -a session start_directory
+	    set -l shell_command env "SHELL=$SHELL"
+	    if set -q ZDOTDIR
+	        set shell_command $shell_command "ZDOTDIR=$ZDOTDIR"
+	    end
+	    set shell_command $shell_command "$SHELL" -i -l
+
+	    if not tmux has-session -t "$session" 2>/dev/null
+	        if test -n "$start_directory"
+	            tmux new-session -d -s "$session" -c "$start_directory" $shell_command 2>/dev/null; or true
+	        else
+	            tmux new-session -d -s "$session" $shell_command 2>/dev/null; or true
+	        end
+	    end
+	    tmux set-option -q -t "$session" default-shell "$SHELL" 2>/dev/null; or true
+	    tmux set-environment -t "$session" SHELL "$SHELL" 2>/dev/null; or true
+	    if set -q ZDOTDIR
+	        tmux set-environment -t "$session" ZDOTDIR "$ZDOTDIR" 2>/dev/null; or true
+	    else
+	        tmux set-environment -rt "$session" ZDOTDIR 2>/dev/null; or true
+	    end
+	    tmux set-environment -rt "$session" TERMSY_STARTUP_TMUX_SESSION 2>/dev/null; or true
+	    tmux set-environment -rt "$session" TERMSY_TMUX_START_DIRECTORY 2>/dev/null; or true
+	    exec tmux attach-session -t "$session"
+	end
+
 	function __termsy_maybe_start_tmux --on-event fish_prompt
 	    if set -q TERMSY_STARTUP_TMUX_SESSION
 	        set -l session "$TERMSY_STARTUP_TMUX_SESSION"
-	        set -e TERMSY_STARTUP_TMUX_SESSION
+	        set -l start_directory
+	        if set -q TERMSY_TMUX_START_DIRECTORY
+	            set start_directory "$TERMSY_TMUX_START_DIRECTORY"
+	        end
+	        set -e TERMSY_STARTUP_TMUX_SESSION TERMSY_TMUX_START_DIRECTORY
 	        functions -e __termsy_maybe_start_tmux
 	        if command -sq tmux
-	            exec tmux new-session -A -s "$session"
+	            __termsy_tmux_attach_or_create "$session" "$start_directory"
 	        else
 	            printf 'Termsy: tmux not found after fish startup; continuing with login shell\n' >&2
 	        end
@@ -461,18 +520,48 @@ enum ShellTitleIntegration {
 	fi
 	typeset -g TERMSY_TITLE_HOOKS_ACTIVE=1
 
+	_termsy_tmux_attach_or_create() {
+	  emulate -L zsh
+	  local session=$1
+	  local start_directory=${2-}
+	  local -a shell_command=(env "SHELL=$SHELL")
+	  if [[ -n "${ZDOTDIR+X}" ]]; then
+	    shell_command+=("ZDOTDIR=$ZDOTDIR")
+	  fi
+	  shell_command+=("$SHELL" -i -l)
+
+	  if ! tmux has-session -t "$session" 2>/dev/null; then
+	    if [[ -n "$start_directory" ]]; then
+	      tmux new-session -d -s "$session" -c "$start_directory" "${shell_command[@]}" 2>/dev/null || true
+	    else
+	      tmux new-session -d -s "$session" "${shell_command[@]}" 2>/dev/null || true
+	    fi
+	  fi
+	  tmux set-option -q -t "$session" default-shell "$SHELL" 2>/dev/null || true
+	  tmux set-environment -t "$session" SHELL "$SHELL" 2>/dev/null || true
+	  if [[ -n "${ZDOTDIR+X}" ]]; then
+	    tmux set-environment -t "$session" ZDOTDIR "$ZDOTDIR" 2>/dev/null || true
+	  else
+	    tmux set-environment -rt "$session" ZDOTDIR 2>/dev/null || true
+	  fi
+	  tmux set-environment -rt "$session" TERMSY_STARTUP_TMUX_SESSION 2>/dev/null || true
+	  tmux set-environment -rt "$session" TERMSY_TMUX_START_DIRECTORY 2>/dev/null || true
+	  exec tmux attach-session -t "$session"
+	}
+
 	_termsy_maybe_start_tmux() {
 	  emulate -L zsh
 	  [[ -n "${TERMSY_STARTUP_TMUX_SESSION-}" ]] || return 0
 	  local session=$TERMSY_STARTUP_TMUX_SESSION
-	  unset TERMSY_STARTUP_TMUX_SESSION
+	  local start_directory=${TERMSY_TMUX_START_DIRECTORY-}
+	  unset TERMSY_STARTUP_TMUX_SESSION TERMSY_TMUX_START_DIRECTORY
 	  if (( $+functions[add-zsh-hook] )); then
 	    add-zsh-hook -d precmd _termsy_maybe_start_tmux 2>/dev/null
 	  else
 	    precmd_functions=(${precmd_functions:#_termsy_maybe_start_tmux})
 	  fi
 	  if (( $+commands[tmux] )); then
-	    exec tmux new-session -A -s "$session"
+	    _termsy_tmux_attach_or_create "$session" "$start_directory"
 	  else
 	    print -ru2 -- 'Termsy: tmux not found after zsh startup; continuing with login shell'
 	  fi
@@ -610,6 +699,7 @@ enum ShellTitleIntegration {
 		cache_root="$cache_root/termsy-shell-title"
 
 		__TERMSY_BOOTSTRAP_ENVIRONMENT__
+		unset TERMSY_TMUX_START_DIRECTORY
 
 		if [ -n "${TERMSY_INITIAL_WORKING_DIRECTORY:-}" ]; then
 		  termsy_initial_working_directory=$TERMSY_INITIAL_WORKING_DIRECTORY
@@ -622,7 +712,11 @@ enum ShellTitleIntegration {
 		      [ -z "${HOME:-}" ] || termsy_initial_working_directory="$HOME/${termsy_initial_working_directory#~/}"
 		      ;;
 		  esac
-		  cd "$termsy_initial_working_directory" 2>/dev/null || true
+		  if cd "$termsy_initial_working_directory" 2>/dev/null; then
+		    if [ -n "${TERMSY_STARTUP_TMUX_SESSION:-}" ]; then
+		      export TERMSY_TMUX_START_DIRECTORY="$PWD"
+		    fi
+		  fi
 		  unset termsy_initial_working_directory
 		fi
 
