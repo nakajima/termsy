@@ -811,4 +811,25 @@ struct TermsyTests {
 		}
 		#expect(savedSession?.lastConnectedAt != nil)
 	}
+
+	#if canImport(UIKit)
+		@MainActor
+		@Test func didMoveToWindowAppliesDisplayActivitySynchronously() {
+			let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+
+			// Mark display active before the view has a window.
+			view.setDisplayActive(true)
+			#expect(view.isDisplayActive)
+			// Without a window, applyDisplayActivity sets isUserInteractionEnabled = false.
+			#expect(!view.isUserInteractionEnabled)
+
+			// Add the view to a window. didMoveToWindow() should synchronously call
+			// applyDisplayActivity(), enabling interaction immediately without waiting
+			// for the next runloop pass.
+			let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+			window.addSubview(view)
+
+			#expect(view.isUserInteractionEnabled)
+		}
+	#endif
 }

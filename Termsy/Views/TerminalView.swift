@@ -690,11 +690,9 @@
 					guard let self, self.window != nil else { return }
 					self.syncSize()
 					self.updateSublayerFrames()
-					self.applyDisplayActivity()
 				}
-			} else {
-				applyDisplayActivity()
 			}
+			applyDisplayActivity()
 		}
 
 		override func layoutSubviews() {
