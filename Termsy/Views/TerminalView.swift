@@ -93,6 +93,9 @@
 		/// Called when the user requests selecting a tab by 1-based index.
 		var onSelectTabRequest: ((Int) -> Void)?
 
+		/// Called when the user requests moving the current tab selection by a relative offset.
+		var onMoveTabSelectionRequest: ((Int) -> Void)?
+
 		/// Called when the user requests opening app settings.
 		var onShowSettingsRequest: (() -> Void)?
 
@@ -1149,7 +1152,39 @@
 
 		override var canBecomeFirstResponder: Bool { presentationMode == .interactive }
 
+		override var keyCommands: [UIKeyCommand]? {
+			guard presentationMode == .interactive else { return nil }
+			return [
+				appShortcutCommand(input: "[", modifiers: [.command, .shift], action: #selector(selectPreviousTabFromKeyCommand(_:)), title: "Previous Tab"),
+				appShortcutCommand(input: "]", modifiers: [.command, .shift], action: #selector(selectNextTabFromKeyCommand(_:)), title: "Next Tab"),
+				appShortcutCommand(input: "{", modifiers: [.command, .shift], action: #selector(selectPreviousTabFromKeyCommand(_:)), title: nil),
+				appShortcutCommand(input: "}", modifiers: [.command, .shift], action: #selector(selectNextTabFromKeyCommand(_:)), title: nil),
+				appShortcutCommand(input: "{", modifiers: .command, action: #selector(selectPreviousTabFromKeyCommand(_:)), title: nil),
+				appShortcutCommand(input: "}", modifiers: .command, action: #selector(selectNextTabFromKeyCommand(_:)), title: nil),
+			]
+		}
+
 		var hasText: Bool { true }
+
+		private func appShortcutCommand(
+			input: String,
+			modifiers: UIKeyModifierFlags,
+			action: Selector,
+			title: String?
+		) -> UIKeyCommand {
+			let command = UIKeyCommand(input: input, modifierFlags: modifiers, action: action)
+			command.wantsPriorityOverSystemBehavior = true
+			command.discoverabilityTitle = title
+			return command
+		}
+
+		@objc private func selectPreviousTabFromKeyCommand(_: UIKeyCommand) {
+			onMoveTabSelectionRequest?(-1)
+		}
+
+		@objc private func selectNextTabFromKeyCommand(_: UIKeyCommand) {
+			onMoveTabSelectionRequest?(1)
+		}
 
 		override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
 			switch action {
@@ -1386,6 +1421,43 @@
 			}
 		}
 
+		nonisolated static func tabNavigationOffset(
+			keyCode: UIKeyboardHIDUsage,
+			modifierFlags: UIKeyModifierFlags,
+			characters: String,
+			charactersIgnoringModifiers: String
+		) -> Int? {
+			let modifiers = modifierFlags.intersection([.shift, .control, .alternate, .command])
+			guard modifiers == [.command, .shift] else { return nil }
+
+			switch keyCode {
+			case .keyboardOpenBracket:
+				return -1
+			case .keyboardCloseBracket:
+				return 1
+			default:
+				break
+			}
+
+			switch charactersIgnoringModifiers {
+			case "[":
+				return -1
+			case "]":
+				return 1
+			default:
+				break
+			}
+
+			switch characters {
+			case "{", "[":
+				return -1
+			case "}", "]":
+				return 1
+			default:
+				return nil
+			}
+		}
+
 		private func handleAppShortcutIfNeeded(for key: UIKey) -> Bool {
 			let modifiers = key.modifierFlags.intersection([.shift, .control, .alternate, .command])
 			if key.keyCode == .keyboardEscape, modifiers.isEmpty {
@@ -1393,6 +1465,16 @@
 			}
 
 			guard key.modifierFlags.contains(.command) else { return false }
+
+			if let offset = Self.tabNavigationOffset(
+				keyCode: key.keyCode,
+				modifierFlags: key.modifierFlags,
+				characters: key.characters,
+				charactersIgnoringModifiers: key.charactersIgnoringModifiers
+			) {
+				onMoveTabSelectionRequest?(offset)
+				return true
+			}
 
 			if key.charactersIgnoringModifiers == "," {
 				onShowSettingsRequest?()

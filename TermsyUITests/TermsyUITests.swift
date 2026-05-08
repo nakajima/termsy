@@ -94,6 +94,7 @@ final class TermsyUITests: XCTestCase {
 	func testTerminalCommandShiftBracketSwitchesTabs() throws {
 		let app = XCUIApplication()
 		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.terminal.scenario)
+		app.launchEnvironment["TERMSY_UI_TEST_INTERACTIVE_TERMINAL"] = "1"
 		XCUIDevice.shared.orientation = .landscapeLeft
 		app.launch()
 		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not reach foreground")
@@ -103,6 +104,10 @@ final class TermsyUITests: XCTestCase {
 		XCTAssertTrue(firstTab.waitForExistence(timeout: 10), "First tab did not appear")
 		XCTAssertTrue(secondTab.waitForExistence(timeout: 10), "Second tab did not appear")
 
+		let terminal = app.otherElements.matching(identifier: "screen.terminal").firstMatch
+		XCTAssertTrue(terminal.waitForExistence(timeout: 10), "Terminal screen did not appear")
+		app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+
 		waitForSelected(firstTab)
 
 		app.typeKey("]", modifierFlags: [.command, .shift])
@@ -111,10 +116,10 @@ final class TermsyUITests: XCTestCase {
 		app.typeKey("[", modifierFlags: [.command, .shift])
 		waitForSelected(firstTab)
 
-		app.typeKey("}", modifierFlags: .command)
+		app.typeKey("}", modifierFlags: [.command, .shift])
 		waitForSelected(secondTab)
 
-		app.typeKey("{", modifierFlags: .command)
+		app.typeKey("{", modifierFlags: [.command, .shift])
 		waitForSelected(firstTab)
 	}
 

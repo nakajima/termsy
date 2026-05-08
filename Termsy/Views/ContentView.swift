@@ -160,9 +160,11 @@ struct ContentView: View {
 			return
 		}
 
+		let usesInteractiveTerminal = launchConfiguration.usesInteractiveTerminalForUITests
 		for session in sessions {
 			coordinator.openTab(for: session)
-			guard session.normalizedTargetKey != primarySession.normalizedTargetKey,
+			guard !usesInteractiveTerminal,
+			      session.normalizedTargetKey != primarySession.normalizedTargetKey,
 			      let tab = coordinator.tabs.first(where: { $0.session?.normalizedTargetKey == session.normalizedTargetKey })
 			else {
 				continue
@@ -173,9 +175,13 @@ struct ContentView: View {
 		guard let primaryTab = coordinator.tabs.first(where: { $0.session?.normalizedTargetKey == primarySession.normalizedTargetKey }) else {
 			return
 		}
-		primaryTab.terminalView.setPresentationMode(.passivePreview)
-		primaryTab.onFirstRemoteOutput = {
+		if usesInteractiveTerminal {
 			announceScreenshotReadiness(readinessLabel)
+		} else {
+			primaryTab.terminalView.setPresentationMode(.passivePreview)
+			primaryTab.onFirstRemoteOutput = {
+				announceScreenshotReadiness(readinessLabel)
+			}
 		}
 		coordinator.selectTab(primaryTab.id)
 		if launchConfiguration.startsTerminalRecording {
@@ -275,18 +281,6 @@ private struct TabKeyboardShortcuts: View {
 			}
 			.keyboardShortcut("w", modifiers: .command)
 			.disabled(!shortcutsEnabled || coordinator.selectedTabID == nil)
-
-			Button("Previous Tab") {
-				coordinator.moveTabSelection(by: -1)
-			}
-			.keyboardShortcut("[", modifiers: [.command, .shift])
-			.disabled(!shortcutsEnabled || coordinator.tabs.count < 2)
-
-			Button("Next Tab") {
-				coordinator.moveTabSelection(by: 1)
-			}
-			.keyboardShortcut("]", modifiers: [.command, .shift])
-			.disabled(!shortcutsEnabled || coordinator.tabs.count < 2)
 
 			ForEach(1 ... 9, id: \.self) { number in
 				Button("Select Tab \(number)") {

@@ -14,6 +14,7 @@ struct AppLaunchConfiguration {
 	let screenshotScenario: ScreenshotScenario?
 	let screenshotDatabasePath: String?
 	let startsTerminalRecording: Bool
+	let usesInteractiveTerminalForUITests: Bool
 
 	static let current = AppLaunchConfiguration(environment: ProcessInfo.processInfo.environment)
 
@@ -21,6 +22,7 @@ struct AppLaunchConfiguration {
 		self.screenshotScenario = environment["TERMSY_SCREENSHOT_SCENARIO"].flatMap(ScreenshotScenario.init(rawValue:))
 		self.screenshotDatabasePath = environment["TERMSY_SCREENSHOT_DB_PATH"]
 		self.startsTerminalRecording = environment["TERMSY_SCREENSHOT_RECORDING"] == "1"
+		self.usesInteractiveTerminalForUITests = environment["TERMSY_UI_TEST_INTERACTIVE_TERMINAL"] == "1"
 	}
 
 	var isScreenshotMode: Bool {

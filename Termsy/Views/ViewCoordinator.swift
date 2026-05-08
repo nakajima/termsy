@@ -1472,6 +1472,9 @@ class TerminalTab: Identifiable {
 		terminalView.onSelectTabRequest = { [weak self] index in
 			self?.requestSelectTab(index)
 		}
+		terminalView.onMoveTabSelectionRequest = { [weak self] offset in
+			self?.requestMoveTabSelection(offset)
+		}
 		terminalView.onShowSettingsRequest = { [weak self] in
 			self?.requestShowSettings()
 		}

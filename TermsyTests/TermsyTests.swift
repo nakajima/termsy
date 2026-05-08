@@ -79,58 +79,31 @@ struct TermsyTests {
 	}
 
 	#if canImport(UIKit)
-		@MainActor
-		@Test func terminalTabNavigationCommandsTakePriorityOverSystemKeyboardHandling() {
-			let coordinator = ViewCoordinator()
-			let sessions = [
-				Session(hostname: "one.example.com", username: "pat", tmuxSessionName: nil, port: 22, autoconnect: false),
-				Session(hostname: "two.example.com", username: "pat", tmuxSessionName: nil, port: 22, autoconnect: false),
-			]
-			sessions.forEach { coordinator.openTab(for: $0) }
-			let ids = coordinator.tabs.map(\.id)
-			coordinator.selectTab(ids[0])
-
-			let tab = coordinator.selectedTab!
-			let host = TerminalHostController(terminalTab: tab, theme: TerminalTheme.mocha.appTheme)
-			let commands = host.keyCommands ?? []
-			let previousCommand = commands.first { command in
-				command.input == "[" &&
-					command.modifierFlags.contains(.command) &&
-					command.modifierFlags.contains(.shift) &&
-					command.wantsPriorityOverSystemBehavior
-			}
-			let nextCommand = commands.first { command in
-				command.input == "]" &&
-					command.modifierFlags.contains(.command) &&
-					command.modifierFlags.contains(.shift) &&
-					command.wantsPriorityOverSystemBehavior
-			}
-			let shiftedPreviousCommand = commands.first { command in
-				command.input == "{" &&
-					command.modifierFlags == .command &&
-					command.wantsPriorityOverSystemBehavior
-			}
-			let shiftedNextCommand = commands.first { command in
-				command.input == "}" &&
-					command.modifierFlags == .command &&
-					command.wantsPriorityOverSystemBehavior
-			}
-
-			#expect(previousCommand != nil)
-			#expect(nextCommand != nil)
-			#expect(shiftedPreviousCommand != nil)
-			#expect(shiftedNextCommand != nil)
-
-			if let nextCommand, let action = nextCommand.action {
-				let didSend = UIApplication.shared.sendAction(action, to: host, from: nextCommand, for: nil)
-				#expect(didSend)
-				#expect(coordinator.selectedTabID == ids[1])
-			}
-			if let previousCommand, let action = previousCommand.action {
-				let didSend = UIApplication.shared.sendAction(action, to: host, from: previousCommand, for: nil)
-				#expect(didSend)
-				#expect(coordinator.selectedTabID == ids[0])
-			}
+		@Test func terminalTabNavigationUsesHardwareBracketPresses() {
+			#expect(TerminalView.tabNavigationOffset(
+				keyCode: .keyboardOpenBracket,
+				modifierFlags: [.command, .shift],
+				characters: "{",
+				charactersIgnoringModifiers: "["
+			) == -1)
+			#expect(TerminalView.tabNavigationOffset(
+				keyCode: .keyboardCloseBracket,
+				modifierFlags: [.command, .shift],
+				characters: "}",
+				charactersIgnoringModifiers: "]"
+			) == 1)
+			#expect(TerminalView.tabNavigationOffset(
+				keyCode: .keyboardOpenBracket,
+				modifierFlags: .command,
+				characters: "[",
+				charactersIgnoringModifiers: "["
+			) == nil)
+			#expect(TerminalView.tabNavigationOffset(
+				keyCode: .keyboardOpenBracket,
+				modifierFlags: [.command, .shift, .control],
+				characters: "{",
+				charactersIgnoringModifiers: "["
+			) == nil)
 		}
 	#endif
 
