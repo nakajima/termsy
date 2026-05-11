@@ -75,7 +75,6 @@ struct SettingsView: View {
 					}
 					.listRowBackground(theme.cardBackground)
 
-
 					if TerminalFontSettings.normalizedFamily(terminalFontFamily) != nil {
 						Button("Use Default") {
 							terminalFontFamily = ""

@@ -65,10 +65,10 @@ enum RemoteTmuxSessionDiscovery {
 		"""#
 		return "/bin/sh -c \(shellQuoted(script))"
 	}()
+}
 
-	private static func shellQuoted(_ value: String) -> String {
-		"'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
-	}
+private func shellQuoted(_ value: String) -> String {
+	"'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
 }
 
 enum SSHConnectionError: Error, LocalizedError, CustomStringConvertible {
@@ -204,10 +204,6 @@ enum ShellTitleIntegration {
 			$0.isEmpty ? nil : $0
 		}
 		return existing.map { "\(path):\($0)" } ?? "\(path):/usr/local/share:/usr/share"
-	}
-
-	private static func shellQuoted(_ value: String) -> String {
-		"'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
 	}
 
 	private static let bashScript = #"""
@@ -716,6 +712,9 @@ enum ShellTitleIntegration {
 		    if [ -n "${TERMSY_STARTUP_TMUX_SESSION:-}" ]; then
 		      export TERMSY_TMUX_START_DIRECTORY="$PWD"
 		    fi
+		  elif [ -n "${TERMSY_STARTUP_TMUX_SESSION:-}" ]; then
+		    export TERMSY_TMUX_START_DIRECTORY="$termsy_initial_working_directory"
+		    termsy_log "could not cd to $termsy_initial_working_directory; tmux will try -c"
 		  fi
 		  unset termsy_initial_working_directory
 		fi

@@ -387,6 +387,7 @@ struct TermsyTests {
 		#expect(command.contains("~/src/app"))
 		#expect(command.contains("termsy_initial_working_directory=\"$HOME/${termsy_initial_working_directory#~/}\""))
 		#expect(command.contains("export TERMSY_TMUX_START_DIRECTORY=\"$PWD\""))
+		#expect(command.contains("export TERMSY_TMUX_START_DIRECTORY=\"$termsy_initial_working_directory\""))
 	}
 
 	@Test func remoteStartupTmuxUsesInitialWorkingDirectoryAsStartDirectory() {
@@ -832,4 +833,52 @@ struct TermsyTests {
 			#expect(view.isUserInteractionEnabled)
 		}
 	#endif
+
+	@Test func sessionTrimmedOptionalStripsWhitespaceAndReturnsNilForEmpty() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: "  api  ",
+			initialWorkingDirectory: "  ~/src  ",
+			port: 22,
+			autoconnect: false,
+			customTitle: "  deploy  "
+		)
+		#expect(session.trimmedCustomTitle == "deploy")
+		#expect(session.trimmedTmuxSessionName == "api")
+		#expect(session.trimmedInitialWorkingDirectory == "~/src")
+
+		let emptySession = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: "   ",
+			initialWorkingDirectory: "",
+			port: 22,
+			autoconnect: false,
+			customTitle: "\t\n"
+		)
+		#expect(emptySession.trimmedCustomTitle == nil)
+		#expect(emptySession.trimmedTmuxSessionName == nil)
+		#expect(emptySession.trimmedInitialWorkingDirectory == nil)
+
+		let nilSession = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		#expect(nilSession.trimmedCustomTitle == nil)
+		#expect(nilSession.trimmedTmuxSessionName == nil)
+		#expect(nilSession.trimmedInitialWorkingDirectory == nil)
+	}
+
+	@Test func shellQuotedHandlesSingleQuotesInRemoteStartupCommand() {
+		let command = ShellTitleIntegration.remoteStartupCommand(
+			tmuxSessionName: "it's",
+			initialWorkingDirectory: nil
+		)
+		#expect(command.contains("TERMSY_STARTUP_TMUX_SESSION"))
+		#expect(command.contains("it'\\''s"))
+	}
 }

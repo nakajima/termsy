@@ -42,7 +42,7 @@
 		private var onSelectFamily: ((String) -> Void)?
 
 		func present(selectedFontFamily: String, onSelectFamily: @escaping (String) -> Void) {
-			self.currentFontFamily = TerminalFontSettings.normalizedFamily(selectedFontFamily)
+			currentFontFamily = TerminalFontSettings.normalizedFamily(selectedFontFamily)
 			self.onSelectFamily = onSelectFamily
 
 			let fontManager = NSFontManager.shared

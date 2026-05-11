@@ -15,10 +15,10 @@
 
 			init(group: NSWindowTabGroup, onChange: @escaping () -> Void) {
 				self.group = group
-				windowsObservation = group.observe(\.windows, options: [.new]) { _, _ in
+				self.windowsObservation = group.observe(\.windows, options: [.new]) { _, _ in
 					onChange()
 				}
-				selectedWindowObservation = group.observe(\.selectedWindow, options: [.new]) { _, _ in
+				self.selectedWindowObservation = group.observe(\.selectedWindow, options: [.new]) { _, _ in
 					onChange()
 				}
 			}

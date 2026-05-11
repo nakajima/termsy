@@ -250,7 +250,7 @@
 	}
 
 	#Preview("Recording Badge") {
-		TerminalRecordingBadgeContent(isRecording: true, dataByteCount: 18_432)
+		TerminalRecordingBadgeContent(isRecording: true, dataByteCount: 18432)
 			.padding()
 			.background(TerminalTheme.mocha.appTheme.background)
 			.environment(\.appTheme, TerminalTheme.mocha.appTheme)

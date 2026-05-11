@@ -186,7 +186,7 @@
 				port: 2222,
 				autoconnect: false
 			)
-			secondarySession.createdAt = Date.now.addingTimeInterval(-43_200)
+			secondarySession.createdAt = Date.now.addingTimeInterval(-43200)
 			try secondarySession.save(db)
 		}
 		return MacConnectSheetView { _ in }

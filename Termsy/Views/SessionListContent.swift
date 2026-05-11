@@ -118,15 +118,15 @@ private struct RemoteTmuxSessionLookupTarget: Hashable, Sendable {
 	let port: Int
 
 	nonisolated init(_ target: DirectSessionTarget) {
-		username = target.username
-		hostname = target.hostname
-		port = target.port
+		self.username = target.username
+		self.hostname = target.hostname
+		self.port = target.port
 	}
 
 	nonisolated init(_ session: Session) {
-		username = session.username
-		hostname = session.hostname
-		port = session.port
+		self.username = session.username
+		self.hostname = session.hostname
+		self.port = session.port
 	}
 
 	var normalizedUsername: String {

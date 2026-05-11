@@ -39,7 +39,6 @@ struct AppLaunchConfiguration {
 		seedScreenshotSessions(in: db)
 	}
 
-
 	private func configureDefaultsForScreenshotMode() {
 		UserDefaults.standard.set(TerminalTheme.mocha.rawValue, forKey: "terminalTheme")
 		UserDefaults.standard.set("block", forKey: "cursorStyle")

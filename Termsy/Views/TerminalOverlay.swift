@@ -37,7 +37,6 @@ struct TerminalOverlay: View {
 			case .connected, .awaitingPassword, .failed:
 				EmptyView()
 			}
-
 		}
 		.safeAreaInset(edge: .bottom) {
 			if showsConnectionLogToggle {
@@ -90,11 +89,9 @@ struct TerminalOverlay: View {
 		#endif
 	}
 
-
 	private var showsConnectionLogToggle: Bool {
 		tab.needsPassword
 	}
-
 }
 
 private struct ConnectionLogPanel: View {

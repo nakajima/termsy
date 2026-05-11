@@ -92,7 +92,6 @@ struct ConnectView: View {
 			}
 			Section {
 				Button("Connect") {
-					
 					connect()
 				}
 				.animation(.easeInOut, value: host)

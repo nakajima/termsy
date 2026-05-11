@@ -134,23 +134,14 @@ extension Session {
 		return trimmed.isEmpty ? "-" : trimmed.lowercased()
 	}
 
-	var trimmedCustomTitle: String? {
-		guard let customTitle else { return nil }
-		let trimmed = customTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-		return trimmed.isEmpty ? nil : trimmed
+	private static func trimmedOptional(_ value: String?) -> String? {
+		guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+		return value.trimmingCharacters(in: .whitespacesAndNewlines)
 	}
 
-	var trimmedTmuxSessionName: String? {
-		guard let tmuxSessionName else { return nil }
-		let trimmed = tmuxSessionName.trimmingCharacters(in: .whitespacesAndNewlines)
-		return trimmed.isEmpty ? nil : trimmed
-	}
-
-	var trimmedInitialWorkingDirectory: String? {
-		guard let initialWorkingDirectory else { return nil }
-		let trimmed = initialWorkingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
-		return trimmed.isEmpty ? nil : trimmed
-	}
+	var trimmedCustomTitle: String? { Self.trimmedOptional(customTitle) }
+	var trimmedTmuxSessionName: String? { Self.trimmedOptional(tmuxSessionName) }
+	var trimmedInitialWorkingDirectory: String? { Self.trimmedOptional(initialWorkingDirectory) }
 
 	var listTitle: String {
 		trimmedTmuxSessionName ?? trimmedCustomTitle ?? displayTarget

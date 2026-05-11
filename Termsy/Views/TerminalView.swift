@@ -69,6 +69,7 @@
 				reloadInputViews()
 			}
 		}
+
 		private let keyboardAccessoryBar = TerminalKeyboardAccessoryView(theme: TerminalTheme.current.appTheme)
 		private var firstResponderTask: Task<Void, Never>?
 		private let momentumVelocityThreshold: CGFloat = 50
@@ -355,22 +356,9 @@
 		}
 
 		func stop() {
-			cancelFirstResponderRequest()
-			clearArmedSoftwareModifiers()
-			releaseDirectSelectionIfNeeded()
-			stopMomentumScrolling()
-			snapSmoothScrollPresentationToTerminal()
-			stopDisplayLink()
-			stopKeyRepeat()
-			activeHardwareKeyCodes.removeAll()
-			suppressedKeyReleaseCodes.removeAll()
+			stopDisplayActivity()
 			ClipboardAccessAuthorization.clear(for: self)
 			lastMouseLocation = nil
-			lastIndirectPointerHoverLocation = nil
-			lastScrollLocation = nil
-			activePointerButton = nil
-			pinchBaselineFontSize = nil
-			pinchAppliedFontSize = nil
 			denyOutstandingClipboardReadConfirmations()
 			if let surface {
 				ghostty_surface_set_focus(surface, false)
@@ -1565,7 +1553,7 @@
 			guard surface != nil else { return nil }
 			guard Date() >= suppressContextMenuUntil else { return nil }
 			if let directSelectionRecognizer,
-			   (directSelectionRecognizer.state == .began || directSelectionRecognizer.state == .changed)
+			   directSelectionRecognizer.state == .began || directSelectionRecognizer.state == .changed
 			{
 				return nil
 			}
@@ -2123,9 +2111,9 @@
 	}
 
 	enum ClipboardAccessAuthorization {
-		nonisolated private static let lock = NSLock()
-		nonisolated(unsafe) private static var pendingUserInitiatedPastes = [UnsafeMutableRawPointer: Date]()
-		nonisolated private static let lifetime: TimeInterval = 2
+		private nonisolated static let lock = NSLock()
+		private nonisolated(unsafe) static var pendingUserInitiatedPastes = [UnsafeMutableRawPointer: Date]()
+		private nonisolated static let lifetime: TimeInterval = 2
 
 		nonisolated static func noteUserInitiatedPaste(for view: TerminalView) {
 			let pointer = Unmanaged.passUnretained(view).toOpaque()
