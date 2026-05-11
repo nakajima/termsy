@@ -370,6 +370,20 @@ struct TermsyTests {
 		#expect(coordinator.selectedTab?.session?.id == firstSession.id)
 	}
 
+	@Test func shellTitleStateParserStripsInternalActivityPrefixes() {
+		let promptTitle = ShellTitleState.parse("__TERMSY_TITLE_PROMPT__:~/src/app")
+		#expect(promptTitle.title == "~/src/app")
+		#expect(promptTitle.activityState == .prompt)
+
+		let commandTitle = ShellTitleState.parse("__TERMSY_TITLE_COMMAND__:vim README.md")
+		#expect(commandTitle.title == "vim README.md")
+		#expect(commandTitle.activityState == .command)
+
+		let normalTitle = ShellTitleState.parse("manual title")
+		#expect(normalTitle.title == "manual title")
+		#expect(normalTitle.activityState == nil)
+	}
+
 	@Test func remoteStartupCommandDoesNotRunBootstrapShellAsLoginShell() {
 		let command = ShellTitleIntegration.remoteStartupCommand(tmuxSessionName: nil, initialWorkingDirectory: nil)
 

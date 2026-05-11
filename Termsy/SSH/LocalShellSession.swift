@@ -32,6 +32,18 @@
 			childPID > 0
 		}
 
+		var needsCloseConfirmation: Bool {
+			guard childPID > 0 else { return false }
+
+			if let executablePath = Self.executablePath(for: childPID),
+			   !Self.pathsReferToSameFile(executablePath, profile.shellPath)
+			{
+				return true
+			}
+
+			return Self.hasLiveDescendantProcess(of: childPID)
+		}
+
 		func start() throws {
 			guard childPID == 0 else { return }
 
@@ -222,6 +234,77 @@
 				ws_ypixel: UInt16(max(pendingTerminalSize.pixelHeight, 0))
 			)
 			_ = ioctl(masterFD, TIOCSWINSZ, &winsize)
+		}
+
+		private static func executablePath(for pid: pid_t) -> String? {
+			var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+			let byteCount = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+			guard byteCount > 0 else { return nil }
+			return String(cString: buffer)
+		}
+
+		private static func pathsReferToSameFile(_ lhs: String, _ rhs: String) -> Bool {
+			normalizedExecutablePath(lhs) == normalizedExecutablePath(rhs)
+		}
+
+		private static func normalizedExecutablePath(_ path: String) -> String {
+			URL(fileURLWithPath: path)
+				.resolvingSymlinksInPath()
+				.standardizedFileURL
+				.path
+		}
+
+		private static func hasLiveDescendantProcess(of rootPID: pid_t) -> Bool {
+			let processList = currentProcessList()
+			var parentsToVisit = [rootPID]
+			var visited = Set<pid_t>([rootPID])
+
+			while let parentPID = parentsToVisit.popLast() {
+				let childProcesses = processList.filter { $0.parentPID == parentPID }
+				for childProcess in childProcesses {
+					guard childProcess.pid > 0,
+					      !childProcess.isZombie,
+					      !visited.contains(childProcess.pid)
+					else { continue }
+					return true
+				}
+				for childProcess in childProcesses where !visited.contains(childProcess.pid) {
+					visited.insert(childProcess.pid)
+					parentsToVisit.append(childProcess.pid)
+				}
+			}
+
+			return false
+		}
+
+		private struct ProcessListEntry {
+			let pid: pid_t
+			let parentPID: pid_t
+			let isZombie: Bool
+		}
+
+		private static func currentProcessList() -> [ProcessListEntry] {
+			var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+			var length = 0
+			guard sysctl(&mib, u_int(mib.count), nil, &length, nil, 0) == 0 else { return [] }
+
+			let stride = MemoryLayout<kinfo_proc>.stride
+			guard length >= stride else { return [] }
+
+			var processes = [kinfo_proc](repeating: kinfo_proc(), count: length / stride)
+			let result = processes.withUnsafeMutableBufferPointer { buffer in
+				sysctl(&mib, u_int(mib.count), buffer.baseAddress, &length, nil, 0)
+			}
+			guard result == 0 else { return [] }
+
+			let count = min(processes.count, length / stride)
+			return processes.prefix(count).map { process in
+				ProcessListEntry(
+					pid: process.kp_proc.p_pid,
+					parentPID: process.kp_eproc.e_ppid,
+					isZombie: process.kp_proc.p_stat == SZOMB
+				)
+			}
 		}
 
 		private func teardown(sendSignal _: Bool) {

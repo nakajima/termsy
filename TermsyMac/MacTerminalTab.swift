@@ -33,6 +33,7 @@
 		@ObservationIgnored private var acceptsTerminalOutput = true
 		@ObservationIgnored private var terminalDidFinish = false
 		@ObservationIgnored private var terminalRecorder: TerminalSessionRecorder?
+		@ObservationIgnored private var shellActivityState: ShellActivityState?
 		@ObservationIgnored private static var didLogTerminalIOActivation = false
 
 		init(source: Source) {
@@ -76,7 +77,22 @@
 		}
 
 		var needsCloseConfirmation: Bool {
-			terminalView.needsCloseConfirmation
+			guard !terminalDidFinish else { return false }
+
+			switch source {
+			case .localShell:
+				return localShellSession?.needsCloseConfirmation ?? false
+			case .ssh:
+				guard hasStarted else { return false }
+				switch shellActivityState {
+				case .some(.prompt):
+					return false
+				case .some(.command):
+					return true
+				case .none:
+					return terminalView.needsCloseConfirmation
+				}
+			}
 		}
 
 		var recordingFileURL: URL? {
@@ -215,7 +231,11 @@
 				self.handleViewport(size)
 			}
 			terminalView.onTitleChange = { [weak self] title in
-				self?.reportedTitle = title
+				let parsedTitle = ShellTitleState.parse(title)
+				self?.reportedTitle = parsedTitle.title
+				if let activityState = parsedTitle.activityState {
+					self?.shellActivityState = activityState
+				}
 			}
 			terminalView.onRenameTabRequest = { [weak self] in
 				self?.onRequestRename?()

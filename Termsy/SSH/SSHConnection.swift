@@ -91,6 +91,39 @@ enum SSHConnectionError: Error, LocalizedError, CustomStringConvertible {
 	}
 }
 
+enum ShellActivityState: Equatable {
+	case prompt
+	case command
+}
+
+struct ParsedShellTitle: Equatable {
+	let title: String
+	let activityState: ShellActivityState?
+}
+
+enum ShellTitleState {
+	private static let promptPrefix = "__TERMSY_TITLE_PROMPT__:"
+	private static let commandPrefix = "__TERMSY_TITLE_COMMAND__:"
+
+	static func parse(_ title: String) -> ParsedShellTitle {
+		if title.hasPrefix(promptPrefix) {
+			return ParsedShellTitle(
+				title: String(title.dropFirst(promptPrefix.count)),
+				activityState: .prompt
+			)
+		}
+
+		if title.hasPrefix(commandPrefix) {
+			return ParsedShellTitle(
+				title: String(title.dropFirst(commandPrefix.count)),
+				activityState: .command
+			)
+		}
+
+		return ParsedShellTitle(title: title, activityState: nil)
+	}
+}
+
 enum ShellTitleIntegration {
 	enum Shell: String {
 		case bash
@@ -275,9 +308,10 @@ enum ShellTitleIntegration {
 	}
 
 	__termsy_set_title() {
+	  local state=$1
 	  local title
-	  title="$(__termsy_sanitize_title "$1")"
-	  printf '\e]2;%s\a' "$title"
+	  title="$(__termsy_sanitize_title "$2")"
+	  printf '\e]2;__TERMSY_TITLE_%s__:%s\a' "$state" "$title"
 	}
 
 	__termsy_normalize_command_title() {
@@ -297,7 +331,7 @@ enum ShellTitleIntegration {
 	  __termsy_in_prompt_command=1
 	  __termsy_preexec_seen=0
 	  local path="${PWD/#$HOME/~}"
-	  __termsy_set_title "$path"
+	  __termsy_set_title PROMPT "$path"
 	  __termsy_in_prompt_command=0
 	}
 
@@ -305,7 +339,7 @@ enum ShellTitleIntegration {
 	  [[ "${__termsy_in_prompt_command-0}" == 1 ]] && return
 	  [[ "${__termsy_preexec_seen-0}" == 1 ]] && return
 	  __termsy_preexec_seen=1
-	  __termsy_set_title "$(__termsy_normalize_command_title "$1")"
+	  __termsy_set_title COMMAND "$(__termsy_normalize_command_title "$1")"
 	}
 
 	if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
@@ -326,9 +360,9 @@ enum ShellTitleIntegration {
 	"""#
 
 	private static let fishScript = #"""
-	function __termsy_set_title -a title
+	function __termsy_set_title -a state title
 	    set -l sanitized (string replace -ar '[\x00-\x1f\x7f]' ' ' -- "$title")
-	    printf '\e]2;%s\a' "$sanitized"
+	    printf '\e]2;__TERMSY_TITLE_%s__:%s\a' "$state" "$sanitized"
 	end
 
 	function __termsy_normalize_command_title -a title
@@ -385,12 +419,12 @@ enum ShellTitleIntegration {
 	end
 
 	function __termsy_prompt_title --on-event fish_prompt
-	    __termsy_set_title (prompt_pwd)
+	    __termsy_set_title PROMPT (prompt_pwd)
 	end
 
 	function __termsy_command_title --on-event fish_preexec -a commandline
 	    if test -n "$commandline"
-	        __termsy_set_title (__termsy_normalize_command_title "$commandline")
+	        __termsy_set_title COMMAND (__termsy_normalize_command_title "$commandline")
 	    end
 	end
 
@@ -575,9 +609,10 @@ enum ShellTitleIntegration {
 
 	_termsy_set_title() {
 	  emulate -L zsh
+	  local state=$1
 	  local title
-	  title=$(_termsy_sanitize_title "$1")
-	  print -rn -- $'\e]2;'${title}$'\a'
+	  title=$(_termsy_sanitize_title "$2")
+	  printf '\e]2;__TERMSY_TITLE_%s__:%s\a' "$state" "$title"
 	}
 
 	_termsy_normalize_command_title() {
@@ -597,12 +632,12 @@ enum ShellTitleIntegration {
 	_termsy_prompt_title() {
 	  emulate -L zsh
 	  local path="${PWD/#$HOME/~}"
-	  _termsy_set_title "$path"
+	  _termsy_set_title PROMPT "$path"
 	}
 
 	_termsy_preexec_title() {
 	  emulate -L zsh
-	  _termsy_set_title "$(_termsy_normalize_command_title "$1")"
+	  _termsy_set_title COMMAND "$(_termsy_normalize_command_title "$1")"
 	}
 
 	autoload -Uz add-zsh-hook 2>/dev/null

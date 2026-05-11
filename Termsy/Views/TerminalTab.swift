@@ -1011,7 +1011,7 @@ class TerminalTab: Identifiable {
 			self.updateTerminalSize(size)
 		}
 		terminalView.onTitleChange = { [weak self] title in
-			self?.reportedTitle = title
+			self?.reportedTitle = ShellTitleState.parse(title).title
 		}
 	}
 

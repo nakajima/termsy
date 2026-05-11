@@ -25,7 +25,6 @@
 
 		private let db: DB
 		private weak var manager: MacTerminalWindowManager?
-		private var bypassesCloseConfirmation = false
 		private var isShowingCloseConfirmation = false
 		private var isClosedByTabGroup = false
 
@@ -265,11 +264,6 @@
 		}
 
 		func windowShouldClose(_ sender: NSWindow) -> Bool {
-			if bypassesCloseConfirmation {
-				bypassesCloseConfirmation = false
-				return true
-			}
-
 			guard terminal.needsCloseConfirmation else { return true }
 			guard !isShowingCloseConfirmation else { return false }
 
@@ -285,8 +279,7 @@
 				guard let self else { return }
 				self.isShowingCloseConfirmation = false
 				guard response == .alertFirstButtonReturn, let sender else { return }
-				self.bypassesCloseConfirmation = true
-				sender.performClose(nil)
+				sender.close()
 			}
 			return false
 		}
@@ -330,7 +323,6 @@
 		func closeFromTabGroupTeardown() {
 			guard !isClosedByTabGroup else { return }
 			isClosedByTabGroup = true
-			bypassesCloseConfirmation = true
 			window?.close()
 			stopRecording()
 			terminal.close()
