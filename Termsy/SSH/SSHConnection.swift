@@ -882,7 +882,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	private let onEvent: @Sendable (String) -> Void
 
 	var isActive: Bool {
-		channel?.isActive ?? false
+		(channel?.isActive ?? false) && (sshChildChannel?.isActive ?? false)
 	}
 
 	init(
@@ -1086,15 +1086,24 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		childChannel.close(mode: .all, promise: nil)
 	}
 
-	func send(_ data: Data) {
-		guard let sshChildChannel, sshChildChannel.isActive else { return }
-		sshChildChannel.eventLoop.execute {
-			guard sshChildChannel.isActive else { return }
+	@discardableResult
+	func send(_ data: Data) -> Bool {
+		guard let sshChildChannel, sshChildChannel.isActive else { return false }
+		sshChildChannel.eventLoop.execute { [weak self] in
+			guard sshChildChannel.isActive else {
+				self?.log("terminal input skipped because the SSH session channel became inactive")
+				sshChildChannel.close(mode: .all, promise: nil)
+				return
+			}
 			var buffer = sshChildChannel.allocator.buffer(capacity: data.count)
 			buffer.writeBytes(data)
 			let channelData = SSHChannelData(type: .channel, data: .byteBuffer(buffer))
-			sshChildChannel.writeAndFlush(channelData, promise: nil)
+			sshChildChannel.writeAndFlush(channelData).whenFailure { error in
+				self?.log("failed to send terminal input: \(error)")
+				sshChildChannel.close(mode: .all, promise: nil)
+			}
 		}
+		return true
 	}
 
 	func resize(_ size: TerminalWindowSize) {

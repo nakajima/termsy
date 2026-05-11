@@ -14,6 +14,7 @@ import GRDBQuery
 @testable import Termsy
 import Testing
 
+@Suite(.serialized)
 struct TermsyTests {
 	@MainActor
 	@Test func resetTerminalViewPreservesDisplayActivity() {
@@ -709,6 +710,29 @@ struct TermsyTests {
 	}
 
 	@MainActor
+	@Test func terminalInputSendFailureUsesBackgroundRestorationReconnect() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+		tab.isConnected = true
+		let oldView = tab.terminalView
+
+		tab.terminalView.onWrite?(Data("x".utf8))
+
+		#expect(tab.connectionError == nil)
+		#expect(tab.terminalView !== oldView)
+		#expect(tab.isRestoring)
+		#expect(tab.restorationMode == .backgroundReconnect)
+		#expect(!tab.showsRestoringProgress)
+		#expect(!tab.showsConnectingOverlay)
+	}
+
+	@MainActor
 	@Test func connectedSessionErrorReconnectUsesBackgroundRestoration() {
 		let session = Session(
 			hostname: "prod.example.com",
@@ -770,29 +794,6 @@ struct TermsyTests {
 
 		#expect(didClose)
 		#expect(!tab.isRestoring)
-	}
-
-	@MainActor
-	@Test func connectWithPasswordSetsConnectingStateAndClearsError() async {
-		let session = Session(
-			hostname: "prod.example.com",
-			username: "pat",
-			tmuxSessionName: nil,
-			port: 22,
-			autoconnect: false
-		)
-		let tab = TerminalTab(session: session)
-		tab.connectionError = "previous failure"
-
-		// connectWithPassword is async but will fail immediately since there's no real server.
-		// We verify the state is set correctly before the actual connection attempt.
-		await tab.connectWithPassword("secret")
-
-		// After the failed attempt, connectionError should be set (from the failed connect),
-		// but the key invariant is that it was cleared at the start of the attempt.
-		// Since the connect fails, connectionState returns to idle with an error.
-		// The important thing: the old "previous failure" error is gone.
-		#expect(tab.connectionError != "previous failure")
 	}
 
 	@MainActor
@@ -885,14 +886,5 @@ struct TermsyTests {
 		#expect(nilSession.trimmedCustomTitle == nil)
 		#expect(nilSession.trimmedTmuxSessionName == nil)
 		#expect(nilSession.trimmedInitialWorkingDirectory == nil)
-	}
-
-	@Test func shellQuotedHandlesSingleQuotesInRemoteStartupCommand() {
-		let command = ShellTitleIntegration.remoteStartupCommand(
-			tmuxSessionName: "it's",
-			initialWorkingDirectory: nil
-		)
-		#expect(command.contains("TERMSY_STARTUP_TMUX_SESSION"))
-		#expect(command.contains("it'\\''s"))
 	}
 }

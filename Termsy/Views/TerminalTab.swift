@@ -773,13 +773,6 @@ class TerminalTab: Identifiable {
 		terminalView.setDisplayActive(isActive)
 	}
 
-	#if canImport(UIKit)
-		func restoreKeyboardFocusAfterAppActivation() {
-			guard isDisplayActive else { return }
-			terminalView.restoreKeyboardFocusAfterAppActivation()
-		}
-	#endif
-
 	func enterForeground() {
 		switch endpoint {
 		case .remote:
@@ -975,6 +968,18 @@ class TerminalTab: Identifiable {
 		onOverlayStateChange?()
 	}
 
+	private func handleTerminalInputSendFailure() {
+		guard case .remote = endpoint, wantsConnection else { return }
+		guard connectionState != .connecting else { return }
+		logConnectionEvent("Terminal input could not be sent because the SSH session channel is inactive")
+		connectionError = nil
+		#if canImport(UIKit)
+			prepareForReconnectAfterBackgroundLoss(snapshot: displaySnapshot ?? terminalView.captureSnapshot())
+		#else
+			prepareForReconnectAfterBackgroundLoss()
+		#endif
+	}
+
 	private func configureTerminalView() {
 		terminalView.onCloseTabRequest = { [weak self] in
 			self?.requestClose()
@@ -999,7 +1004,9 @@ class TerminalTab: Identifiable {
 			self.recordTerminalInput(data)
 			switch self.endpoint {
 			case .remote:
-				self.sshSession.connection.send(data)
+				if !self.sshSession.connection.send(data) {
+					self.handleTerminalInputSendFailure()
+				}
 			case .localShell:
 				#if os(macOS)
 					self.localShellSession?.send(data)
