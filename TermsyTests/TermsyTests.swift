@@ -722,7 +722,7 @@ struct TermsyTests {
 		tab.isConnected = true
 		let oldView = tab.terminalView
 
-		tab.terminalView.onWrite?(Data("x".utf8))
+		tab.terminalView(tab.terminalView, didWrite: Data("x".utf8))
 
 		#expect(tab.connectionError == nil)
 		#expect(tab.terminalView !== oldView)
@@ -886,5 +886,132 @@ struct TermsyTests {
 		#expect(nilSession.trimmedCustomTitle == nil)
 		#expect(nilSession.trimmedTmuxSessionName == nil)
 		#expect(nilSession.trimmedInitialWorkingDirectory == nil)
+	}
+
+	@MainActor
+	@Test func overlayStatePriorityRestorationBeatsPasswordBeatsErrorBeatsConnectionState() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+
+		// Default: idle → no-overlay .connected.
+		guard case .connected = tab.overlayState else {
+			Issue.record("expected .connected default, got \(tab.overlayState)")
+			return
+		}
+		#expect(!tab.showsOverlay)
+
+		// Connection error alone surfaces as .failed (no overlay; rendered inline).
+		tab.connectionError = "boom"
+		guard case let .failed(message) = tab.overlayState else {
+			Issue.record("expected .failed, got \(tab.overlayState)")
+			return
+		}
+		#expect(message == "boom")
+		#expect(!tab.showsOverlay)
+
+		// needsPassword takes precedence over a pending error.
+		tab.needsPassword = true
+		if case .awaitingPassword = tab.overlayState {} else {
+			Issue.record("expected .awaitingPassword, got \(tab.overlayState)")
+		}
+		#expect(tab.showsOverlay)
+
+		// restorationMode takes precedence over needsPassword and error.
+		tab.restorationMode = .launch
+		guard case .restoring(.launch) = tab.overlayState else {
+			Issue.record("expected .restoring(.launch), got \(tab.overlayState)")
+			return
+		}
+		#expect(tab.showsOverlay)
+		#expect(tab.showsRestoringProgress)
+
+		// backgroundReconnect restoration suppresses the progress indicator.
+		tab.restorationMode = .backgroundReconnect
+		guard case .restoring(.backgroundReconnect) = tab.overlayState else {
+			Issue.record("expected .restoring(.backgroundReconnect), got \(tab.overlayState)")
+			return
+		}
+		#expect(!tab.showsRestoringProgress)
+	}
+
+	@MainActor
+	@Test func isConnectedSetterRoundTripsBetweenConnectedAndIdle() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+
+		#expect(!tab.isConnected)
+
+		tab.isConnected = true
+		#expect(tab.isConnected)
+
+		tab.isConnected = false
+		#expect(!tab.isConnected)
+		// Returning to idle clears the connecting overlay too.
+		#expect(!tab.showsConnectingOverlay)
+	}
+
+	@MainActor
+	@Test func needsPasswordSetterOnlyTransitionsOutOfWaitingForPasswordState() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+
+		// Setting false while not waiting must not disturb other states.
+		tab.isConnected = true
+		tab.needsPassword = false
+		#expect(tab.isConnected)
+		#expect(!tab.needsPassword)
+
+		// Setting true forces waitingForPassword and overrides connected.
+		tab.needsPassword = true
+		#expect(tab.needsPassword)
+		#expect(!tab.isConnected)
+		if case .awaitingPassword = tab.overlayState {} else {
+			Issue.record("expected .awaitingPassword, got \(tab.overlayState)")
+		}
+
+		// Setting false from waiting resets to idle, not back to connected.
+		tab.needsPassword = false
+		#expect(!tab.needsPassword)
+		#expect(!tab.isConnected)
+	}
+
+	@MainActor
+	@Test func preparePassivePreviewClearsErrorAndRestorationAndMarksConnected() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+		tab.connectionError = "earlier failure"
+		tab.restorationMode = .launch
+
+		tab.preparePassivePreview(transcript: "demo output")
+
+		#expect(tab.connectionError == nil)
+		#expect(tab.restorationMode == nil)
+		#expect(tab.isConnected)
+		#expect(!tab.showsOverlay)
+		#expect(!tab.shouldRequestBackgroundExecution)
 	}
 }

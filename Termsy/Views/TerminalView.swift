@@ -13,6 +13,19 @@
 	import UIKit
 
 	@MainActor
+	protocol TerminalViewDelegate: AnyObject {
+		func terminalView(_ view: TerminalView, didWrite data: Data)
+		func terminalViewDidResize(_ view: TerminalView)
+		func terminalView(_ view: TerminalView, didReportTitle title: String)
+		func terminalViewRequestsCloseTab(_ view: TerminalView)
+		func terminalViewRequestsNewTab(_ view: TerminalView)
+		func terminalView(_ view: TerminalView, requestsSelectTab index: Int)
+		func terminalView(_ view: TerminalView, requestsMoveTabSelectionBy offset: Int)
+		func terminalViewRequestsShowSettings(_ view: TerminalView)
+		func terminalViewShouldDismissAuxiliaryUI(_ view: TerminalView) -> Bool
+	}
+
+	@MainActor
 	final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate, UIGestureRecognizerDelegate {
 		enum PresentationMode {
 			case interactive
@@ -76,32 +89,7 @@
 		private let momentumDecelerationPerFrame: CGFloat = 0.92
 		private let smoothScrollAnimationSpeed: CGFloat = 18
 
-		/// Called when the terminal produces bytes (user input, query responses).
-		var onWrite: ((Data) -> Void)?
-
-		/// Called when the terminal grid resizes.
-		var onResize: ((UInt16, UInt16) -> Void)?
-
-		/// Called when the terminal updates its title.
-		var onTitleChange: ((String) -> Void)?
-
-		/// Called when the user requests closing the current tab.
-		var onCloseTabRequest: (() -> Void)?
-
-		/// Called when the user requests opening a new tab.
-		var onNewTabRequest: (() -> Void)?
-
-		/// Called when the user requests selecting a tab by 1-based index.
-		var onSelectTabRequest: ((Int) -> Void)?
-
-		/// Called when the user requests moving the current tab selection by a relative offset.
-		var onMoveTabSelectionRequest: ((Int) -> Void)?
-
-		/// Called when the user requests opening app settings.
-		var onShowSettingsRequest: (() -> Void)?
-
-		/// Called when Escape should dismiss auxiliary app UI instead of reaching the terminal.
-		var onDismissAuxiliaryUIRequest: (() -> Bool)?
+		weak var delegate: (any TerminalViewDelegate)?
 
 		var autocapitalizationType: UITextAutocapitalizationType {
 			get { .none }
@@ -320,12 +308,14 @@
 					hostManagedSurface = HostManagedSurface(
 						onData: { [weak self] data in
 							DispatchQueue.main.async {
-								self?.onWrite?(data)
+								guard let self else { return }
+								self.delegate?.terminalView(self, didWrite: data)
 							}
 						},
-						onResize: { [weak self] resize in
+						onResize: { [weak self] _ in
 							DispatchQueue.main.async {
-								self?.onResize?(resize.columns, resize.rows)
+								guard let self else { return }
+								self.delegate?.terminalViewDidResize(self)
 							}
 						}
 					)
@@ -381,7 +371,7 @@
 		}
 
 		func handleTitleChange(_ title: String) {
-			onTitleChange?(title)
+			delegate?.terminalView(self, didReportTitle: title)
 		}
 
 		func requestClipboardReadConfirmation(
@@ -1165,11 +1155,11 @@
 		}
 
 		@objc private func selectPreviousTabFromKeyCommand(_: UIKeyCommand) {
-			onMoveTabSelectionRequest?(-1)
+			delegate?.terminalView(self, requestsMoveTabSelectionBy: -1)
 		}
 
 		@objc private func selectNextTabFromKeyCommand(_: UIKeyCommand) {
-			onMoveTabSelectionRequest?(1)
+			delegate?.terminalView(self, requestsMoveTabSelectionBy: 1)
 		}
 
 		override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
@@ -1447,7 +1437,7 @@
 		private func handleAppShortcutIfNeeded(for key: UIKey) -> Bool {
 			let modifiers = key.modifierFlags.intersection([.shift, .control, .alternate, .command])
 			if key.keyCode == .keyboardEscape, modifiers.isEmpty {
-				return onDismissAuxiliaryUIRequest?() == true
+				return delegate?.terminalViewShouldDismissAuxiliaryUI(self) == true
 			}
 
 			guard key.modifierFlags.contains(.command) else { return false }
@@ -1458,20 +1448,20 @@
 				characters: key.characters,
 				charactersIgnoringModifiers: key.charactersIgnoringModifiers
 			) {
-				onMoveTabSelectionRequest?(offset)
+				delegate?.terminalView(self, requestsMoveTabSelectionBy: offset)
 				return true
 			}
 
 			if key.charactersIgnoringModifiers == "," {
-				onShowSettingsRequest?()
+				delegate?.terminalViewRequestsShowSettings(self)
 				return true
 			}
 			if key.charactersIgnoringModifiers.compare("w", options: .caseInsensitive) == .orderedSame {
-				onCloseTabRequest?()
+				delegate?.terminalViewRequestsCloseTab(self)
 				return true
 			}
 			if key.charactersIgnoringModifiers.compare("t", options: .caseInsensitive) == .orderedSame {
-				onNewTabRequest?()
+				delegate?.terminalViewRequestsNewTab(self)
 				return true
 			}
 			if key.charactersIgnoringModifiers.compare("v", options: .caseInsensitive) == .orderedSame {
@@ -1485,7 +1475,7 @@
 				return performCopyToClipboard()
 			}
 			if let digit = Int(key.charactersIgnoringModifiers), (1 ... 9).contains(digit) {
-				onSelectTabRequest?(digit)
+				delegate?.terminalView(self, requestsSelectTab: digit)
 				return true
 			}
 
