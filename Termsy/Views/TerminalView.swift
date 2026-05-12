@@ -42,14 +42,14 @@
 		private var hostManagedSurface: HostManagedSurface?
 		private var ghosttySurfaceUserdata: GhosttySurfaceUserdata?
 		private var displayLink: CADisplayLink?
-		private var pendingClipboardConfirmations = [PendingClipboardConfirmation]()
-		private var activeClipboardConfirmation: PendingClipboardConfirmation?
-		private weak var clipboardAlertController: UIAlertController?
-		private var activeHardwareKeyCodes = Set<UInt16>()
-		private var keyRepeatTimer: DispatchSourceTimer?
-		private var repeatingHardwareKey: UIKey?
-		private var repeatingKeyCode: UInt16?
-		private var suppressedKeyReleaseCodes = Set<UInt16>()
+		private lazy var clipboardConfirmer = TerminalClipboardConfirmer(
+			presenter: { [weak self] in self?.topClipboardAlertPresenter() },
+			surface: { [weak self] in self?.surface }
+		)
+		private lazy var keyRepeatController = TerminalKeyRepeatController { [weak self] key in
+			guard let self, let surface = self.surface else { return }
+			_ = self.handleKey(key, action: GHOSTTY_ACTION_REPEAT, surface: surface)
+		}
 		private var lastMouseLocation: CGPoint?
 		private var lastIndirectPointerHoverLocation: CGPoint?
 		private var activePointerButton: ghostty_input_mouse_button_e?
@@ -62,12 +62,7 @@
 		private var lastScrollLocation: CGPoint?
 		private var isDirectSelectionActive = false
 		private var suppressContextMenuUntil = Date.distantPast
-		private var momentumVelocity = CGPoint.zero
-		private var momentumInputKind: TerminalScrollSettings.InputKind?
-		private var smoothScrollAccumulatedOffsetY: CGFloat = 0
-		private var smoothScrollTargetOffsetY: CGFloat = 0
-		private var smoothScrollPresentationOffsetY: CGFloat = 0
-		private var smoothScrollSuppressedUntilNextScrollGesture = false
+		private let scrollPhysics = TerminalScrollPhysics()
 		private var pinchBaselineFontSize: Float?
 		private var pinchAppliedFontSize: Float?
 		private var lastAppliedSurfaceMetrics: AppliedSurfaceMetrics?
@@ -85,9 +80,6 @@
 
 		private let keyboardAccessoryBar = TerminalKeyboardAccessoryView(theme: TerminalTheme.current.appTheme)
 		private var firstResponderTask: Task<Void, Never>?
-		private let momentumVelocityThreshold: CGFloat = 50
-		private let momentumDecelerationPerFrame: CGFloat = 0.92
-		private let smoothScrollAnimationSpeed: CGFloat = 18
 
 		weak var delegate: (any TerminalViewDelegate)?
 
@@ -146,18 +138,6 @@
 		var writingToolsBehavior: UIWritingToolsBehavior {
 			get { .none }
 			set {}
-		}
-
-		private enum ClipboardConfirmationAction {
-			case read(state: UnsafeMutableRawPointer, request: ghostty_clipboard_request_e)
-			case write
-		}
-
-		private struct PendingClipboardConfirmation {
-			let id = UUID()
-			let kind: GhosttyClipboardConfirmationKind
-			let text: String
-			let action: ClipboardConfirmationAction
 		}
 
 		// MARK: - Lifecycle
@@ -349,7 +329,7 @@
 			stopDisplayActivity()
 			ClipboardAccessAuthorization.clear(for: self)
 			lastMouseLocation = nil
-			denyOutstandingClipboardReadConfirmations()
+			clipboardConfirmer.denyOutstandingReadConfirmations()
 			if let surface {
 				ghostty_surface_set_focus(surface, false)
 			}
@@ -361,8 +341,9 @@
 
 		func feedData(_ data: Data) {
 			guard !data.isEmpty else { return }
-			smoothScrollSuppressedUntilNextScrollGesture = true
-			snapSmoothScrollPresentationToTerminal()
+			scrollPhysics.suppressUntilNextGesture()
+			scrollPhysics.snapPresentationToTerminal()
+			updateSublayerFrames()
 			hostManagedSurface?.write(data)
 		}
 
@@ -379,33 +360,11 @@
 			state: UnsafeMutableRawPointer,
 			request: ghostty_clipboard_request_e
 		) {
-			guard let kind = GhosttyClipboardConfirmationKind(request: request) else {
-				guard let surface else { return }
-				"".withCString { cString in
-					ghostty_surface_complete_clipboard_request(surface, cString, state, true)
-				}
-				return
-			}
-
-			pendingClipboardConfirmations.append(
-				PendingClipboardConfirmation(
-					kind: kind,
-					text: text,
-					action: .read(state: state, request: request)
-				)
-			)
-			presentNextClipboardConfirmationIfNeeded()
+			clipboardConfirmer.requestRead(text: text, state: state, request: request)
 		}
 
 		func requestClipboardWriteConfirmation(text: String) {
-			pendingClipboardConfirmations.append(
-				PendingClipboardConfirmation(
-					kind: .osc52Write,
-					text: text,
-					action: .write
-				)
-			)
-			presentNextClipboardConfirmationIfNeeded()
+			clipboardConfirmer.requestWrite(text: text)
 		}
 
 		var hasAttachedWindow: Bool {
@@ -449,85 +408,6 @@
 		func setDisplayActive(_ isActive: Bool) {
 			isDisplayActive = isActive
 			applyDisplayActivity()
-		}
-
-		private func presentNextClipboardConfirmationIfNeeded() {
-			guard activeClipboardConfirmation == nil,
-			      !pendingClipboardConfirmations.isEmpty
-			else { return }
-
-			let confirmation = pendingClipboardConfirmations.removeFirst()
-			activeClipboardConfirmation = confirmation
-
-			guard let presenter = topClipboardAlertPresenter() else {
-				resolveClipboardConfirmation(confirmation, allowed: false)
-				return
-			}
-
-			let alert = UIAlertController(
-				title: confirmation.kind.title,
-				message: confirmation.kind.formattedMessage(for: confirmation.text),
-				preferredStyle: .alert
-			)
-			alert.addAction(
-				UIAlertAction(title: confirmation.kind.denyButtonTitle, style: .cancel) { [weak self] _ in
-					self?.resolveClipboardConfirmation(confirmation, allowed: false)
-				}
-			)
-			alert.addAction(
-				UIAlertAction(title: confirmation.kind.allowButtonTitle, style: .default) { [weak self] _ in
-					self?.resolveClipboardConfirmation(confirmation, allowed: true)
-				}
-			)
-			clipboardAlertController = alert
-			presenter.present(alert, animated: true)
-		}
-
-		private func resolveClipboardConfirmation(_ confirmation: PendingClipboardConfirmation, allowed: Bool) {
-			guard activeClipboardConfirmation?.id == confirmation.id else { return }
-
-			switch confirmation.action {
-			case let .read(state, _):
-				guard let surface else {
-					finishClipboardConfirmation(confirmation)
-					return
-				}
-				let responseText = allowed ? confirmation.text : ""
-				responseText.withCString { cString in
-					ghostty_surface_complete_clipboard_request(surface, cString, state, true)
-				}
-
-			case .write:
-				if allowed {
-					UIPasteboard.general.string = confirmation.text
-				}
-			}
-
-			finishClipboardConfirmation(confirmation)
-		}
-
-		private func finishClipboardConfirmation(_ confirmation: PendingClipboardConfirmation) {
-			guard activeClipboardConfirmation?.id == confirmation.id else { return }
-			activeClipboardConfirmation = nil
-			clipboardAlertController = nil
-			presentNextClipboardConfirmationIfNeeded()
-		}
-
-		private func denyOutstandingClipboardReadConfirmations() {
-			let confirmations = [activeClipboardConfirmation].compactMap { $0 } + pendingClipboardConfirmations
-			if let surface {
-				for confirmation in confirmations {
-					if case let .read(state, _) = confirmation.action {
-						"".withCString { cString in
-							ghostty_surface_complete_clipboard_request(surface, cString, state, true)
-						}
-					}
-				}
-			}
-			activeClipboardConfirmation = nil
-			pendingClipboardConfirmations.removeAll()
-			clipboardAlertController?.dismiss(animated: false)
-			clipboardAlertController = nil
 		}
 
 		private func topClipboardAlertPresenter() -> UIViewController? {
@@ -625,12 +505,9 @@
 			resignFirstResponder()
 			clearArmedSoftwareModifiers()
 			releaseDirectSelectionIfNeeded()
-			stopMomentumScrolling()
-			snapSmoothScrollPresentationToTerminal()
+			cancelActiveScrollAnimationForInteraction()
 			stopDisplayLink()
-			stopKeyRepeat()
-			activeHardwareKeyCodes.removeAll()
-			suppressedKeyReleaseCodes.removeAll()
+			keyRepeatController.reset()
 			lastScrollLocation = nil
 			lastIndirectPointerHoverLocation = nil
 			activePointerButton = nil
@@ -676,7 +553,7 @@
 			contentScaleFactor = scale
 			layer.contentsScale = scale
 			let presentationOffsetY = TerminalScrollSettings.smoothVisualScrollingEnabled
-				? smoothScrollPresentationOffsetY : 0
+				? scrollPhysics.presentationOffsetY : 0
 			guard let sublayers = layer.sublayers else { return }
 			for sublayer in sublayers {
 				sublayer.frame = bounds
@@ -735,12 +612,27 @@
 		@objc private func tick(_ link: CADisplayLink) {
 			GhosttyApp.shared.tick()
 			let deltaTime = max(CGFloat(link.targetTimestamp - link.timestamp), 1.0 / 120.0)
-			updateMomentumScrolling(deltaTime: deltaTime)
-			updateSmoothScrollPresentation(deltaTime: deltaTime)
+			advanceMomentumScrolling(deltaTime: deltaTime)
+			if TerminalScrollSettings.smoothVisualScrollingEnabled {
+				scrollPhysics.advanceSmoothScrollPresentation(deltaTime: deltaTime)
+			} else {
+				scrollPhysics.snapPresentationToTerminal()
+			}
 			guard let surface else { return }
 			ghostty_surface_refresh(surface)
 			ghostty_surface_draw(surface)
 			updateSublayerFrames()
+		}
+
+		private func advanceMomentumScrolling(deltaTime: CGFloat) {
+			switch scrollPhysics.advanceMomentum(deltaTime: deltaTime) {
+			case .idle:
+				break
+			case let .delta(delta, inputKind):
+				sendScrollDelta(delta, inputKind: inputKind, location: lastScrollLocation, momentum: .changed)
+			case let .ended(inputKind):
+				sendScrollDelta(.zero, inputKind: inputKind, location: lastScrollLocation, momentum: .none)
+			}
 		}
 
 		// MARK: - Touch / Mouse
@@ -936,7 +828,7 @@
 
 			switch recognizer.state {
 			case .began:
-				smoothScrollSuppressedUntilNextScrollGesture = false
+				scrollPhysics.clearSuppression()
 				cancelActiveScrollAnimationForInteraction()
 				lastScrollLocation = location
 
@@ -953,8 +845,11 @@
 
 			case .cancelled, .failed:
 				recognizer.setTranslation(.zero, in: self)
-				stopMomentumScrolling()
-				releaseSmoothScrollPresentation()
+				if let endedKind = scrollPhysics.cancelForInteraction() {
+					sendScrollDelta(.zero, inputKind: endedKind, location: lastScrollLocation, momentum: .none)
+				}
+				scrollPhysics.releaseSmoothScroll()
+				updateSublayerFrames()
 
 			default:
 				break
@@ -993,93 +888,29 @@
 			inputKind: TerminalScrollSettings.InputKind
 		) {
 			guard TerminalScrollSettings.momentumScrollingEnabled else {
-				releaseSmoothScrollPresentation()
+				scrollPhysics.releaseSmoothScroll()
 				return
 			}
-			guard abs(velocity.x) > momentumVelocityThreshold || abs(velocity.y) > momentumVelocityThreshold else {
-				releaseSmoothScrollPresentation()
-				return
+			if scrollPhysics.beginMomentum(velocity: velocity, inputKind: inputKind) {
+				sendScrollDelta(.zero, inputKind: inputKind, location: lastScrollLocation, momentum: .began)
 			}
-
-			momentumVelocity = velocity
-			momentumInputKind = inputKind
-			sendScrollDelta(.zero, inputKind: inputKind, location: lastScrollLocation, momentum: .began)
-		}
-
-		private func stopMomentumScrolling() {
-			guard let inputKind = momentumInputKind else { return }
-			momentumVelocity = .zero
-			momentumInputKind = nil
-			sendScrollDelta(.zero, inputKind: inputKind, location: lastScrollLocation, momentum: .none)
-		}
-
-		private func updateMomentumScrolling(deltaTime: CGFloat) {
-			guard let inputKind = momentumInputKind else { return }
-
-			let frameScale = max(deltaTime * 60, 0)
-			let deceleration = CGFloat(pow(Double(momentumDecelerationPerFrame), Double(frameScale)))
-			momentumVelocity.x *= deceleration
-			momentumVelocity.y *= deceleration
-
-			if abs(momentumVelocity.x) < momentumVelocityThreshold,
-			   abs(momentumVelocity.y) < momentumVelocityThreshold
-			{
-				stopMomentumScrolling()
-				releaseSmoothScrollPresentation()
-				return
-			}
-
-			let delta = CGPoint(
-				x: momentumVelocity.x * deltaTime,
-				y: momentumVelocity.y * deltaTime
-			)
-			sendScrollDelta(delta, inputKind: inputKind, location: lastScrollLocation, momentum: .changed)
 		}
 
 		private func noteSmoothScrollDelta(_ adjustedDelta: CGPoint) {
 			guard TerminalScrollSettings.smoothVisualScrollingEnabled else {
-				snapSmoothScrollPresentationToTerminal()
+				scrollPhysics.snapPresentationToTerminal()
+				updateSublayerFrames()
 				return
 			}
-			guard !smoothScrollSuppressedUntilNextScrollGesture else { return }
-			guard let cellHeight = terminalCellHeightInPoints(), cellHeight > 0 else { return }
-			smoothScrollAccumulatedOffsetY -= adjustedDelta.y
-			smoothScrollTargetOffsetY = wrappedSmoothScrollOffset(
-				for: smoothScrollAccumulatedOffsetY,
-				cellHeight: cellHeight
-			)
-		}
-
-		private func updateSmoothScrollPresentation(deltaTime: CGFloat) {
-			guard TerminalScrollSettings.smoothVisualScrollingEnabled else {
-				snapSmoothScrollPresentationToTerminal()
-				return
-			}
-
-			let alpha = min(1, deltaTime * smoothScrollAnimationSpeed)
-			smoothScrollPresentationOffsetY +=
-				(smoothScrollTargetOffsetY - smoothScrollPresentationOffsetY) * alpha
-
-			if abs(smoothScrollPresentationOffsetY - smoothScrollTargetOffsetY) < 0.1 {
-				smoothScrollPresentationOffsetY = smoothScrollTargetOffsetY
-			}
-		}
-
-		private func releaseSmoothScrollPresentation() {
-			smoothScrollAccumulatedOffsetY = 0
-			smoothScrollTargetOffsetY = 0
-		}
-
-		private func snapSmoothScrollPresentationToTerminal() {
-			smoothScrollAccumulatedOffsetY = 0
-			smoothScrollTargetOffsetY = 0
-			smoothScrollPresentationOffsetY = 0
-			updateSublayerFrames()
+			guard let cellHeight = terminalCellHeightInPoints() else { return }
+			scrollPhysics.noteScrollAccumulation(delta: adjustedDelta, cellHeight: cellHeight)
 		}
 
 		private func cancelActiveScrollAnimationForInteraction() {
-			stopMomentumScrolling()
-			snapSmoothScrollPresentationToTerminal()
+			if let endedKind = scrollPhysics.cancelForInteraction() {
+				sendScrollDelta(.zero, inputKind: endedKind, location: lastScrollLocation, momentum: .none)
+			}
+			updateSublayerFrames()
 		}
 
 		private func terminalCellHeightInPoints() -> CGFloat? {
@@ -1089,18 +920,6 @@
 			let scale = resolvedScale()
 			guard scale > 0 else { return nil }
 			return CGFloat(size.cell_height_px) / scale
-		}
-
-		private func wrappedSmoothScrollOffset(for value: CGFloat, cellHeight: CGFloat) -> CGFloat {
-			guard cellHeight > 0 else { return 0 }
-			var remainder = value.truncatingRemainder(dividingBy: cellHeight)
-			let halfCellHeight = cellHeight / 2
-			if remainder > halfCellHeight {
-				remainder -= cellHeight
-			} else if remainder < -halfCellHeight {
-				remainder += cellHeight
-			}
-			return remainder
 		}
 
 		override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -1191,9 +1010,7 @@
 
 		func insertText(_ text: String) {
 			guard surface != nil else { return }
-			guard activeHardwareKeyCodes.isEmpty else {
-				return
-			}
+			guard !keyRepeatController.hasActiveKey else { return }
 
 			switch text {
 			case "\n", "\r":
@@ -1215,9 +1032,7 @@
 
 		func deleteBackward() {
 			guard surface != nil else { return }
-			guard activeHardwareKeyCodes.isEmpty else {
-				return
-			}
+			guard !keyRepeatController.hasActiveKey else { return }
 			sendSoftwareSpecialKey(macKeycode: 0x0033) // Backspace
 		}
 
@@ -1358,14 +1173,17 @@
 				guard let key = press.key, let surface else { continue }
 				let keyCode = UInt16(key.keyCode.rawValue)
 				if handleAppShortcutIfNeeded(for: key) {
-					suppressedKeyReleaseCodes.insert(keyCode)
+					keyRepeatController.suppressRelease(keyCode)
 					continue
 				}
 				// Suppress UIKit's UIKeyInput callbacks while the hardware key is down.
 				// We send both the initial press and repeats through ghostty key events.
-				activeHardwareKeyCodes.insert(keyCode)
-				if handleKey(key, action: GHOSTTY_ACTION_PRESS, surface: surface) {
-					startKeyRepeat(for: key)
+				keyRepeatController.notePressed(keyCode)
+				if handleKey(key, action: GHOSTTY_ACTION_PRESS, surface: surface),
+				   shouldRepeatHardwareKey(key),
+				   key.modifierFlags.intersection([.command, .control, .alternate]).isEmpty
+				{
+					keyRepeatController.startRepeat(for: key)
 				}
 			}
 		}
@@ -1374,26 +1192,16 @@
 			for press in presses {
 				guard let key = press.key, let surface else { continue }
 				let keyCode = UInt16(key.keyCode.rawValue)
-				activeHardwareKeyCodes.remove(keyCode)
-				if repeatingKeyCode == keyCode {
-					stopKeyRepeat()
+				if keyRepeatController.noteReleased(keyCode) {
+					handleKey(key, action: GHOSTTY_ACTION_RELEASE, surface: surface)
 				}
-				if suppressedKeyReleaseCodes.remove(keyCode) != nil {
-					continue
-				}
-				handleKey(key, action: GHOSTTY_ACTION_RELEASE, surface: surface)
 			}
 		}
 
 		override func pressesCancelled(_ presses: Set<UIPress>, with _: UIPressesEvent?) {
 			for press in presses {
 				guard let key = press.key else { continue }
-				let keyCode = UInt16(key.keyCode.rawValue)
-				activeHardwareKeyCodes.remove(keyCode)
-				if repeatingKeyCode == keyCode {
-					stopKeyRepeat()
-				}
-				suppressedKeyReleaseCodes.remove(keyCode)
+				keyRepeatController.noteCancelled(UInt16(key.keyCode.rawValue))
 			}
 		}
 
@@ -1585,36 +1393,6 @@
 			default:
 				return hardwareKeyText(for: key) != nil
 			}
-		}
-
-		private func startKeyRepeat(for key: UIKey) {
-			guard surface != nil else { return }
-			guard shouldRepeatHardwareKey(key) else { return }
-			let blockedModifiers: UIKeyModifierFlags = [.command, .control, .alternate]
-			guard key.modifierFlags.intersection(blockedModifiers).isEmpty else { return }
-
-			stopKeyRepeat()
-			repeatingHardwareKey = key
-			repeatingKeyCode = UInt16(key.keyCode.rawValue)
-
-			let timer = DispatchSource.makeTimerSource(queue: .main)
-			timer.schedule(deadline: .now() + 0.35, repeating: 0.05)
-			timer.setEventHandler { [weak self] in
-				guard let self,
-				      let repeatKey = self.repeatingHardwareKey,
-				      let surface = self.surface
-				else { return }
-				_ = self.handleKey(repeatKey, action: GHOSTTY_ACTION_REPEAT, surface: surface)
-			}
-			keyRepeatTimer = timer
-			timer.resume()
-		}
-
-		private func stopKeyRepeat() {
-			keyRepeatTimer?.cancel()
-			keyRepeatTimer = nil
-			repeatingHardwareKey = nil
-			repeatingKeyCode = nil
 		}
 
 		private func hardwareKeyText(for key: UIKey) -> String? {
