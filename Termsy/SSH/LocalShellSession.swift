@@ -18,7 +18,9 @@
 		private var masterFD: Int32 = -1
 		private var childPID: pid_t = 0
 		private var readSource: DispatchSourceRead?
+		private var writeSource: DispatchSourceWrite?
 		private var processSource: DispatchSourceProcess?
+		private var pendingInputBuffer = Data()
 		private var pendingTerminalSize = TerminalWindowSize(columns: 80, rows: 24, pixelWidth: 0, pixelHeight: 0)
 		private var startDate = Date()
 		private var isDisconnecting = false
@@ -107,22 +109,9 @@
 		}
 
 		func send(_ data: Data) {
-			guard masterFD >= 0, !data.isEmpty else { return }
-			queue.async { [masterFD] in
-				data.withUnsafeBytes { buffer in
-					guard let baseAddress = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
-					var bytesRemaining = data.count
-					var offset = 0
-					while bytesRemaining > 0 {
-						let written = write(masterFD, baseAddress.advanced(by: offset), bytesRemaining)
-						if written <= 0 {
-							if errno == EINTR { continue }
-							break
-						}
-						bytesRemaining -= written
-						offset += written
-					}
-				}
+			guard !data.isEmpty else { return }
+			queue.async { [weak self] in
+				self?.enqueueInput(data)
 			}
 		}
 
@@ -143,6 +132,9 @@
 				kill(childPID, SIGHUP)
 			}
 			if masterFD >= 0 {
+				writeSource?.cancel()
+				writeSource = nil
+				pendingInputBuffer.removeAll(keepingCapacity: false)
 				readSource?.cancel()
 				readSource = nil
 			}
@@ -178,6 +170,68 @@
 			source.setCancelHandler {}
 			processSource = source
 			source.resume()
+		}
+
+		private func enqueueInput(_ data: Data) {
+			guard masterFD >= 0 else { return }
+			pendingInputBuffer.append(data)
+			drainPendingInputBuffer()
+		}
+
+		private func drainPendingInputBuffer() {
+			guard masterFD >= 0 else {
+				pendingInputBuffer.removeAll(keepingCapacity: false)
+				cancelWriteSource()
+				return
+			}
+
+			while !pendingInputBuffer.isEmpty {
+				let written = pendingInputBuffer.withUnsafeBytes { buffer in
+					guard let baseAddress = buffer.baseAddress else { return 0 }
+					return write(masterFD, baseAddress, buffer.count)
+				}
+
+				if written > 0 {
+					pendingInputBuffer.removeSubrange(0 ..< written)
+					continue
+				}
+
+				if written == 0 {
+					installWriteSourceIfNeeded()
+					return
+				}
+
+				if errno == EINTR {
+					continue
+				}
+
+				if errno == EAGAIN || errno == EWOULDBLOCK {
+					installWriteSourceIfNeeded()
+					return
+				}
+
+				pendingInputBuffer.removeAll(keepingCapacity: false)
+				cancelWriteSource()
+				return
+			}
+
+			cancelWriteSource()
+		}
+
+		private func installWriteSourceIfNeeded() {
+			guard writeSource == nil, masterFD >= 0 else { return }
+			let source = DispatchSource.makeWriteSource(fileDescriptor: masterFD, queue: queue)
+			source.setEventHandler { [weak self] in
+				self?.drainPendingInputBuffer()
+			}
+			source.setCancelHandler {}
+			writeSource = source
+			source.resume()
+		}
+
+		private func cancelWriteSource() {
+			writeSource?.cancel()
+			writeSource = nil
 		}
 
 		private func drainOutput() {
@@ -308,6 +362,9 @@
 		}
 
 		private func teardown(sendSignal _: Bool) {
+			writeSource?.cancel()
+			writeSource = nil
+			pendingInputBuffer.removeAll(keepingCapacity: false)
 			readSource?.cancel()
 			readSource = nil
 			processSource?.cancel()

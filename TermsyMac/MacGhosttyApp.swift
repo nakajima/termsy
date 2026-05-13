@@ -2,6 +2,24 @@
 	import AppKit
 	import TermsyGhosttyCore
 
+	/// Bridges access to NSPasteboard for ghostty's `readClipboard` callback.
+	/// Exposed (with `@testable`) so tests can exercise the threading behavior
+	/// directly without spinning up a full ghostty surface.
+	enum MacClipboardBridge {
+		/// Reads the current pasteboard string. Safe to call from any thread.
+		///
+		/// We deliberately do NOT hop to main here: ghostty can invoke its
+		/// `readClipboard` callback from a worker thread while the main thread
+		/// is synchronously busy inside `ghostty_surface_binding_action` (e.g.
+		/// during a paste). Dispatching back to main would deadlock the worker
+		/// against the busy main thread, hanging the terminal until the tab is
+		/// killed. NSPasteboard's read methods don't require main; the iOS
+		/// equivalent (UIPasteboard) is also accessed without hopping.
+		static func readClipboardStringMirroringProduction() -> String? {
+			NSPasteboard.general.string(forType: .string)
+		}
+	}
+
 	@MainActor
 	final class MacGhosttyApp {
 		static let shared = MacGhosttyApp()
@@ -79,29 +97,23 @@
 						}
 					},
 					readClipboard: { userdata, clipboard, opaquePtr in
+						// Run on whatever thread ghostty called us from. See
+						// MacClipboardBridge.readClipboardStringMirroringProduction for why
+						// we don't hop to main: a sync hop deadlocks against ghostty's
+						// own main-thread paste processing.
 						guard clipboard == GHOSTTY_CLIPBOARD_STANDARD,
 						      let userdata,
 						      let opaquePtr
 						else { return false }
-
-						let fulfillClipboardRequest = {
-							let view = Unmanaged<MacTerminalView>.fromOpaque(userdata).takeUnretainedValue()
-							guard let surface = view.surface,
-							      let string = NSPasteboard.general.string(forType: .string),
-							      !string.isEmpty
-							else { return false }
-
-							string.withCString { cString in
-								ghostty_surface_complete_clipboard_request(surface, cString, opaquePtr, true)
-							}
-							return true
+						let view = Unmanaged<MacTerminalView>.fromOpaque(userdata).takeUnretainedValue()
+						guard let surface = view.surface,
+						      let string = MacClipboardBridge.readClipboardStringMirroringProduction(),
+						      !string.isEmpty
+						else { return false }
+						string.withCString { cString in
+							ghostty_surface_complete_clipboard_request(surface, cString, opaquePtr, true)
 						}
-
-						if Thread.isMainThread {
-							return fulfillClipboardRequest()
-						}
-
-						return DispatchQueue.main.sync(execute: fulfillClipboardRequest)
+						return true
 					}
 				)
 			)

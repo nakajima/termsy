@@ -28,11 +28,6 @@ struct SessionPickerView: View {
 					}
 				},
 				onOpenSession: openSession,
-				onOpenLocalShell: {
-					#if os(macOS)
-						openLocalShell()
-					#endif
-				},
 				onOpenNewSession: openNewSession,
 				onClose: close
 			)
@@ -54,13 +49,6 @@ struct SessionPickerView: View {
 		coordinator.openTab(for: session)
 		close()
 	}
-
-	#if os(macOS)
-		private func openLocalShell() {
-			close()
-			coordinator.openLocalShellTab()
-		}
-	#endif
 
 	private func openNewSession() {
 		close()

@@ -237,7 +237,6 @@ struct SessionListContent: View {
 	}
 
 	private enum ItemID: Hashable {
-		case localShell
 		case directConnection(String)
 		case remoteTmuxSession(String)
 		case session(String)
@@ -256,7 +255,6 @@ struct SessionListContent: View {
 	private let variant: Variant
 	private let isSessionOpen: (Session) -> Bool
 	private let onOpenSession: (Session) -> Void
-	private let onOpenLocalShell: () -> Void
 	private let onOpenNewSession: () -> Void
 	private let onClose: () -> Void
 	private let onAppearWithSessions: ([Session]) -> Void
@@ -270,7 +268,6 @@ struct SessionListContent: View {
 		variant: Variant,
 		isSessionOpen: @escaping (Session) -> Bool = { _ in false },
 		onOpenSession: @escaping (Session) -> Void,
-		onOpenLocalShell: @escaping () -> Void = {},
 		onOpenNewSession: @escaping () -> Void = {},
 		onClose: @escaping () -> Void = {},
 		onAppearWithSessions: @escaping ([Session]) -> Void = { _ in }
@@ -278,7 +275,6 @@ struct SessionListContent: View {
 		self.variant = variant
 		self.isSessionOpen = isSessionOpen
 		self.onOpenSession = onOpenSession
-		self.onOpenLocalShell = onOpenLocalShell
 		self.onOpenNewSession = onOpenNewSession
 		self.onClose = onClose
 		self.onAppearWithSessions = onAppearWithSessions
@@ -358,23 +354,10 @@ struct SessionListContent: View {
 		return loadingTarget == lookupTarget
 	}
 
-	private var shouldShowLocalShellRow: Bool {
-		#if os(macOS)
-			guard !normalizedFilterText.isEmpty else { return true }
-			return "local shell".contains(normalizedFilterText)
-				|| LocalShellProfile.default.detailText.lowercased().contains(normalizedFilterText)
-		#else
-			return false
-		#endif
-	}
+	private var shouldShowLocalShellRow: Bool { false }
 
 	private var visibleItemIDs: [ItemID] {
 		var ids: [ItemID] = []
-		#if os(macOS)
-			if shouldShowLocalShellRow {
-				ids.append(.localShell)
-			}
-		#endif
 		if let directConnectTarget {
 			ids.append(.directConnection(directConnectTarget.normalizedTargetKey))
 		}
@@ -394,14 +377,6 @@ struct SessionListContent: View {
 				Section {
 					filterField()
 				}
-
-				#if os(macOS)
-					if shouldShowLocalShellRow {
-						Section("Local") {
-							localShellRow()
-						}
-					}
-				#endif
 
 				if let directConnectTarget {
 					Section {
@@ -613,48 +588,6 @@ struct SessionListContent: View {
 		.id(itemID)
 	}
 
-	#if os(macOS)
-		@ViewBuilder
-		private func localShellRow() -> some View {
-			let isSelected = selectedItemID == .localShell
-
-			Button {
-				selectedItemID = .localShell
-				onOpenLocalShell()
-			} label: {
-				localShellLabel(isSelected: isSelected)
-			}
-			.buttonStyle(.plain)
-			.sessionListKeyboardShortcut("l", modifiers: .command, enabled: variant == .picker)
-			.listRowInsets(denseRowInsets)
-			.listRowBackground(rowBackground(isSelected: isSelected))
-			.id(ItemID.localShell)
-		}
-
-		@ViewBuilder
-		private func localShellLabel(isSelected: Bool) -> some View {
-			switch variant {
-			case .savedSessions:
-				VStack(alignment: .leading, spacing: rowTextSpacing) {
-					Text("Local Shell")
-						.font(.headline)
-						.foregroundStyle(theme.primaryText)
-					Text(LocalShellProfile.default.detailText)
-						.font(.caption)
-						.foregroundStyle(theme.secondaryText)
-				}
-				.frame(maxWidth: .infinity, alignment: .leading)
-				.padding(.vertical, rowVerticalPadding)
-			case .picker:
-				Label("Local Shell", systemImage: "terminal")
-					.font(.body)
-					.foregroundStyle(isSelected ? theme.primaryText : theme.accent)
-					.frame(maxWidth: .infinity, alignment: .leading)
-					.padding(.vertical, rowVerticalPadding)
-					.contentShape(Rectangle())
-			}
-		}
-	#endif
 
 	@ViewBuilder
 	private func sessionRow(for session: Session) -> some View {
@@ -766,8 +699,6 @@ struct SessionListContent: View {
 		}
 
 		switch selectedItemID {
-		case .localShell:
-			onOpenLocalShell()
 		case let .directConnection(key):
 			guard let target = directConnectTarget, target.normalizedTargetKey == key else {
 				ensureValidSelection()
@@ -1221,271 +1152,6 @@ private extension View {
 		}
 	}
 
-#elseif canImport(AppKit)
-	import AppKit
-
-	private struct SessionFilterTextField: NSViewRepresentable {
-		@Binding var text: String
-		@Binding var isFocused: Bool
-		let placeholder: String
-		let textColor: PlatformColor
-		let onSubmit: () -> Void
-		let onMoveSelection: (Int) -> Void
-
-		func makeCoordinator() -> Coordinator {
-			Coordinator(text: $text, isFocused: $isFocused, onSubmit: onSubmit, onMoveSelection: onMoveSelection)
-		}
-
-		func makeNSView(context: Context) -> KeyHandlingTextField {
-			let textField = KeyHandlingTextField()
-			textField.isBordered = false
-			textField.drawsBackground = false
-			textField.focusRingType = .none
-			textField.font = .systemFont(ofSize: NSFont.systemFontSize)
-			textField.delegate = context.coordinator
-			return textField
-		}
-
-		func updateNSView(_ nsView: KeyHandlingTextField, context: Context) {
-			context.coordinator.text = $text
-			context.coordinator.isFocused = $isFocused
-			context.coordinator.onSubmit = onSubmit
-			context.coordinator.onMoveSelection = onMoveSelection
-			nsView.placeholderString = placeholder
-			nsView.textColor = textColor
-			nsView.wantsFocus = isFocused
-			if nsView.stringValue != text {
-				nsView.stringValue = text
-			}
-			nsView.focusIfNeeded()
-		}
-
-		final class KeyHandlingTextField: NSTextField {
-			var wantsFocus = false
-
-			override func viewDidMoveToWindow() {
-				super.viewDidMoveToWindow()
-				focusIfNeeded()
-			}
-
-			func focusIfNeeded() {
-				guard wantsFocus, let window else { return }
-				DispatchQueue.main.async { [weak self, weak window] in
-					guard let self, self.wantsFocus, let window, self.window === window else { return }
-					guard window.firstResponder !== self.currentEditor() else { return }
-					window.makeFirstResponder(self)
-				}
-			}
-		}
-
-		final class Coordinator: NSObject, NSTextFieldDelegate {
-			var text: Binding<String>
-			var isFocused: Binding<Bool>
-			var onSubmit: () -> Void
-			var onMoveSelection: (Int) -> Void
-
-			init(
-				text: Binding<String>,
-				isFocused: Binding<Bool>,
-				onSubmit: @escaping () -> Void,
-				onMoveSelection: @escaping (Int) -> Void
-			) {
-				self.text = text
-				self.isFocused = isFocused
-				self.onSubmit = onSubmit
-				self.onMoveSelection = onMoveSelection
-			}
-
-			func controlTextDidBeginEditing(_: Notification) {
-				isFocused.wrappedValue = true
-			}
-
-			func controlTextDidEndEditing(_: Notification) {
-				isFocused.wrappedValue = false
-			}
-
-			func controlTextDidChange(_ notification: Notification) {
-				guard let textField = notification.object as? NSTextField else { return }
-				text.wrappedValue = textField.stringValue
-			}
-
-			func control(_: NSControl, textView _: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-				let event = NSApp.currentEvent
-				let modifiers = event?.modifierFlags.intersection([.command, .control, .option, .shift]) ?? []
-				if modifiers == .control {
-					switch event?.charactersIgnoringModifiers?.lowercased() {
-					case "n":
-						onMoveSelection(1)
-						return true
-					case "p":
-						onMoveSelection(-1)
-						return true
-					default:
-						break
-					}
-				}
-
-				if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-					onSubmit()
-					return true
-				}
-
-				return false
-			}
-		}
-	}
-
-	private struct SessionListKeyboardHandler: NSViewRepresentable {
-		let isEnabled: Bool
-		let handlesClose: Bool
-		let onMoveSelection: (Int) -> Void
-		let onMovePage: (Int) -> Void
-		let onMoveToBoundary: (Bool) -> Void
-		let onActivateSelection: () -> Void
-		let onClose: () -> Void
-
-		func makeNSView(context _: Context) -> KeyCommandView {
-			KeyCommandView()
-		}
-
-		func updateNSView(_ nsView: KeyCommandView, context _: Context) {
-			nsView.acceptsKeyCommands = isEnabled
-			nsView.handlesClose = handlesClose
-			nsView.onMoveSelection = onMoveSelection
-			nsView.onMovePage = onMovePage
-			nsView.onMoveToBoundary = onMoveToBoundary
-			nsView.onActivateSelection = onActivateSelection
-			nsView.onClose = onClose
-			if isEnabled {
-				nsView.activateIfPossible()
-			} else {
-				nsView.deactivateIfNeeded()
-			}
-		}
-
-		final class KeyCommandView: NSView {
-			var acceptsKeyCommands = true
-			var handlesClose = false
-			var onMoveSelection: ((Int) -> Void)?
-			var onMovePage: ((Int) -> Void)?
-			var onMoveToBoundary: ((Bool) -> Void)?
-			var onActivateSelection: (() -> Void)?
-			var onClose: (() -> Void)?
-
-			override var acceptsFirstResponder: Bool { true }
-
-			override func viewDidMoveToWindow() {
-				super.viewDidMoveToWindow()
-				activateIfPossible()
-			}
-
-			func activateIfPossible() {
-				guard acceptsKeyCommands, let window else { return }
-				DispatchQueue.main.async { [weak self, weak window] in
-					guard let self, self.acceptsKeyCommands, let window, self.window === window else { return }
-					window.makeFirstResponder(self)
-				}
-			}
-
-			func deactivateIfNeeded() {
-				guard window?.firstResponder === self else { return }
-				window?.makeFirstResponder(nil)
-			}
-
-			override func keyDown(with event: NSEvent) {
-				guard acceptsKeyCommands else {
-					nextResponder?.keyDown(with: event)
-					return
-				}
-				guard !handle(event) else { return }
-				nextResponder?.keyDown(with: event)
-			}
-
-			private func handle(_ event: NSEvent) -> Bool {
-				let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
-				let hasNoModifiers = modifiers.isEmpty
-
-				switch event.keyCode {
-				case 126 where hasNoModifiers:
-					onMoveSelection?(-1)
-					return true
-				case 125 where hasNoModifiers:
-					onMoveSelection?(1)
-					return true
-				case 116 where hasNoModifiers:
-					onMovePage?(-1)
-					return true
-				case 121 where hasNoModifiers:
-					onMovePage?(1)
-					return true
-				case 115 where hasNoModifiers:
-					onMoveToBoundary?(false)
-					return true
-				case 119 where hasNoModifiers:
-					onMoveToBoundary?(true)
-					return true
-				case 126 where modifiers == .command:
-					onMoveToBoundary?(false)
-					return true
-				case 125 where modifiers == .command:
-					onMoveToBoundary?(true)
-					return true
-				case 36, 76 where hasNoModifiers:
-					onActivateSelection?()
-					return true
-				case 53 where hasNoModifiers && handlesClose:
-					onClose?()
-					return true
-				default:
-					break
-				}
-
-				if modifiers == .control {
-					switch event.charactersIgnoringModifiers?.lowercased() {
-					case "p":
-						onMoveSelection?(-1)
-						return true
-					case "n":
-						onMoveSelection?(1)
-						return true
-					default:
-						break
-					}
-				}
-
-				return false
-			}
-		}
-	}
-#else
-	private struct SessionFilterTextField: View {
-		@Binding var text: String
-		@Binding var isFocused: Bool
-		let placeholder: String
-		let textColor: PlatformColor
-		let onSubmit: () -> Void
-		let onMoveSelection: (Int) -> Void
-
-		var body: some View {
-			TextField(placeholder, text: $text)
-				.onSubmit(onSubmit)
-				.onAppear { isFocused = true }
-		}
-	}
-
-	private struct SessionListKeyboardHandler: View {
-		let isEnabled: Bool
-		let handlesClose: Bool
-		let onMoveSelection: (Int) -> Void
-		let onMovePage: (Int) -> Void
-		let onMoveToBoundary: (Bool) -> Void
-		let onActivateSelection: () -> Void
-		let onClose: () -> Void
-
-		var body: some View {
-			Color.clear
-		}
-	}
 #endif
 
 #Preview("Saved Sessions") {

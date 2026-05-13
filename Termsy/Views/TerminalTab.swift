@@ -8,9 +8,7 @@
 import Foundation
 import Observation
 import SwiftUI
-#if canImport(UIKit)
-	import UIKit
-#endif
+import UIKit
 
 /// Represents a single open terminal tab.
 @Observable @MainActor
@@ -53,9 +51,6 @@ class TerminalTab: Identifiable {
 	let endpoint: TerminalEndpoint
 	var session: Session?
 	var sshSession = SSHTerminalSession()
-	#if os(macOS)
-		private let localShellSession: LocalShellSession?
-	#endif
 	var terminalView: TerminalView
 	private var phase: ConnectionPhase = .idle
 	var connectionError: String? {
@@ -102,12 +97,10 @@ class TerminalTab: Identifiable {
 	var connectionLog: [String] = []
 	private(set) var isRecording = false
 	private(set) var recordingDataByteCount: Int64 = 0
-	#if canImport(UIKit)
-		@ObservationIgnored private var restorationSnapshot: UIImage?
-		var displaySnapshot: UIImage? {
-			restorationSnapshot
-		}
-	#endif
+	@ObservationIgnored private var restorationSnapshot: UIImage?
+	var displaySnapshot: UIImage? {
+		restorationSnapshot
+	}
 	@ObservationIgnored var onFirstRemoteOutput: (() -> Void)?
 	@ObservationIgnored private var pendingPreviewTranscript: String?
 	@ObservationIgnored private var pendingPreviewReadinessLabel: String?
@@ -128,44 +121,22 @@ class TerminalTab: Identifiable {
 		self.session = session
 		self.customTitle = Self.normalizedTabTitle(session.customTitle)
 		self.terminalView = TerminalView(frame: .zero)
-		#if canImport(UIKit)
-			if session.isOpen {
-				self.restorationMode = .launch
-				if let snapshotData = session.lastTerminalSnapshotJPEGData {
-					self.restorationSnapshot = UIImage(data: snapshotData)
-				} else {
-					self.restorationSnapshot = nil
-				}
+		if session.isOpen {
+			self.restorationMode = .launch
+			if let snapshotData = session.lastTerminalSnapshotJPEGData {
+				self.restorationSnapshot = UIImage(data: snapshotData)
 			} else {
-				self.restorationMode = nil
 				self.restorationSnapshot = nil
 			}
-		#endif
-		#if os(macOS)
-			self.localShellSession = nil
-		#endif
+		} else {
+			self.restorationMode = nil
+			self.restorationSnapshot = nil
+		}
 
 		configureTerminalView()
 		configureSSHSessionCallbacks()
 	}
 
-	#if os(macOS)
-		init(localShellProfile: LocalShellProfile = .default) {
-			self.endpoint = .localShell(localShellProfile)
-			self.session = nil
-			self.terminalView = TerminalView(frame: .zero)
-			self.localShellSession = LocalShellSession(profile: localShellProfile)
-
-			configureTerminalView()
-			localShellSession?.onRemoteOutput = { [weak self] data in
-				self?.recordTerminalOutput(data)
-				self?.terminalView.feedData(data)
-			}
-			localShellSession?.onClose = { [weak self] reason in
-				self?.handleLocalShellClose(reason)
-			}
-		}
-	#endif
 
 	private(set) var customTitle: String?
 
@@ -290,11 +261,7 @@ class TerminalTab: Identifiable {
 		case .remote:
 			return sshSession.connection.isActive
 		case .localShell:
-			#if os(macOS)
-				return localShellSession?.isActive ?? false
-			#else
-				return false
-			#endif
+			return false
 		}
 	}
 
@@ -310,11 +277,7 @@ class TerminalTab: Identifiable {
 
 	private var shouldDeferRemoteConnectionUntilAppActive: Bool {
 		guard case .remote = endpoint else { return false }
-		#if canImport(UIKit) && !os(macOS)
-			return !ApplicationActivity.isActive
-		#else
-			return false
-		#endif
+		return !ApplicationActivity.isActive
 	}
 
 	func hostDidAppear() {
@@ -440,9 +403,7 @@ class TerminalTab: Identifiable {
 		case .remote:
 			await connectRemote(presentation: presentation)
 		case .localShell:
-			#if os(macOS)
-				await connectLocalShell()
-			#endif
+			break
 		}
 	}
 
@@ -537,22 +498,6 @@ class TerminalTab: Identifiable {
 		}
 	}
 
-	#if os(macOS)
-		private func connectLocalShell() async {
-			guard let localShellSession else { return }
-			do {
-				try localShellSession.start()
-				phase = .connected
-				finishRestorationPresentation()
-				notifyOverlayStateChanged()
-			} catch {
-				finishRestorationPresentation()
-				print("[LocalShell] failed to start: \(error)")
-				phase = .failed(error.localizedDescription)
-				notifyOverlayStateChanged()
-			}
-		}
-	#endif
 
 	private func configuredTmuxSessionName(for session: Session?) -> String? {
 		guard let rawTmuxSessionName = session?.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -589,40 +534,24 @@ class TerminalTab: Identifiable {
 			return
 		case .restoringSnapshot:
 			guard case .remote = endpoint else { return }
-			#if canImport(UIKit)
-				if case .backgroundReconnect = restorationMode, restorationSnapshot != nil {
-					return
-				}
-				beginRestoration(.backgroundReconnect, snapshot: restorationSnapshot ?? terminalView.captureSnapshot())
-			#else
-				if case .backgroundReconnect = restorationMode {
-					return
-				}
-				beginRestoration(.backgroundReconnect)
-			#endif
+			if case .backgroundReconnect = restorationMode, restorationSnapshot != nil {
+				return
+			}
+			beginRestoration(.backgroundReconnect, snapshot: restorationSnapshot ?? terminalView.captureSnapshot())
 		}
 	}
 
 	private func finishRestorationPresentation() {
 		restorationMode = nil
-		#if canImport(UIKit)
-			restorationSnapshot = nil
-		#endif
+		restorationSnapshot = nil
 		notifyOverlayStateChanged()
 	}
 
-	#if canImport(UIKit)
-		private func beginRestoration(_ mode: RestorationMode, snapshot: UIImage?) {
-			restorationMode = mode
-			restorationSnapshot = snapshot
-			notifyOverlayStateChanged()
-		}
-	#else
-		private func beginRestoration(_ mode: RestorationMode) {
-			restorationMode = mode
-			notifyOverlayStateChanged()
-		}
-	#endif
+	private func beginRestoration(_ mode: RestorationMode, snapshot: UIImage?) {
+		restorationMode = mode
+		restorationSnapshot = snapshot
+		notifyOverlayStateChanged()
+	}
 
 	private func configureSSHSessionCallbacks(for sshSession: SSHTerminalSession? = nil) {
 		let sshSession = sshSession ?? self.sshSession
@@ -685,9 +614,7 @@ class TerminalTab: Identifiable {
 		case .remote:
 			sshSession.disconnect()
 		case .localShell:
-			#if os(macOS)
-				localShellSession?.disconnect()
-			#endif
+			break
 		}
 	}
 
@@ -711,37 +638,35 @@ class TerminalTab: Identifiable {
 		onTerminalViewReplacementRequested?()
 	}
 
-	#if canImport(UIKit)
-		func capturePersistedSnapshotJPEGData() -> Data? {
-			guard case .remote = endpoint,
-			      let jpegData = terminalView.capturePersistedSnapshotJPEGData()
-			else {
-				return nil
-			}
-			session?.lastTerminalSnapshotJPEGData = jpegData
-			if restorationMode == .launch {
-				restorationSnapshot = UIImage(data: jpegData)
-			}
-			return jpegData
+	func capturePersistedSnapshotJPEGData() -> Data? {
+		guard case .remote = endpoint,
+		      let jpegData = terminalView.capturePersistedSnapshotJPEGData()
+		else {
+			return nil
 		}
+		session?.lastTerminalSnapshotJPEGData = jpegData
+		if restorationMode == .launch {
+			restorationSnapshot = UIImage(data: jpegData)
+		}
+		return jpegData
+	}
 
-		func prepareScreenshotBackgroundReconnect(readinessLabel: String, retryCount: Int = 12) {
-			guard retryCount > 0 else {
-				print("[Screenshots] failed to prepare \(readinessLabel)")
-				return
-			}
-			renderPendingPreviewIfNeeded()
-			guard terminalView.hasAttachedWindow else {
-				Task { @MainActor [weak self] in
-					try? await Task.sleep(nanoseconds: 100_000_000)
-					self?.prepareScreenshotBackgroundReconnect(readinessLabel: readinessLabel, retryCount: retryCount - 1)
-				}
-				return
-			}
-			beginRestoration(.backgroundReconnect, snapshot: terminalView.captureSnapshot())
-			print("[Screenshots] ready \(readinessLabel)")
+	func prepareScreenshotBackgroundReconnect(readinessLabel: String, retryCount: Int = 12) {
+		guard retryCount > 0 else {
+			print("[Screenshots] failed to prepare \(readinessLabel)")
+			return
 		}
-	#endif
+		renderPendingPreviewIfNeeded()
+		guard terminalView.hasAttachedWindow else {
+			Task { @MainActor [weak self] in
+				try? await Task.sleep(nanoseconds: 100_000_000)
+				self?.prepareScreenshotBackgroundReconnect(readinessLabel: readinessLabel, retryCount: retryCount - 1)
+			}
+			return
+		}
+		beginRestoration(.backgroundReconnect, snapshot: terminalView.captureSnapshot())
+		print("[Screenshots] ready \(readinessLabel)")
+	}
 
 	func applyTheme(_ theme: AppTheme) {
 		terminalView.applyTheme(theme)
@@ -800,15 +725,13 @@ class TerminalTab: Identifiable {
 	func noteAppWillResignActive() {
 		scheduledConnectionTask?.cancel()
 		scheduledConnectionTask = nil
-		#if canImport(UIKit)
-			if case .remote = endpoint,
-			   isConnected,
-			   !isPassivePreview,
-			   terminalView.hasAttachedWindow
-			{
-				restorationSnapshot = terminalView.captureSnapshot()
-			}
-		#endif
+		if case .remote = endpoint,
+		   isConnected,
+		   !isPassivePreview,
+		   terminalView.hasAttachedWindow
+		{
+			restorationSnapshot = terminalView.captureSnapshot()
+		}
 		if ApplicationActivity.hasBackgroundExecution, shouldRequestBackgroundExecution {
 			logConnectionEvent("Requested iOS background execution to keep the SSH session alive")
 		}
@@ -855,11 +778,7 @@ class TerminalTab: Identifiable {
 		guard wantsConnection else { return }
 		if phase == .connected, !connectionIsActive {
 			logConnectionEvent("App became active; connection was inactive; preparing background reconnect")
-			#if canImport(UIKit)
-				prepareForReconnectAfterBackgroundLoss(snapshot: restorationSnapshot)
-			#else
-				prepareForReconnectAfterBackgroundLoss()
-			#endif
+			prepareForReconnectAfterBackgroundLoss(snapshot: restorationSnapshot)
 			return
 		}
 		if phase == .idle || phase == .connecting {
@@ -874,27 +793,15 @@ class TerminalTab: Identifiable {
 		}
 	}
 
-	#if canImport(UIKit)
-		func prepareForReconnectAfterBackgroundLoss(snapshot: UIImage? = nil) {
-			guard case .remote = endpoint, !isPassivePreview else {
-				retryConnection()
-				return
-			}
-			beginRestoration(.backgroundReconnect, snapshot: snapshot ?? restorationSnapshot ?? terminalView.captureSnapshot())
-			resetTerminalView()
-			retryConnection(preservingRestoration: true)
+	func prepareForReconnectAfterBackgroundLoss(snapshot: UIImage? = nil) {
+		guard case .remote = endpoint, !isPassivePreview else {
+			retryConnection()
+			return
 		}
-	#else
-		func prepareForReconnectAfterBackgroundLoss() {
-			guard case .remote = endpoint, !isPassivePreview else {
-				retryConnection()
-				return
-			}
-			beginRestoration(.backgroundReconnect)
-			resetTerminalView()
-			retryConnection(preservingRestoration: true)
-		}
-	#endif
+		beginRestoration(.backgroundReconnect, snapshot: snapshot ?? restorationSnapshot ?? terminalView.captureSnapshot())
+		resetTerminalView()
+		retryConnection(preservingRestoration: true)
+	}
 
 	private func isRecoverableBackgroundDisconnectMessage(_ message: String) -> Bool {
 		let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -947,9 +854,7 @@ class TerminalTab: Identifiable {
 		case .remote:
 			sshSession.updateTerminalSize(size)
 		case .localShell:
-			#if os(macOS)
-				localShellSession?.updateTerminalSize(size)
-			#endif
+			break
 		}
 	}
 
@@ -979,11 +884,7 @@ class TerminalTab: Identifiable {
 		guard phase != .connecting else { return }
 		logConnectionEvent("Terminal input could not be sent because the SSH session channel is inactive")
 		connectionError = nil
-		#if canImport(UIKit)
-			prepareForReconnectAfterBackgroundLoss(snapshot: displaySnapshot ?? terminalView.captureSnapshot())
-		#else
-			prepareForReconnectAfterBackgroundLoss()
-		#endif
+		prepareForReconnectAfterBackgroundLoss(snapshot: displaySnapshot ?? terminalView.captureSnapshot())
 	}
 
 	private func configureTerminalView() {
@@ -1054,11 +955,7 @@ class TerminalTab: Identifiable {
 	}
 
 	func requestReconnect() {
-		#if canImport(UIKit)
-			prepareForReconnectAfterBackgroundLoss(snapshot: displaySnapshot)
-		#else
-			prepareForReconnectAfterBackgroundLoss()
-		#endif
+		prepareForReconnectAfterBackgroundLoss(snapshot: displaySnapshot)
 	}
 
 	private func handleSSHSessionClose(_ reason: SSHTerminalSession.CloseReason) {
@@ -1095,22 +992,14 @@ class TerminalTab: Identifiable {
 			} else {
 				wantsConnection = true
 				phase = .idle
-				#if canImport(UIKit)
-					prepareForReconnectAfterBackgroundLoss(snapshot: restorationSnapshot)
-				#else
-					prepareForReconnectAfterBackgroundLoss()
-				#endif
+				prepareForReconnectAfterBackgroundLoss(snapshot: restorationSnapshot)
 			}
 		case let .error(message):
 			logConnectionEvent("SSH session closed with error: \(message)")
 			if shouldReconnectAfterClose(message: message, wasConnectedBeforeClose: wasConnectedBeforeClose) {
 				phase = .idle
 				if wasConnectedBeforeClose {
-					#if canImport(UIKit)
-						beginRestoration(.backgroundReconnect, snapshot: displaySnapshot ?? terminalView.captureSnapshot())
-					#else
-						beginRestoration(.backgroundReconnect)
-					#endif
+					beginRestoration(.backgroundReconnect, snapshot: displaySnapshot ?? terminalView.captureSnapshot())
 				} else {
 					notifyOverlayStateChanged()
 				}
@@ -1127,30 +1016,6 @@ class TerminalTab: Identifiable {
 		}
 	}
 
-	#if os(macOS)
-		private func handleLocalShellClose(_ reason: LocalShellSession.CloseReason) {
-			connectTask?.cancel()
-			connectTask = nil
-			if phase == .connecting || phase == .connected {
-				phase = .idle
-			}
-			finishRestorationPresentation()
-
-			switch reason {
-			case .localDisconnect:
-				phase = .idle
-				notifyOverlayStateChanged()
-			case .cleanExit:
-				phase = .idle
-				notifyOverlayStateChanged()
-				terminalView.processExited()
-				onRequestClose?()
-			case let .error(message):
-				phase = .failed(message)
-				notifyOverlayStateChanged()
-			}
-		}
-	#endif
 }
 
 extension TerminalTab: TerminalViewDelegate {
@@ -1162,9 +1027,7 @@ extension TerminalTab: TerminalViewDelegate {
 				handleTerminalInputSendFailure()
 			}
 		case .localShell:
-			#if os(macOS)
-				localShellSession?.send(data)
-			#endif
+			break
 		}
 	}
 

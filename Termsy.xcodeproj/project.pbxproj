@@ -40,6 +40,13 @@
 			remoteGlobalIDString = A6B5AC722F7F7BE9002ED882;
 			remoteInfo = Termsy;
 		};
+		A6C4F6EE2FB308760012EA56 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A6B5AC6B2F7F7BE9002ED882 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 60075403701494F8457396D5;
+			remoteInfo = TermsyMac;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
@@ -47,6 +54,7 @@
 		A6B5AC732F7F7BE9002ED882 /* Termsy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Termsy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A6B5AC802F7F7BEA002ED882 /* TermsyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TermsyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A6B5AC8A2F7F7BEA002ED882 /* TermsyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TermsyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A6C4F6EA2FB308760012EA56 /* TeletypeMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TeletypeMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -83,6 +91,11 @@
 		A6B5AC8D2F7F7BEA002ED882 /* TermsyUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = TermsyUITests;
+			sourceTree = "<group>";
+		};
+		A6C4F6EB2FB308760012EA56 /* TeletypeMacTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TeletypeMacTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -132,6 +145,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A6C4F6E72FB308760012EA56 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -145,6 +165,7 @@
 				A6B5AC752F7F7BE9002ED882 /* Termsy */,
 				A6B5AC832F7F7BEA002ED882 /* TermsyTests */,
 				A6B5AC8D2F7F7BEA002ED882 /* TermsyUITests */,
+				A6C4F6EB2FB308760012EA56 /* TeletypeMacTests */,
 				A6B5ACA22F7F7D3E002ED882 /* Frameworks */,
 				A6B5AC742F7F7BE9002ED882 /* Products */,
 			);
@@ -157,6 +178,7 @@
 				40A863FA45E38E353C433157 /* Teletype.app */,
 				A6B5AC802F7F7BEA002ED882 /* TermsyTests.xctest */,
 				A6B5AC8A2F7F7BEA002ED882 /* TermsyUITests.xctest */,
+				A6C4F6EA2FB308760012EA56 /* TeletypeMacTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -280,6 +302,29 @@
 			productReference = A6B5AC8A2F7F7BEA002ED882 /* TermsyUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		A6C4F6E92FB308760012EA56 /* TeletypeMacTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A6C4F6F22FB308760012EA56 /* Build configuration list for PBXNativeTarget "TeletypeMacTests" */;
+			buildPhases = (
+				A6C4F6E62FB308760012EA56 /* Sources */,
+				A6C4F6E72FB308760012EA56 /* Frameworks */,
+				A6C4F6E82FB308760012EA56 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A6C4F6EF2FB308760012EA56 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A6C4F6EB2FB308760012EA56 /* TeletypeMacTests */,
+			);
+			name = TeletypeMacTests;
+			packageProductDependencies = (
+			);
+			productName = TeletypeMacTests;
+			productReference = A6C4F6EA2FB308760012EA56 /* TeletypeMacTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -303,6 +348,10 @@
 					A6B5AC892F7F7BEA002ED882 = {
 						CreatedOnToolsVersion = 26.3;
 						TestTargetID = A6B5AC722F7F7BE9002ED882;
+					};
+					A6C4F6E92FB308760012EA56 = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = 60075403701494F8457396D5;
 					};
 				};
 			};
@@ -332,6 +381,7 @@
 				A6B5AC7F2F7F7BEA002ED882 /* TermsyTests */,
 				A6B5AC892F7F7BEA002ED882 /* TermsyUITests */,
 				60075403701494F8457396D5 /* TermsyMac */,
+				A6C4F6E92FB308760012EA56 /* TeletypeMacTests */,
 			);
 		};
 /* End PBXProject section */
@@ -352,6 +402,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A6B5AC882F7F7BEA002ED882 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A6C4F6E82FB308760012EA56 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -389,6 +446,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A6C4F6E62FB308760012EA56 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C455310ECF590E75EE5FDA07 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -408,6 +472,11 @@
 			isa = PBXTargetDependency;
 			target = A6B5AC722F7F7BE9002ED882 /* Termsy */;
 			targetProxy = A6B5AC8B2F7F7BEA002ED882 /* PBXContainerItemProxy */;
+		};
+		A6C4F6EF2FB308760012EA56 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 60075403701494F8457396D5 /* TermsyMac */;
+			targetProxy = A6C4F6EE2FB308760012EA56 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -729,6 +798,50 @@
 			};
 			name = Release;
 		};
+		A6C4F6F02FB308760012EA56 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z773AM52SJ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.7;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = fm.folder.TeletypeMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Teletype.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Teletype";
+			};
+			name = Debug;
+		};
+		A6C4F6F12FB308760012EA56 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z773AM52SJ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.7;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = fm.folder.TeletypeMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Teletype.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Teletype";
+			};
+			name = Release;
+		};
 		BD8FFFAA509D43741A8DD8B2 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -830,6 +943,15 @@
 			buildConfigurations = (
 				A6B5AC9B2F7F7BEA002ED882 /* Debug */,
 				A6B5AC9C2F7F7BEA002ED882 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A6C4F6F22FB308760012EA56 /* Build configuration list for PBXNativeTarget "TeletypeMacTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A6C4F6F02FB308760012EA56 /* Debug */,
+				A6C4F6F12FB308760012EA56 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -18,52 +18,27 @@ struct SessionListView: View {
 			onOpenSession: { session in
 				coordinator.openTab(for: session)
 			},
-			onOpenLocalShell: {
-				#if os(macOS)
-					coordinator.openLocalShellTab()
-				#endif
-			},
 			onOpenNewSession: {
 				coordinator.openNewTabUI()
 			},
 			onAppearWithSessions: { sessions in
-				#if os(iOS)
-					if sessions.isEmpty {
-						coordinator.isShowingConnectView = true
-					}
-				#endif
+				if sessions.isEmpty {
+					coordinator.isShowingConnectView = true
+				}
 			}
 		)
 		.navigationTitle("Teletype")
 		.accessibilityIdentifier("screen.savedSessions")
 		.toolbar {
-			#if os(macOS)
-				ToolbarItemGroup(placement: .termsyPrimaryAction) {
-					Button {
-						coordinator.openLocalShellTab()
-					} label: {
-						Label("Local Shell", systemImage: "terminal")
-					}
-					.keyboardShortcut("l", modifiers: .command)
-
-					Button {
-						coordinator.openNewTabUI()
-					} label: {
-						Label("New Session", systemImage: "plus")
-					}
-					.keyboardShortcut("t", modifiers: .command)
+			ToolbarItem(placement: .termsyPrimaryAction) {
+				Button {
+					coordinator.openNewTabUI()
+				} label: {
+					Label("New Session", systemImage: "plus")
 				}
-			#else
-				ToolbarItem(placement: .termsyPrimaryAction) {
-					Button {
-						coordinator.openNewTabUI()
-					} label: {
-						Label("New Session", systemImage: "plus")
-					}
-					.accessibilityIdentifier("action.newSession")
-					.keyboardShortcut("t", modifiers: .command)
-				}
-			#endif
+				.accessibilityIdentifier("action.newSession")
+				.keyboardShortcut("t", modifiers: .command)
+			}
 		}
 	}
 }
