@@ -830,6 +830,18 @@ struct TermsyTests {
 
 	#if canImport(UIKit)
 		@MainActor
+		private func makeTestWindow(
+			frame: CGRect = CGRect(x: 0, y: 0, width: 320, height: 480)
+		) -> UIWindow? {
+			guard let windowScene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
+				return nil
+			}
+			let window = UIWindow(windowScene: windowScene)
+			window.frame = frame
+			return window
+		}
+
+		@MainActor
 		@Test func didMoveToWindowAppliesDisplayActivitySynchronously() {
 			let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
 
@@ -842,10 +854,45 @@ struct TermsyTests {
 			// Add the view to a window. didMoveToWindow() should synchronously call
 			// applyDisplayActivity(), enabling interaction immediately without waiting
 			// for the next runloop pass.
-			let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+			guard let window = makeTestWindow() else {
+				Issue.record("expected window scene")
+				return
+			}
 			window.addSubview(view)
 
 			#expect(view.isUserInteractionEnabled)
+		}
+
+		@MainActor
+		@Test func appActivationReenablesTerminalDisplayInteraction() {
+			let coordinator = ViewCoordinator()
+			coordinator.openTab(for: Session(
+				hostname: "prod.example.com",
+				username: "pat",
+				tmuxSessionName: nil,
+				port: 22,
+				autoconnect: false
+			))
+			guard let tab = coordinator.selectedTab else {
+				Issue.record("expected selected tab")
+				return
+			}
+			tab.disconnect()
+
+			guard let window = makeTestWindow() else {
+				Issue.record("expected window scene")
+				return
+			}
+			window.addSubview(tab.terminalView)
+			#expect(tab.terminalView.isUserInteractionEnabled)
+
+			coordinator.appWillResignActive()
+			#expect(!tab.terminalView.isUserInteractionEnabled)
+
+			coordinator.appDidBecomeActive()
+			#expect(tab.isDisplayActive)
+			#expect(tab.terminalView.isDisplayActive)
+			#expect(tab.terminalView.isUserInteractionEnabled)
 		}
 	#endif
 

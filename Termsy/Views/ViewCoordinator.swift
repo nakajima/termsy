@@ -230,6 +230,9 @@ class ViewCoordinator {
 			tab.noteAppDidBecomeActive()
 		}
 		refreshDisplayActivity()
+		#if canImport(UIKit)
+			selectedTab?.recoverDisplayAfterAppActivation()
+		#endif
 	}
 
 	private func noteBackgroundExecutionExpired(remaining: TimeInterval?) {

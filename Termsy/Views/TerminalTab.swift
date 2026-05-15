@@ -704,6 +704,10 @@ class TerminalTab: Identifiable {
 		terminalView.setDisplayActive(isActive)
 	}
 
+	func recoverDisplayAfterAppActivation() {
+		terminalView.recoverDisplayAfterAppActivation()
+	}
+
 	func enterForeground() {
 		switch endpoint {
 		case .remote:

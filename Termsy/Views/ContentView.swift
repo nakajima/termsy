@@ -10,6 +10,8 @@ import GRDBQuery
 import SwiftUI
 #if os(macOS)
 	import AppKit
+#elseif canImport(UIKit)
+	import UIKit
 #endif
 
 struct ContentView: View {
@@ -93,30 +95,33 @@ struct ContentView: View {
 		}
 		#else
 		.onChange(of: scenePhase, initial: true) { _, phase in
-					switch phase {
-					case .active:
-						coordinator.appDidBecomeActive()
-					case .inactive:
-						coordinator.appWillResignActive()
-					case .background:
-						coordinator.appDidEnterBackground()
-					@unknown default:
-						break
-					}
-				}
+			switch phase {
+			case .active:
+				coordinator.appDidBecomeActive()
+			case .inactive:
+				coordinator.appWillResignActive()
+			case .background:
+				coordinator.appDidEnterBackground()
+			@unknown default:
+				break
+			}
+		}
+		.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+			coordinator.appDidBecomeActive()
+		}
 		#endif
-				.task {
-					guard !didAutoconnect else { return }
-					didAutoconnect = true
+		.task {
+			guard !didAutoconnect else { return }
+			didAutoconnect = true
 
-					if launchConfiguration.isScreenshotMode {
-						applyScreenshotScenarioIfNeeded()
-						return
-					}
+			if launchConfiguration.isScreenshotMode {
+				applyScreenshotScenarioIfNeeded()
+				return
+			}
 
-					coordinator.configureDatabaseContext(dbContext)
-					coordinator.restoreSavedWorkspace()
-				}
+			coordinator.configureDatabaseContext(dbContext)
+			coordinator.restoreSavedWorkspace()
+		}
 	}
 
 	private func applyScreenshotScenarioIfNeeded() {
