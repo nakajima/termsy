@@ -11,6 +11,15 @@ enum ApplicationActivity {
 	#if canImport(UIKit) && !os(macOS)
 		private static var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
+		static var isForegroundActive: Bool {
+			if UIApplication.shared.applicationState == .active {
+				return true
+			}
+			return UIApplication.shared.connectedScenes.contains { scene in
+				scene.activationState == .foregroundActive
+			}
+		}
+
 		static var hasBackgroundExecution: Bool {
 			backgroundTaskID != .invalid
 		}
@@ -43,6 +52,7 @@ enum ApplicationActivity {
 			UIApplication.shared.endBackgroundTask(taskID)
 		}
 	#else
+		static var isForegroundActive: Bool { isActive }
 		static var hasBackgroundExecution: Bool { false }
 		static var backgroundTimeRemaining: TimeInterval? { nil }
 

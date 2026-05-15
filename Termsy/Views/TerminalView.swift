@@ -453,6 +453,7 @@
 			}
 
 			if shouldBeActive {
+				ghostty_surface_set_occlusion(surface, false)
 				startDisplayLink()
 				ghostty_surface_set_focus(surface, true)
 				requestFirstResponder()
@@ -461,6 +462,7 @@
 			} else {
 				stopDisplayActivity()
 				ghostty_surface_set_focus(surface, false)
+				ghostty_surface_set_occlusion(surface, true)
 			}
 		}
 
@@ -518,6 +520,7 @@
 			updateSublayerFrames()
 			syncSize(force: true)
 			stopDisplayLink()
+			ghostty_surface_set_occlusion(surface, false)
 			startDisplayLink()
 			ghostty_surface_set_focus(surface, true)
 			GhosttyApp.shared.tick()

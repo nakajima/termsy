@@ -178,10 +178,13 @@ class ViewCoordinator {
 	func appWillResignActive() {
 		appIsActive = false
 		ApplicationActivity.isActive = false
+		#if canImport(UIKit)
+			GhosttyApp.shared.setFocused(false)
+		#endif
 		for tab in tabs {
 			tab.noteAppWillResignActive()
 		}
-		refreshDisplayActivity()
+		refreshDisplayActivity(usingCachedAppActivity: true)
 	}
 
 	func appDidEnterBackground() {
@@ -211,12 +214,15 @@ class ViewCoordinator {
 				)
 			}
 		}
-		refreshDisplayActivity()
+		refreshDisplayActivity(usingCachedAppActivity: true)
 	}
 
 	func appDidBecomeActive() {
 		appIsActive = true
 		ApplicationActivity.isActive = true
+		#if canImport(UIKit)
+			GhosttyApp.shared.setFocused(true)
+		#endif
 		let hadBackgroundExecution = ApplicationActivity.hasBackgroundExecution
 		let remaining = ApplicationActivity.backgroundTimeRemaining
 		ApplicationActivity.endBackgroundExecution()
@@ -467,10 +473,19 @@ class ViewCoordinator {
 		}
 	#endif
 
-	private func refreshDisplayActivity() {
-		let activeTabID = appIsActive && !isPresentingAuxiliaryUI ? selectedTabID : nil
+	private func refreshDisplayActivity(usingCachedAppActivity: Bool = false) {
+		let isActive = usingCachedAppActivity ? appIsActive : currentAppIsActive
+		let activeTabID = isActive && !isPresentingAuxiliaryUI ? selectedTabID : nil
 		for tab in tabs {
 			tab.setDisplayActive(tab.id == activeTabID)
 		}
+	}
+
+	private var currentAppIsActive: Bool {
+		#if canImport(UIKit) && !os(macOS)
+			ApplicationActivity.isForegroundActive
+		#else
+			appIsActive
+		#endif
 	}
 }

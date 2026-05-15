@@ -109,6 +109,15 @@ struct ContentView: View {
 		.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
 			coordinator.appDidBecomeActive()
 		}
+		.onReceive(NotificationCenter.default.publisher(for: UIScene.didActivateNotification)) { _ in
+			coordinator.appDidBecomeActive()
+		}
+		.onReceive(NotificationCenter.default.publisher(for: UIScene.willDeactivateNotification)) { _ in
+			coordinator.appWillResignActive()
+		}
+		.onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { _ in
+			coordinator.appDidEnterBackground()
+		}
 		#endif
 		.task {
 			guard !didAutoconnect else { return }

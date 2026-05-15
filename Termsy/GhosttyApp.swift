@@ -98,6 +98,11 @@
 			runtime?.tick()
 		}
 
+		func setFocused(_ isFocused: Bool) {
+			guard let app else { return }
+			ghostty_app_set_focus(app, isFocused)
+		}
+
 		func makeSurfaceUserdata(payload: UnsafeMutableRawPointer?, object: AnyObject? = nil) -> GhosttySurfaceUserdata? {
 			runtime?.makeSurfaceUserdata(payload: payload, object: object)
 		}
