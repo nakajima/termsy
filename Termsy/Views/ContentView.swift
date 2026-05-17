@@ -61,6 +61,7 @@ struct ContentView: View {
 		}
 		.environment(coordinator)
 		.onAppear {
+			DiagnosticLogStore.shared.record("content.appear")
 			coordinator.configureDatabaseContext(dbContext)
 		}
 		.sheet(isPresented: $coordinator.isShowingSessionPicker) {
@@ -95,6 +96,10 @@ struct ContentView: View {
 		}
 		#else
 		.onChange(of: scenePhase, initial: true) { _, phase in
+			DiagnosticLogStore.shared.record(
+				"content.scenePhase",
+				metadata: ["phase": "\(phase)", "application": ApplicationActivity.diagnosticStateDescription]
+			)
 			switch phase {
 			case .active:
 				coordinator.appDidBecomeActive()
@@ -107,15 +112,31 @@ struct ContentView: View {
 			}
 		}
 		.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+			DiagnosticLogStore.shared.record(
+				"notification.UIApplication.didBecomeActive",
+				metadata: ["application": ApplicationActivity.diagnosticStateDescription]
+			)
 			coordinator.appDidBecomeActive()
 		}
 		.onReceive(NotificationCenter.default.publisher(for: UIScene.didActivateNotification)) { _ in
+			DiagnosticLogStore.shared.record(
+				"notification.UIScene.didActivate",
+				metadata: ["application": ApplicationActivity.diagnosticStateDescription]
+			)
 			coordinator.appDidBecomeActive()
 		}
 		.onReceive(NotificationCenter.default.publisher(for: UIScene.willDeactivateNotification)) { _ in
+			DiagnosticLogStore.shared.record(
+				"notification.UIScene.willDeactivate",
+				metadata: ["application": ApplicationActivity.diagnosticStateDescription]
+			)
 			coordinator.appWillResignActive()
 		}
 		.onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { _ in
+			DiagnosticLogStore.shared.record(
+				"notification.UIScene.didEnterBackground",
+				metadata: ["application": ApplicationActivity.diagnosticStateDescription]
+			)
 			coordinator.appDidEnterBackground()
 		}
 		#endif

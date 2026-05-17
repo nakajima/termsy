@@ -15,6 +15,7 @@ struct SettingsView: View {
 	@AppStorage(TerminalScrollSettings.indirectSensitivityKey) private var indirectScrollSensitivity = TerminalScrollSettings.defaultIndirectSensitivity
 	@AppStorage(TerminalScrollSettings.momentumScrollingEnabledKey) private var momentumScrollingEnabled = TerminalScrollSettings.defaultMomentumScrollingEnabled
 	@AppStorage(TerminalScrollSettings.smoothVisualScrollingEnabledKey) private var smoothVisualScrollingEnabled = TerminalScrollSettings.defaultSmoothVisualScrollingEnabled
+	@Environment(ViewCoordinator.self) private var coordinator
 	@Environment(\.appTheme) private var theme
 	@Environment(\.dismiss) private var dismiss
 
@@ -157,6 +158,21 @@ struct SettingsView: View {
 					}
 				}
 
+				Section {
+					NavigationLink {
+						DiagnosticLogView()
+							.environment(coordinator)
+					} label: {
+						Label("Diagnostic Log", systemImage: "doc.text.magnifyingglass")
+							.foregroundStyle(theme.primaryText)
+					}
+					.listRowBackground(theme.cardBackground)
+				} header: {
+					Text("Diagnostics")
+				} footer: {
+					Text("Use this after a freeze to capture and share lifecycle/display state.")
+				}
+
 				Section("Theme") {
 					ForEach(TerminalTheme.allCases) { terminalTheme in
 						Button {
@@ -199,5 +215,6 @@ struct SettingsView: View {
 
 #Preview {
 	SettingsView()
+		.environment(ViewCoordinator())
 		.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 }

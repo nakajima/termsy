@@ -36,6 +36,23 @@ final class TermsyUITests: XCTestCase {
 	}
 
 	@MainActor
+	func testDiagnosticLogOpensFromSettings() throws {
+		let app = XCUIApplication()
+		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.settings.scenario)
+		XCUIDevice.shared.orientation = .landscapeLeft
+		app.launch()
+		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not reach foreground")
+
+		let diagnosticLog = app.buttons["Diagnostic Log"]
+		XCTAssertTrue(diagnosticLog.waitForExistence(timeout: 10), "Diagnostic Log row did not appear")
+		diagnosticLog.tap()
+
+		XCTAssertTrue(app.buttons["Capture Current State"].waitForExistence(timeout: 5), "Diagnostics screen did not open")
+		XCTAssertTrue(app.buttons["Share Log"].exists, "Share Log action missing")
+		XCTAssertTrue(app.buttons["Clear Log"].exists, "Clear Log action missing")
+	}
+
+	@MainActor
 	func testDirectSessionInputOpensTerminal() throws {
 		let app = XCUIApplication()
 		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.savedSessions.scenario)

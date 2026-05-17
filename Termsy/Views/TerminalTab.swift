@@ -112,6 +112,8 @@ class TerminalTab: Identifiable {
 	@ObservationIgnored private let reconnectRetryDelayNanoseconds: UInt64 = 2_000_000_000
 	@ObservationIgnored private var remoteConnectAttempt = 0
 	@ObservationIgnored private var wantsConnection = true
+	@ObservationIgnored private var lastRemoteOutputAt: Date?
+	@ObservationIgnored private var lastTerminalInputAt: Date?
 	@ObservationIgnored private var terminalRecorder: TerminalSessionRecorder?
 
 	let id = UUID()
@@ -557,6 +559,7 @@ class TerminalTab: Identifiable {
 		let sshSession = sshSession ?? self.sshSession
 		sshSession.onRemoteOutput = { [weak self, weak sshSession] data in
 			guard let self, let sshSession, self.sshSession === sshSession else { return }
+			self.lastRemoteOutputAt = Date()
 			if self.restorationMode != nil {
 				self.finishRestorationPresentation()
 			}
@@ -700,12 +703,90 @@ class TerminalTab: Identifiable {
 	}
 
 	func setDisplayActive(_ isActive: Bool) {
+		let previous = isDisplayActive
 		isDisplayActive = isActive
+		if previous != isActive {
+			DiagnosticLogStore.shared.record(
+				"terminalTab.setDisplayActive",
+				metadata: diagnosticSnapshotMetadata(reason: "setDisplayActive", selected: nil)
+			)
+		}
 		terminalView.setDisplayActive(isActive)
 	}
 
 	func recoverDisplayAfterAppActivation() {
+		DiagnosticLogStore.shared.record(
+			"terminalTab.recoverDisplayAfterAppActivation",
+			metadata: diagnosticSnapshotMetadata(reason: "appActivationRecovery", selected: nil)
+		)
 		terminalView.recoverDisplayAfterAppActivation()
+	}
+
+	func diagnosticSnapshotMetadata(reason: String, index: Int? = nil, selected: Bool? = nil) -> [String: Any?] {
+		var metadata: [String: Any?] = [
+			"reason": reason,
+			"tab": diagnosticID,
+			"endpoint": endpointDiagnosticDescription,
+			"phase": diagnosticPhaseDescription,
+			"wantsConnection": wantsConnection,
+			"connectionIsActive": connectionIsActive,
+			"displayActive": isDisplayActive,
+			"restoration": restorationDiagnosticDescription,
+			"passivePreview": isPassivePreview,
+			"recording": isRecording,
+			"lastRemoteOutputAge": Self.ageDescription(since: lastRemoteOutputAt),
+			"lastTerminalInputAge": Self.ageDescription(since: lastTerminalInputAt),
+			"view": terminalView.diagnosticStateSummary(),
+		]
+		if let index {
+			metadata["index"] = index
+		}
+		if let selected {
+			metadata["selected"] = selected
+		}
+		return metadata
+	}
+
+	var diagnosticCompactSummary: String {
+		"\(diagnosticID){phase=\(diagnosticPhaseDescription),displayActive=\(isDisplayActive),connectionActive=\(connectionIsActive),lastOutput=\(Self.ageDescription(since: lastRemoteOutputAt)),lastInput=\(Self.ageDescription(since: lastTerminalInputAt)),view=\(terminalView.diagnosticStateSummary())}"
+	}
+
+	private var diagnosticID: String {
+		String(id.uuidString.prefix(8))
+	}
+
+	private var endpointDiagnosticDescription: String {
+		switch endpoint {
+		case .remote:
+			return "remote"
+		case .localShell:
+			return "localShell"
+		}
+	}
+
+	private var restorationDiagnosticDescription: String {
+		guard let restorationMode else { return "none" }
+		switch restorationMode {
+		case .launch:
+			return "launch"
+		case .backgroundReconnect:
+			return "backgroundReconnect"
+		}
+	}
+
+	private var diagnosticPhaseDescription: String {
+		switch phase {
+		case .idle:
+			return "idle"
+		case .connecting:
+			return "connecting"
+		case .connected:
+			return "connected"
+		case .waitingForPassword:
+			return "waitingForPassword"
+		case .failed:
+			return "failed"
+		}
 	}
 
 	func enterForeground() {
@@ -727,6 +808,10 @@ class TerminalTab: Identifiable {
 	}
 
 	func noteAppWillResignActive() {
+		DiagnosticLogStore.shared.record(
+			"terminalTab.noteAppWillResignActive",
+			metadata: diagnosticSnapshotMetadata(reason: "appWillResignActive", selected: nil)
+		)
 		scheduledConnectionTask?.cancel()
 		scheduledConnectionTask = nil
 		if case .remote = endpoint,
@@ -743,6 +828,10 @@ class TerminalTab: Identifiable {
 	}
 
 	func noteAppDidEnterBackground() {
+		DiagnosticLogStore.shared.record(
+			"terminalTab.noteAppDidEnterBackground",
+			metadata: diagnosticSnapshotMetadata(reason: "appDidEnterBackground", selected: nil)
+		)
 		guard case .remote = endpoint, !isPassivePreview else { return }
 		logConnectionEvent(
 			"App did enter background; shouldRequestBackgroundExecution=\(shouldRequestBackgroundExecution) "
@@ -779,6 +868,10 @@ class TerminalTab: Identifiable {
 	}
 
 	func noteAppDidBecomeActive() {
+		DiagnosticLogStore.shared.record(
+			"terminalTab.noteAppDidBecomeActive",
+			metadata: diagnosticSnapshotMetadata(reason: "appDidBecomeActive", selected: nil)
+		)
 		guard wantsConnection else { return }
 		if phase == .connected, !connectionIsActive {
 			logConnectionEvent("App became active; connection was inactive; preparing background reconnect")
@@ -870,6 +963,11 @@ class TerminalTab: Identifiable {
 		}
 	}
 
+	private static func ageDescription(since date: Date?) -> String {
+		guard let date else { return "never" }
+		return String(format: "%.2fs", Date().timeIntervalSince(date))
+	}
+
 	private static func backgroundTimeRemainingDescription(_ remaining: TimeInterval?) -> String {
 		guard let remaining else { return "unavailable" }
 		guard remaining.isFinite else { return "unlimited" }
@@ -884,6 +982,10 @@ class TerminalTab: Identifiable {
 	}
 
 	private func handleTerminalInputSendFailure() {
+		DiagnosticLogStore.shared.record(
+			"terminalTab.inputSendFailure",
+			metadata: diagnosticSnapshotMetadata(reason: "inputSendFailure", selected: nil)
+		)
 		guard case .remote = endpoint, wantsConnection else { return }
 		guard phase != .connecting else { return }
 		logConnectionEvent("Terminal input could not be sent because the SSH session channel is inactive")
@@ -1024,6 +1126,7 @@ class TerminalTab: Identifiable {
 
 extension TerminalTab: TerminalViewDelegate {
 	func terminalView(_: TerminalView, didWrite data: Data) {
+		lastTerminalInputAt = Date()
 		recordTerminalInput(data)
 		switch endpoint {
 		case .remote:

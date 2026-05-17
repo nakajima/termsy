@@ -30,6 +30,15 @@
 		enum PresentationMode {
 			case interactive
 			case passivePreview
+
+			var diagnosticDescription: String {
+				switch self {
+				case .interactive:
+					return "interactive"
+				case .passivePreview:
+					return "passivePreview"
+				}
+			}
 		}
 
 		private struct AppliedSurfaceMetrics: Equatable {
@@ -42,6 +51,7 @@
 		private var hostManagedSurface: HostManagedSurface?
 		private var ghosttySurfaceUserdata: GhosttySurfaceUserdata?
 		private var displayLink: CADisplayLink?
+		private var lastDisplayTickAt: Date?
 		private lazy var clipboardConfirmer = TerminalClipboardConfirmer(
 			presenter: { [weak self] in self?.topClipboardAlertPresenter() },
 			surface: { [weak self] in self?.surface }
@@ -371,6 +381,38 @@
 			window != nil
 		}
 
+		func diagnosticStateSummary() -> String {
+			let displayLinkState: String
+			if let displayLink {
+				displayLinkState = "present(paused=\(displayLink.isPaused))"
+			} else {
+				displayLinkState = "nil"
+			}
+			let boundsDescription = "\(Int(bounds.width.rounded()))x\(Int(bounds.height.rounded()))"
+			let presentationOffset = String(format: "%.2f", scrollPhysics.presentationOffsetY)
+			let lastTickAge: String
+			if let lastDisplayTickAt {
+				lastTickAge = String(format: "%.2fs", Date().timeIntervalSince(lastDisplayTickAt))
+			} else {
+				lastTickAge = "never"
+			}
+			return [
+				"mode=\(presentationMode.diagnosticDescription)",
+				"displayActive=\(isDisplayActive)",
+				"window=\(window != nil)",
+				"surface=\(surface != nil)",
+				"interaction=\(isUserInteractionEnabled)",
+				"firstResponder=\(isFirstResponder)",
+				"shouldHoldFirstResponder=\(shouldHoldFirstResponder)",
+				"displayLink=\(displayLinkState)",
+				"lastTickAge=\(lastTickAge)",
+				"bounds=\(boundsDescription)",
+				"sublayers=\(layer.sublayers?.count ?? 0)",
+				"presentationOffsetY=\(presentationOffset)",
+				"momentum=\(scrollPhysics.momentumInputKind != nil)",
+			].joined(separator: ",")
+		}
+
 		func captureSnapshot() -> UIImage? {
 			let snapshotBounds = bounds.integral
 			guard snapshotBounds.width > 0, snapshotBounds.height > 0 else { return nil }
@@ -406,7 +448,14 @@
 		}
 
 		func setDisplayActive(_ isActive: Bool) {
+			let previous = isDisplayActive
 			isDisplayActive = isActive
+			if previous != isActive {
+				DiagnosticLogStore.shared.record(
+					"terminalView.setDisplayActive",
+					metadata: ["active": isActive, "state": diagnosticStateSummary()]
+				)
+			}
 			applyDisplayActivity()
 		}
 
@@ -443,7 +492,14 @@
 
 		private func applyDisplayActivity() {
 			let shouldBeActive = isDisplayActive && window != nil
+			let previousInteractionEnabled = isUserInteractionEnabled
 			isUserInteractionEnabled = shouldBeActive
+			if previousInteractionEnabled != shouldBeActive {
+				DiagnosticLogStore.shared.record(
+					"terminalView.interactionEnabledChanged",
+					metadata: ["enabled": shouldBeActive, "state": diagnosticStateSummary()]
+				)
+			}
 
 			guard let surface else {
 				if !shouldBeActive {
@@ -476,13 +532,30 @@
 			keepCheckingAfterSuccess: Bool = false
 		) {
 			cancelFirstResponderRequest()
-			guard shouldHoldFirstResponder else { return }
+			guard shouldHoldFirstResponder else {
+				DiagnosticLogStore.shared.record(
+					"terminalView.requestFirstResponder.skipped",
+					metadata: ["retryCount": retryCount, "forceReacquire": forceReacquire, "state": diagnosticStateSummary()]
+				)
+				return
+			}
 			if isFirstResponder {
 				guard forceReacquire else { return }
 				resignFirstResponder()
 			}
 
-			_ = becomeFirstResponder()
+			let becameFirstResponder = becomeFirstResponder()
+			DiagnosticLogStore.shared.record(
+				"terminalView.becomeFirstResponder",
+				metadata: [
+					"result": becameFirstResponder,
+					"isFirstResponder": isFirstResponder,
+					"retryCount": retryCount,
+					"forceReacquire": forceReacquire,
+					"keepCheckingAfterSuccess": keepCheckingAfterSuccess,
+					"state": diagnosticStateSummary(),
+				]
+			)
 			guard retryCount > 0 else { return }
 			guard keepCheckingAfterSuccess || !isFirstResponder else { return }
 
@@ -508,6 +581,10 @@
 		}
 
 		func recoverDisplayAfterAppActivation(retryCount: Int = 30) {
+			DiagnosticLogStore.shared.record(
+				"terminalView.recoverDisplayAfterAppActivation.begin",
+				metadata: ["retryCount": retryCount, "state": diagnosticStateSummary()]
+			)
 			guard presentationMode == .interactive else { return }
 			guard isDisplayActive, window != nil else { return }
 
@@ -531,6 +608,10 @@
 				retryCount: retryCount,
 				forceReacquire: true,
 				keepCheckingAfterSuccess: true
+			)
+			DiagnosticLogStore.shared.record(
+				"terminalView.recoverDisplayAfterAppActivation.end",
+				metadata: ["state": diagnosticStateSummary()]
 			)
 		}
 
@@ -558,6 +639,10 @@
 
 		override func didMoveToWindow() {
 			super.didMoveToWindow()
+			DiagnosticLogStore.shared.record(
+				"terminalView.didMoveToWindow",
+				metadata: ["state": diagnosticStateSummary()]
+			)
 			if window != nil {
 				updateDisplayScale()
 				start()
@@ -641,14 +726,24 @@
 			let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
 			link.add(to: .main, forMode: .common)
 			displayLink = link
+			DiagnosticLogStore.shared.record(
+				"terminalView.startDisplayLink",
+				metadata: ["state": diagnosticStateSummary()]
+			)
 		}
 
 		private func stopDisplayLink() {
+			guard displayLink != nil else { return }
 			displayLink?.invalidate()
 			displayLink = nil
+			DiagnosticLogStore.shared.record(
+				"terminalView.stopDisplayLink",
+				metadata: ["state": diagnosticStateSummary()]
+			)
 		}
 
 		@objc private func tick(_ link: CADisplayLink) {
+			lastDisplayTickAt = Date()
 			GhosttyApp.shared.tick()
 			let deltaTime = max(CGFloat(link.targetTimestamp - link.timestamp), 1.0 / 120.0)
 			advanceMomentumScrolling(deltaTime: deltaTime)

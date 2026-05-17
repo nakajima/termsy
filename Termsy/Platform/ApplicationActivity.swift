@@ -20,6 +20,37 @@ enum ApplicationActivity {
 			}
 		}
 
+		static var diagnosticStateDescription: String {
+			let appState: String
+			switch UIApplication.shared.applicationState {
+			case .active:
+				appState = "active"
+			case .inactive:
+				appState = "inactive"
+			case .background:
+				appState = "background"
+			@unknown default:
+				appState = "unknown"
+			}
+			let sceneStates = UIApplication.shared.connectedScenes.map { scene in
+				let state: String
+				switch scene.activationState {
+				case .foregroundActive:
+					state = "foregroundActive"
+				case .foregroundInactive:
+					state = "foregroundInactive"
+				case .background:
+					state = "background"
+				case .unattached:
+					state = "unattached"
+				@unknown default:
+					state = "unknown"
+				}
+				return "\(scene.session.role.rawValue):\(state)"
+			}.sorted().joined(separator: ",")
+			return "applicationState=\(appState) isForegroundActive=\(isForegroundActive) scenes=[\(sceneStates)] backgroundTaskActive=\(hasBackgroundExecution)"
+		}
+
 		static var hasBackgroundExecution: Bool {
 			backgroundTaskID != .invalid
 		}
@@ -53,6 +84,7 @@ enum ApplicationActivity {
 		}
 	#else
 		static var isForegroundActive: Bool { isActive }
+		static var diagnosticStateDescription: String { "isActive=\(isActive)" }
 		static var hasBackgroundExecution: Bool { false }
 		static var backgroundTimeRemaining: TimeInterval? { nil }
 

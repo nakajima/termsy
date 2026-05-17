@@ -21,6 +21,10 @@ struct TermsyApp: App {
 
 	init() {
 		let launchConfiguration = AppLaunchConfiguration.current
+		DiagnosticLogStore.shared.record(
+			"app.launch",
+			metadata: ["screenshotMode": launchConfiguration.isScreenshotMode]
+		)
 		self.launchConfiguration = launchConfiguration
 		self.db = DB.path(launchConfiguration.databasePath)
 		launchConfiguration.preparePersistentStateIfNeeded(using: db)

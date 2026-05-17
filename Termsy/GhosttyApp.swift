@@ -99,7 +99,11 @@
 		}
 
 		func setFocused(_ isFocused: Bool) {
-			guard let app else { return }
+			guard let app else {
+				DiagnosticLogStore.shared.record("ghosttyApp.setFocused.skipped", metadata: ["focused": isFocused])
+				return
+			}
+			DiagnosticLogStore.shared.record("ghosttyApp.setFocused", metadata: ["focused": isFocused])
 			ghostty_app_set_focus(app, isFocused)
 		}
 

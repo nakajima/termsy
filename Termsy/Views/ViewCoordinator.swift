@@ -142,12 +142,17 @@ class ViewCoordinator {
 	}
 
 	func openSettings() {
+		recordDiagnosticSnapshot(reason: "openSettings.before")
 		isShowingConnectView = false
 		isShowingSessionPicker = false
 		isShowingSettings = true
 	}
 
 	func openNewTabUI() {
+		DiagnosticLogStore.shared.record(
+			"coordinator.openNewTabUI",
+			metadata: diagnosticSnapshotMetadata(reason: "openNewTabUI")
+		)
 		isShowingSettings = false
 		if tabs.isEmpty {
 			isShowingConnectView = true
@@ -176,6 +181,10 @@ class ViewCoordinator {
 	}
 
 	func appWillResignActive() {
+		DiagnosticLogStore.shared.record(
+			"coordinator.appWillResignActive.begin",
+			metadata: diagnosticSnapshotMetadata(reason: "appWillResignActive.begin")
+		)
 		appIsActive = false
 		ApplicationActivity.isActive = false
 		#if canImport(UIKit)
@@ -185,9 +194,17 @@ class ViewCoordinator {
 			tab.noteAppWillResignActive()
 		}
 		refreshDisplayActivity(usingCachedAppActivity: true)
+		DiagnosticLogStore.shared.record(
+			"coordinator.appWillResignActive.end",
+			metadata: diagnosticSnapshotMetadata(reason: "appWillResignActive.end")
+		)
 	}
 
 	func appDidEnterBackground() {
+		DiagnosticLogStore.shared.record(
+			"coordinator.appDidEnterBackground.begin",
+			metadata: diagnosticSnapshotMetadata(reason: "appDidEnterBackground.begin")
+		)
 		appIsActive = false
 		ApplicationActivity.isActive = false
 		for tab in tabs {
@@ -215,9 +232,17 @@ class ViewCoordinator {
 			}
 		}
 		refreshDisplayActivity(usingCachedAppActivity: true)
+		DiagnosticLogStore.shared.record(
+			"coordinator.appDidEnterBackground.end",
+			metadata: diagnosticSnapshotMetadata(reason: "appDidEnterBackground.end")
+		)
 	}
 
 	func appDidBecomeActive() {
+		DiagnosticLogStore.shared.record(
+			"coordinator.appDidBecomeActive.begin",
+			metadata: diagnosticSnapshotMetadata(reason: "appDidBecomeActive.begin")
+		)
 		appIsActive = true
 		ApplicationActivity.isActive = true
 		#if canImport(UIKit)
@@ -239,6 +264,27 @@ class ViewCoordinator {
 		#if canImport(UIKit)
 			selectedTab?.recoverDisplayAfterAppActivation()
 		#endif
+		DiagnosticLogStore.shared.record(
+			"coordinator.appDidBecomeActive.end",
+			metadata: diagnosticSnapshotMetadata(reason: "appDidBecomeActive.end")
+		)
+	}
+
+	func recordDiagnosticSnapshot(reason: String) {
+		DiagnosticLogStore.shared.record(
+			"coordinator.snapshot",
+			metadata: diagnosticSnapshotMetadata(reason: reason)
+		)
+		for (index, tab) in tabs.enumerated() {
+			DiagnosticLogStore.shared.record(
+				"terminalTab.snapshot",
+				metadata: tab.diagnosticSnapshotMetadata(
+					reason: reason,
+					index: index,
+					selected: tab.id == selectedTabID
+				)
+			)
+		}
 	}
 
 	private func noteBackgroundExecutionExpired(remaining: TimeInterval?) {
@@ -249,6 +295,12 @@ class ViewCoordinator {
 
 	func selectTab(_ id: UUID?, persistWorkspace: Bool = true) {
 		let previousID = selectedTabID
+		DiagnosticLogStore.shared.record(
+			"coordinator.selectTab",
+			metadata: diagnosticSnapshotMetadata(
+				reason: "selectTab previous=\(diagnosticID(previousID)) next=\(diagnosticID(id))"
+			)
+		)
 		selectedTabID = id
 
 		if let previousID, previousID != id,
@@ -473,9 +525,36 @@ class ViewCoordinator {
 		}
 	#endif
 
+	private func diagnosticSnapshotMetadata(reason: String) -> [String: Any?] {
+		[
+			"reason": reason,
+			"appIsActive": appIsActive,
+			"currentAppIsActive": currentAppIsActive,
+			"application": ApplicationActivity.diagnosticStateDescription,
+			"presentingUI": isPresentingAuxiliaryUI,
+			"showingConnect": isShowingConnectView,
+			"showingSessionPicker": isShowingSessionPicker,
+			"showingSettings": isShowingSettings,
+			"selectedTab": diagnosticID(selectedTabID),
+			"tabCount": tabs.count,
+			"tabs": tabs.map(\.diagnosticCompactSummary).joined(separator: " | "),
+		]
+	}
+
+	private func diagnosticID(_ id: UUID?) -> String {
+		guard let id else { return "nil" }
+		return String(id.uuidString.prefix(8))
+	}
+
 	private func refreshDisplayActivity(usingCachedAppActivity: Bool = false) {
 		let isActive = usingCachedAppActivity ? appIsActive : currentAppIsActive
 		let activeTabID = isActive && !isPresentingAuxiliaryUI ? selectedTabID : nil
+		DiagnosticLogStore.shared.record(
+			"coordinator.refreshDisplayActivity",
+			metadata: diagnosticSnapshotMetadata(
+				reason: "refreshDisplayActivity cached=\(usingCachedAppActivity) effectiveActive=\(isActive) activeTab=\(diagnosticID(activeTabID))"
+			)
+		)
 		for tab in tabs {
 			tab.setDisplayActive(tab.id == activeTabID)
 		}
