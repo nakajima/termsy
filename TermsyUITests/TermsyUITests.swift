@@ -43,7 +43,12 @@ final class TermsyUITests: XCTestCase {
 		app.launch()
 		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not reach foreground")
 
-		let diagnosticLog = app.buttons["Diagnostic Log"]
+		let diagnosticLog = app.descendants(matching: .any)["settings.diagnosticLog"]
+		let settingsForm = app.collectionViews.firstMatch
+		XCTAssertTrue(settingsForm.waitForExistence(timeout: 10), "Settings form did not appear")
+		for _ in 0 ..< 8 where !diagnosticLog.exists {
+			settingsForm.swipeUp()
+		}
 		XCTAssertTrue(diagnosticLog.waitForExistence(timeout: 10), "Diagnostic Log row did not appear")
 		diagnosticLog.tap()
 

@@ -166,6 +166,7 @@ struct SettingsView: View {
 						Label("Diagnostic Log", systemImage: "doc.text.magnifyingglass")
 							.foregroundStyle(theme.primaryText)
 					}
+					.accessibilityIdentifier("settings.diagnosticLog")
 					.listRowBackground(theme.cardBackground)
 				} header: {
 					Text("Diagnostics")

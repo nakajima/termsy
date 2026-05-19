@@ -165,19 +165,23 @@ class ViewCoordinator {
 
 	@discardableResult
 	func dismissPresentedUI() -> Bool {
+		let didDismiss: Bool
 		if isShowingSettings {
 			isShowingSettings = false
-			return true
-		}
-		if isShowingConnectView {
+			didDismiss = true
+		} else if isShowingConnectView {
 			isShowingConnectView = false
-			return true
-		}
-		if isShowingSessionPicker {
+			didDismiss = true
+		} else if isShowingSessionPicker {
 			isShowingSessionPicker = false
-			return true
+			didDismiss = true
+		} else {
+			didDismiss = false
 		}
-		return false
+		if didDismiss, currentAppIsActive, !isPresentingAuxiliaryUI {
+			selectedTab?.noteSelectedWhileAppActive()
+		}
+		return didDismiss
 	}
 
 	func appWillResignActive() {

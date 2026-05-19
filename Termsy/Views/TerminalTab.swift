@@ -124,6 +124,7 @@ class TerminalTab: Identifiable {
 	@ObservationIgnored private var lastRemoteOutputAt: Date?
 	@ObservationIgnored private var lastTerminalInputAt: Date?
 	@ObservationIgnored private var terminalRecorder: TerminalSessionRecorder?
+	@ObservationIgnored private var suppressedCloseSessionIDs = Set<ObjectIdentifier>()
 
 	let id = UUID()
 
@@ -338,6 +339,7 @@ class TerminalTab: Identifiable {
 		if phase == .connected || phase == .connecting {
 			switch endpoint {
 			case .remote:
+				suppressCloseCallbacks(for: sshSession)
 				sshSession.disconnect()
 			case .localShell:
 				break
@@ -357,6 +359,24 @@ class TerminalTab: Identifiable {
 			return
 		}
 		guard wantsConnection else { return }
+		if phase == .connecting, connectTask == nil, !connectionIsActive {
+			phase = .idle
+			recordConnectionDiagnosticEvent(
+				"connect.recoverStaleConnecting",
+				metadata: ["presentation": presentation.diagnosticDescription]
+			)
+			notifyOverlayStateChanged()
+		}
+		guard phase == .idle,
+		      connectTask == nil,
+		      !connectionIsActive
+		else {
+			recordConnectionDiagnosticEvent(
+				"connect.skip.busy",
+				metadata: ["presentation": presentation.diagnosticDescription]
+			)
+			return
+		}
 		if delayNanoseconds > 0 {
 			recordConnectionDiagnosticEvent(
 				"connect.schedule",
@@ -381,16 +401,6 @@ class TerminalTab: Identifiable {
 				metadata: ["presentation": presentation.diagnosticDescription]
 			)
 			logConnectionEvent("Deferring connection until app becomes active")
-			return
-		}
-		guard phase == .idle,
-		      connectTask == nil,
-		      !connectionIsActive
-		else {
-			recordConnectionDiagnosticEvent(
-				"connect.skip.busy",
-				metadata: ["presentation": presentation.diagnosticDescription]
-			)
 			return
 		}
 
@@ -525,9 +535,33 @@ class TerminalTab: Identifiable {
 				initialWorkingDirectory: initialWorkingDirectory
 			)
 			guard !Task.isCancelled, self.sshSession === sshSession else {
+				let isCurrentSession = self.sshSession === sshSession
 				logConnectionEvent("Attempt \(attempt): ignoring stale successful connection")
-				recordConnectionDiagnosticEvent("connect.attempt.staleSuccess", attempt: attempt)
+				recordConnectionDiagnosticEvent(
+					"connect.attempt.staleSuccess",
+					attempt: attempt,
+					metadata: [
+						"taskCancelled": Task.isCancelled,
+						"currentSession": isCurrentSession,
+					]
+				)
+				if isCurrentSession {
+					suppressCloseCallbacks(for: sshSession)
+				}
 				sshSession.disconnect()
+				if isCurrentSession {
+					phase = .idle
+					connectTask = nil
+					notifyOverlayStateChanged()
+					if wantsConnection {
+						beginConnectionAttemptIfNeeded(
+							after: reconnectRetryDelayNanoseconds,
+							presentation: presentation
+						)
+					} else {
+						finishRestorationPresentation()
+					}
+				}
 				return
 			}
 			wantsConnection = true
@@ -577,6 +611,7 @@ class TerminalTab: Identifiable {
 				metadata: Self.sanitizedDiagnosticMetadata(for: error)
 			)
 			logConnectionEvent("Attempt \(attempt): connection failed: \(error)")
+			connectTask = nil
 			notifyOverlayStateChanged()
 			beginConnectionAttemptIfNeeded(after: reconnectRetryDelayNanoseconds, presentation: presentation)
 		}
@@ -600,6 +635,7 @@ class TerminalTab: Identifiable {
 		previousSession.onClose = nil
 		previousSession.onEvent = nil
 		previousSession.onDiagnosticEvent = nil
+		suppressedCloseSessionIDs.remove(ObjectIdentifier(previousSession))
 		previousSession.disconnect()
 
 		let newSession = SSHTerminalSession()
@@ -660,7 +696,7 @@ class TerminalTab: Identifiable {
 		}
 		sshSession.onClose = { [weak self, weak sshSession] reason in
 			guard let self, let sshSession, self.sshSession === sshSession else { return }
-			self.handleSSHSessionClose(reason)
+			self.handleSSHSessionClose(reason, from: sshSession)
 		}
 		sshSession.onEvent = { [weak self, weak sshSession] message in
 			guard let self, let sshSession, self.sshSession === sshSession else { return }
@@ -1106,6 +1142,21 @@ class TerminalTab: Identifiable {
 		}
 	}
 
+	private func suppressCloseCallbacks(for sshSession: SSHTerminalSession) {
+		suppressedCloseSessionIDs.insert(ObjectIdentifier(sshSession))
+	}
+
+	private func shouldIgnoreClose(from sshSession: SSHTerminalSession) -> Bool {
+		let id = ObjectIdentifier(sshSession)
+		guard suppressedCloseSessionIDs.contains(id) else { return false }
+		suppressedCloseSessionIDs.remove(id)
+		return true
+	}
+
+	private var shouldStartReconnectImmediately: Bool {
+		ApplicationActivity.isActive && isDisplayActive && !isPassivePreview
+	}
+
 	private func recordConnectionDiagnosticEvent(
 		_ event: String,
 		attempt: Int? = nil,
@@ -1257,13 +1308,24 @@ class TerminalTab: Identifiable {
 		prepareForReconnectAfterBackgroundLoss(snapshot: displaySnapshot)
 	}
 
-	private func handleSSHSessionClose(_ reason: SSHTerminalSession.CloseReason) {
+	private func handleSSHSessionClose(_ reason: SSHTerminalSession.CloseReason, from sshSession: SSHTerminalSession) {
+		let closeReason = Self.diagnosticDescription(for: reason)
+		if shouldIgnoreClose(from: sshSession) {
+			recordConnectionDiagnosticEvent(
+				"connection.close.ignored",
+				metadata: ["closeReason": closeReason]
+			)
+			logConnectionEvent("Ignoring SSH close from a transport replaced during reconnect")
+			return
+		}
+
 		let wasConnectedBeforeClose = isConnected
 		recordConnectionDiagnosticEvent(
 			"connection.close",
 			metadata: [
-				"closeReason": Self.diagnosticDescription(for: reason),
+				"closeReason": closeReason,
 				"wasConnectedBeforeClose": wasConnectedBeforeClose,
+				"reconnectImmediately": shouldStartReconnectImmediately,
 			]
 		)
 		connectTask?.cancel()
@@ -1277,10 +1339,17 @@ class TerminalTab: Identifiable {
 			logConnectionEvent("SSH session closed locally")
 			if wantsConnection {
 				notifyOverlayStateChanged()
-				beginConnectionAttemptIfNeeded(
-					after: activationReconnectDelayNanoseconds,
-					presentation: connectionPresentationForCurrentState
-				)
+				if shouldStartReconnectImmediately {
+					beginConnectionAttemptIfNeeded(
+						after: activationReconnectDelayNanoseconds,
+						presentation: connectionPresentationForCurrentState
+					)
+				} else {
+					recordConnectionDiagnosticEvent(
+						"reconnect.deferredUntilSelected",
+						metadata: ["reason": "localDisconnect"]
+					)
+				}
 			} else {
 				phase = .idle
 				finishRestorationPresentation()
@@ -1304,16 +1373,27 @@ class TerminalTab: Identifiable {
 			logConnectionEvent("SSH session closed with error: \(message)")
 			if shouldReconnectAfterClose(message: message, wasConnectedBeforeClose: wasConnectedBeforeClose) {
 				phase = .idle
-				if wasConnectedBeforeClose {
-					beginRestoration(.backgroundReconnect, snapshot: displaySnapshot ?? terminalView.captureSnapshot())
+				if wasConnectedBeforeClose || restorationMode != nil {
+					beginRestoration(
+						.backgroundReconnect,
+						snapshot: displaySnapshot ?? restorationSnapshot ?? terminalView.captureSnapshot()
+					)
 				} else {
 					notifyOverlayStateChanged()
 				}
-				logConnectionEvent("Scheduling reconnect after SSH close")
-				beginConnectionAttemptIfNeeded(
-					after: ApplicationActivity.isActive ? activationReconnectDelayNanoseconds : 0,
-					presentation: wasConnectedBeforeClose ? .restoringSnapshot : connectionPresentationForCurrentState
-				)
+				if shouldStartReconnectImmediately {
+					logConnectionEvent("Scheduling reconnect after SSH close")
+					beginConnectionAttemptIfNeeded(
+						after: activationReconnectDelayNanoseconds,
+						presentation: wasConnectedBeforeClose ? .restoringSnapshot : connectionPresentationForCurrentState
+					)
+				} else {
+					logConnectionEvent("Deferring reconnect after SSH close until the tab is selected")
+					recordConnectionDiagnosticEvent(
+						"reconnect.deferredUntilSelected",
+						metadata: ["reason": "sshClose"]
+					)
+				}
 			} else {
 				phase = .failed(message)
 				finishRestorationPresentation()

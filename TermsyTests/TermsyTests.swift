@@ -755,6 +755,66 @@ struct TermsyTests {
 	}
 
 	@MainActor
+	@Test func staleCloseFromReplacedSSHSessionDoesNotCancelReconnectState() {
+		let session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let tab = TerminalTab(session: session)
+		defer { tab.close() }
+		let oldSSHSession = tab.sshSession
+		tab.isConnected = true
+
+		tab.prepareForReconnectAfterBackgroundLoss()
+		oldSSHSession.onClose?(.error("connection reset"))
+
+		#expect(tab.connectionLogText.contains("Ignoring SSH close"))
+		#expect(tab.isRestoring)
+		#expect(tab.restorationMode == .backgroundReconnect)
+	}
+
+	@MainActor
+	@Test func backgroundTabSSHCloseDefersReconnectUntilSelected() {
+		let firstSession = Session(
+			hostname: "one.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let secondSession = Session(
+			hostname: "two.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let coordinator = ViewCoordinator()
+		defer {
+			for tab in coordinator.tabs {
+				tab.close()
+			}
+		}
+		coordinator.openTab(for: firstSession)
+		let backgroundTab = coordinator.tabs[0]
+		coordinator.openTab(for: secondSession)
+		backgroundTab.isConnected = true
+		let oldBackgroundView = backgroundTab.terminalView
+
+		backgroundTab.sshSession.onClose?(.error("connection reset"))
+
+		#expect(backgroundTab.isRestoring)
+		#expect(backgroundTab.restorationMode == .backgroundReconnect)
+		#expect(backgroundTab.terminalView === oldBackgroundView)
+
+		coordinator.selectTab(backgroundTab.id)
+		#expect(backgroundTab.terminalView !== oldBackgroundView)
+	}
+
+	@MainActor
 	@Test func terminalInputSendFailureUsesBackgroundRestorationReconnect() {
 		let session = Session(
 			hostname: "prod.example.com",
