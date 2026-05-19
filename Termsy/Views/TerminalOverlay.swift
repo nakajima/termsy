@@ -26,6 +26,8 @@ struct TerminalOverlay: View {
 					ProgressView("Restoring session…")
 						.tint(theme.accent)
 						.foregroundStyle(theme.primaryText)
+				} else {
+					BackgroundReconnectStatusView()
 				}
 			case .connecting:
 				snapshotBackdrop
@@ -48,7 +50,7 @@ struct TerminalOverlay: View {
 				.padding(.bottom)
 			}
 		}
-		.allowsHitTesting(tab.needsPassword)
+		.allowsHitTesting(tab.showsConnectionLogPanel || tab.needsPassword)
 		.alert("Password Required", isPresented: .init(
 			get: { tab.needsPassword && !tab.isLocalShell },
 			set: { if !$0 { tab.needsPassword = false } }
@@ -90,7 +92,28 @@ struct TerminalOverlay: View {
 	}
 
 	private var showsConnectionLogToggle: Bool {
-		tab.needsPassword
+		tab.showsConnectionLogPanel
+	}
+}
+
+private struct BackgroundReconnectStatusView: View {
+	@Environment(\.appTheme) private var theme
+
+	var body: some View {
+		VStack(spacing: 8) {
+			ProgressView()
+				.tint(theme.accent)
+			Text("Reconnecting…")
+				.font(.caption.weight(.semibold))
+				.foregroundStyle(theme.primaryText)
+		}
+		.padding(.horizontal, 14)
+		.padding(.vertical, 12)
+		.background(theme.cardBackground.opacity(0.94), in: .rect(cornerRadius: 12))
+		.overlay {
+			RoundedRectangle(cornerRadius: 12)
+				.stroke(theme.divider, lineWidth: 1)
+		}
 	}
 }
 
@@ -132,6 +155,13 @@ private struct ConnectionLogPanel: View {
 				.stroke(theme.divider, lineWidth: 1)
 		}
 	}
+}
+
+#Preview("Background Reconnect Status") {
+	BackgroundReconnectStatusView()
+		.padding()
+		.background(TerminalTheme.mocha.appTheme.background)
+		.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 }
 
 #Preview("Connection Log Panel") {

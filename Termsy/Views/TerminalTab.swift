@@ -46,6 +46,15 @@ class TerminalTab: Identifiable {
 	private enum ConnectionAttemptPresentation {
 		case initial
 		case restoringSnapshot
+
+		var diagnosticDescription: String {
+			switch self {
+			case .initial:
+				"initial"
+			case .restoringSnapshot:
+				"restoringSnapshot"
+			}
+		}
 	}
 
 	let endpoint: TerminalEndpoint
@@ -271,6 +280,15 @@ class TerminalTab: Identifiable {
 		connectionLog.joined(separator: "\n")
 	}
 
+	var showsConnectionLogPanel: Bool {
+		switch overlayState {
+		case .connecting, .awaitingPassword, .restoring:
+			true
+		case .connected, .failed:
+			false
+		}
+	}
+
 	var shouldRequestBackgroundExecution: Bool {
 		guard !isPassivePreview else { return false }
 		guard case .remote = endpoint else { return false }
@@ -340,11 +358,28 @@ class TerminalTab: Identifiable {
 		}
 		guard wantsConnection else { return }
 		if delayNanoseconds > 0 {
+			recordConnectionDiagnosticEvent(
+				"connect.schedule",
+				metadata: [
+					"delaySeconds": String(format: "%.2f", Double(delayNanoseconds) / 1_000_000_000),
+					"presentation": presentation.diagnosticDescription,
+				]
+			)
 			scheduleConnectionAttempt(after: delayNanoseconds, presentation: presentation)
 			return
 		}
-		guard terminalView.hasAttachedWindow else { return }
+		guard terminalView.hasAttachedWindow else {
+			recordConnectionDiagnosticEvent(
+				"connect.skip.noWindow",
+				metadata: ["presentation": presentation.diagnosticDescription]
+			)
+			return
+		}
 		if shouldDeferRemoteConnectionUntilAppActive {
+			recordConnectionDiagnosticEvent(
+				"connect.deferred.appInactive",
+				metadata: ["presentation": presentation.diagnosticDescription]
+			)
 			logConnectionEvent("Deferring connection until app becomes active")
 			return
 		}
@@ -352,11 +387,19 @@ class TerminalTab: Identifiable {
 		      connectTask == nil,
 		      !connectionIsActive
 		else {
+			recordConnectionDiagnosticEvent(
+				"connect.skip.busy",
+				metadata: ["presentation": presentation.diagnosticDescription]
+			)
 			return
 		}
 
 		applyConnectionPresentation(presentation)
 		phase = .connecting
+		recordConnectionDiagnosticEvent(
+			"connect.task.start",
+			metadata: ["presentation": presentation.diagnosticDescription]
+		)
 		notifyOverlayStateChanged()
 		connectTask = Task { @MainActor [weak self] in
 			defer {
@@ -366,6 +409,10 @@ class TerminalTab: Identifiable {
 			guard let self else { return }
 			if self.shouldDeferRemoteConnectionUntilAppActive {
 				self.phase = .idle
+				self.recordConnectionDiagnosticEvent(
+					"connect.task.deferred.appInactive",
+					metadata: ["presentation": presentation.diagnosticDescription]
+				)
 				self.logConnectionEvent("Deferred pending connection because app is inactive")
 				return
 			}
@@ -383,6 +430,10 @@ class TerminalTab: Identifiable {
 			try? await Task.sleep(nanoseconds: delayNanoseconds)
 			guard !Task.isCancelled else { return }
 			self?.scheduledConnectionTask = nil
+			self?.recordConnectionDiagnosticEvent(
+				"connect.schedule.fire",
+				metadata: ["presentation": presentation.diagnosticDescription]
+			)
 			self?.beginConnectionAttemptIfNeeded(presentation: presentation)
 		}
 	}
@@ -394,12 +445,20 @@ class TerminalTab: Identifiable {
 		}
 		if shouldDeferRemoteConnectionUntilAppActive {
 			phase = .idle
+			recordConnectionDiagnosticEvent(
+				"connect.request.deferred.appInactive",
+				metadata: ["presentation": presentation.diagnosticDescription]
+			)
 			logConnectionEvent("Connection request deferred because app is inactive")
 			return
 		}
 		phase = .connecting
 		connectionError = nil
 		notifyOverlayStateChanged()
+		recordConnectionDiagnosticEvent(
+			"connect.request",
+			metadata: ["presentation": presentation.diagnosticDescription]
+		)
 		logConnectionEvent("Connect requested")
 		switch endpoint {
 		case .remote:
@@ -441,6 +500,16 @@ class TerminalTab: Identifiable {
 		} else {
 			"Attempt \(attempt): starting remote login shell"
 		}
+		recordConnectionDiagnosticEvent(
+			"connect.attempt.start",
+			attempt: attempt,
+			metadata: [
+				"presentation": presentation.diagnosticDescription,
+				"hasPassword": password?.isEmpty == false,
+				"hasTmuxSession": tmuxSessionName != nil,
+				"hasInitialWorkingDirectory": initialWorkingDirectory != nil,
+			]
+		)
 		logConnectionEvent("Attempt \(attempt): connecting to \(session.username)@\(session.hostname):\(session.port)")
 		logConnectionEvent(startupModeMessage)
 		if let initialWorkingDirectory {
@@ -457,6 +526,7 @@ class TerminalTab: Identifiable {
 			)
 			guard !Task.isCancelled, self.sshSession === sshSession else {
 				logConnectionEvent("Attempt \(attempt): ignoring stale successful connection")
+				recordConnectionDiagnosticEvent("connect.attempt.staleSuccess", attempt: attempt)
 				sshSession.disconnect()
 				return
 			}
@@ -468,6 +538,7 @@ class TerminalTab: Identifiable {
 				Keychain.setPassword(password, for: session)
 			}
 			notifyOverlayStateChanged()
+			recordConnectionDiagnosticEvent("connect.attempt.success", attempt: attempt)
 			logConnectionEvent("Attempt \(attempt): connection established")
 			if let session = self.session {
 				onConnectionEstablished?(session)
@@ -475,6 +546,7 @@ class TerminalTab: Identifiable {
 		} catch SSHConnectionError.authenticationFailed {
 			guard self.sshSession === sshSession else { return }
 			finishRestorationPresentation()
+			recordConnectionDiagnosticEvent("connect.attempt.authenticationFailed", attempt: attempt)
 			logConnectionEvent("Attempt \(attempt): authentication failed; prompting for password")
 			wantsConnection = false
 			phase = .waitingForPassword
@@ -490,10 +562,20 @@ class TerminalTab: Identifiable {
 				applyConnectionPresentation(.restoringSnapshot)
 			}
 			if shouldDeferRemoteConnectionUntilAppActive {
+				recordConnectionDiagnosticEvent(
+					"connect.attempt.failure.inactiveApp",
+					attempt: attempt,
+					metadata: Self.sanitizedDiagnosticMetadata(for: error)
+				)
 				logConnectionEvent("Attempt \(attempt): connection failed while app inactive; reconnect deferred: \(error)")
 				notifyOverlayStateChanged()
 				return
 			}
+			recordConnectionDiagnosticEvent(
+				"connect.attempt.failure",
+				attempt: attempt,
+				metadata: Self.sanitizedDiagnosticMetadata(for: error)
+			)
 			logConnectionEvent("Attempt \(attempt): connection failed: \(error)")
 			notifyOverlayStateChanged()
 			beginConnectionAttemptIfNeeded(after: reconnectRetryDelayNanoseconds, presentation: presentation)
@@ -517,11 +599,12 @@ class TerminalTab: Identifiable {
 		previousSession.onRemoteOutput = nil
 		previousSession.onClose = nil
 		previousSession.onEvent = nil
+		previousSession.onDiagnosticEvent = nil
 		previousSession.disconnect()
 
 		let newSession = SSHTerminalSession()
 		sshSession = newSession
-		configureSSHSessionCallbacks(for: newSession)
+		configureSSHSessionCallbacks(for: newSession, attempt: attempt)
 		newSession.updateTerminalSize(terminalSize)
 		if !wasForeground {
 			newSession.enterBackground()
@@ -555,7 +638,7 @@ class TerminalTab: Identifiable {
 		notifyOverlayStateChanged()
 	}
 
-	private func configureSSHSessionCallbacks(for sshSession: SSHTerminalSession? = nil) {
+	private func configureSSHSessionCallbacks(for sshSession: SSHTerminalSession? = nil, attempt: Int? = nil) {
 		let sshSession = sshSession ?? self.sshSession
 		sshSession.onRemoteOutput = { [weak self, weak sshSession] data in
 			guard let self, let sshSession, self.sshSession === sshSession else { return }
@@ -582,6 +665,10 @@ class TerminalTab: Identifiable {
 		sshSession.onEvent = { [weak self, weak sshSession] message in
 			guard let self, let sshSession, self.sshSession === sshSession else { return }
 			self.logConnectionEvent(message)
+		}
+		sshSession.onDiagnosticEvent = { [weak self, weak sshSession] event, metadata in
+			guard let self, let sshSession, self.sshSession === sshSession else { return }
+			self.recordSSHTransportDiagnosticEvent(event, attempt: attempt, metadata: metadata)
 		}
 	}
 
@@ -867,24 +954,80 @@ class TerminalTab: Identifiable {
 		)
 	}
 
-	func noteAppDidBecomeActive() {
+	func noteAppDidBecomeActive(isSelected: Bool = true) {
 		DiagnosticLogStore.shared.record(
 			"terminalTab.noteAppDidBecomeActive",
-			metadata: diagnosticSnapshotMetadata(reason: "appDidBecomeActive", selected: nil)
+			metadata: diagnosticSnapshotMetadata(reason: "appDidBecomeActive", selected: isSelected)
 		)
+		reconcileConnectionAfterAppActivation(
+			isSelected: isSelected,
+			reason: "appDidBecomeActive",
+			selectedDelayNanoseconds: activationReconnectDelayNanoseconds
+		)
+	}
+
+	func noteSelectedWhileAppActive() {
+		DiagnosticLogStore.shared.record(
+			"terminalTab.noteSelectedWhileAppActive",
+			metadata: diagnosticSnapshotMetadata(reason: "selectedWhileAppActive", selected: true)
+		)
+		reconcileConnectionAfterAppActivation(
+			isSelected: true,
+			reason: "selectedWhileAppActive",
+			selectedDelayNanoseconds: 0
+		)
+	}
+
+	private func reconcileConnectionAfterAppActivation(
+		isSelected: Bool,
+		reason: String,
+		selectedDelayNanoseconds: UInt64
+	) {
 		guard wantsConnection else { return }
 		if phase == .connected, !connectionIsActive {
-			logConnectionEvent("App became active; connection was inactive; preparing background reconnect")
+			if isSelected {
+				logConnectionEvent("\(reason); connection was inactive; preparing background reconnect")
+				recordConnectionDiagnosticEvent(
+					"reconnect.backgroundLoss.start",
+					metadata: ["reason": reason, "selected": true]
+				)
+				prepareForReconnectAfterBackgroundLoss(snapshot: restorationSnapshot)
+			} else {
+				logConnectionEvent("\(reason); background tab reconnect deferred until selected")
+				phase = .idle
+				beginRestoration(.backgroundReconnect, snapshot: restorationSnapshot)
+				recordConnectionDiagnosticEvent(
+					"reconnect.backgroundLoss.deferred",
+					metadata: ["reason": reason, "selected": false]
+				)
+			}
+			return
+		}
+
+		if isSelected, phase == .idle, restorationMode == .backgroundReconnect, !connectionIsActive {
+			logConnectionEvent("\(reason); starting deferred background reconnect")
+			recordConnectionDiagnosticEvent(
+				"reconnect.deferredSelection.start",
+				metadata: ["reason": reason]
+			)
 			prepareForReconnectAfterBackgroundLoss(snapshot: restorationSnapshot)
 			return
 		}
+
 		if phase == .idle || phase == .connecting {
-			logConnectionEvent("App became active; reconciling connection")
+			logConnectionEvent("\(reason); reconciling connection selected=\(isSelected)")
 			if phase == .connecting, connectTask == nil, !connectionIsActive {
 				phase = .idle
 			}
+			guard isSelected else {
+				recordConnectionDiagnosticEvent(
+					"reconnect.deferredUntilSelected",
+					metadata: ["reason": reason]
+				)
+				return
+			}
 			beginConnectionAttemptIfNeeded(
-				after: activationReconnectDelayNanoseconds,
+				after: selectedDelayNanoseconds,
 				presentation: connectionPresentationForCurrentState
 			)
 		}
@@ -961,6 +1104,56 @@ class TerminalTab: Identifiable {
 		if connectionLog.count > 120 {
 			connectionLog.removeFirst(connectionLog.count - 120)
 		}
+	}
+
+	private func recordConnectionDiagnosticEvent(
+		_ event: String,
+		attempt: Int? = nil,
+		metadata: [String: Any?] = [:]
+	) {
+		var payload: [String: Any?] = [
+			"tab": diagnosticID,
+			"endpoint": endpointDiagnosticDescription,
+			"phase": diagnosticPhaseDescription,
+			"wantsConnection": wantsConnection,
+			"connectionIsActive": connectionIsActive,
+			"displayActive": isDisplayActive,
+			"restoration": restorationDiagnosticDescription,
+			"appActive": ApplicationActivity.isActive,
+			"foregroundActive": ApplicationActivity.isForegroundActive,
+		]
+		if let attempt {
+			payload["attempt"] = attempt
+		}
+		for (key, value) in metadata {
+			payload[key] = value
+		}
+		DiagnosticLogStore.shared.record("terminalTab.ssh.\(event)", metadata: payload)
+	}
+
+	private func recordSSHTransportDiagnosticEvent(
+		_ event: String,
+		attempt: Int?,
+		metadata: [String: String]
+	) {
+		var payload: [String: Any?] = [:]
+		for (key, value) in metadata {
+			payload[key] = value
+		}
+		recordConnectionDiagnosticEvent(event, attempt: attempt, metadata: payload)
+	}
+
+	private static func sanitizedDiagnosticMetadata(for error: Error) -> [String: Any?] {
+		var metadata: [String: Any?] = [
+			"errorType": String(reflecting: type(of: error)),
+		]
+		if let sshError = error as? SSHConnectionError {
+			metadata["errorDescription"] = sshError.description
+		}
+		let nsError = error as NSError
+		metadata["errorDomain"] = nsError.domain
+		metadata["errorCode"] = nsError.code
+		return metadata
 	}
 
 	private static func ageDescription(since date: Date?) -> String {
@@ -1066,6 +1259,13 @@ class TerminalTab: Identifiable {
 
 	private func handleSSHSessionClose(_ reason: SSHTerminalSession.CloseReason) {
 		let wasConnectedBeforeClose = isConnected
+		recordConnectionDiagnosticEvent(
+			"connection.close",
+			metadata: [
+				"closeReason": Self.diagnosticDescription(for: reason),
+				"wasConnectedBeforeClose": wasConnectedBeforeClose,
+			]
+		)
 		connectTask?.cancel()
 		connectTask = nil
 		if phase == .connecting || phase == .connected {
@@ -1119,6 +1319,17 @@ class TerminalTab: Identifiable {
 				finishRestorationPresentation()
 				notifyOverlayStateChanged()
 			}
+		}
+	}
+
+	private static func diagnosticDescription(for reason: SSHTerminalSession.CloseReason) -> String {
+		switch reason {
+		case .localDisconnect:
+			"localDisconnect"
+		case .cleanExit:
+			"cleanExit"
+		case .error:
+			"error"
 		}
 	}
 

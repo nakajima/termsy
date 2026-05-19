@@ -258,7 +258,7 @@ class ViewCoordinator {
 			}
 		}
 		for tab in tabs {
-			tab.noteAppDidBecomeActive()
+			tab.noteAppDidBecomeActive(isSelected: tab.id == selectedTabID)
 		}
 		refreshDisplayActivity()
 		#if canImport(UIKit)
@@ -314,6 +314,9 @@ class ViewCoordinator {
 		}
 
 		refreshDisplayActivity()
+		if currentAppIsActive, !isPresentingAuxiliaryUI {
+			selectedTab?.noteSelectedWhileAppActive()
+		}
 		if persistWorkspace {
 			persistWorkspaceStateIfPossible()
 		}

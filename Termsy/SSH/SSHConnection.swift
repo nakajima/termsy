@@ -865,6 +865,15 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	enum StartupCommandFallbackPolicy: Sendable, Equatable {
 		case plainShellOnBootstrapFailure
 		case requireStartupCommand
+
+		var diagnosticDescription: String {
+			switch self {
+			case .plainShellOnBootstrapFailure:
+				"plainShellOnBootstrapFailure"
+			case .requireStartupCommand:
+				"requireStartupCommand"
+			}
+		}
 	}
 
 	private static let sessionStartupTimeout: TimeAmount = .seconds(10)
@@ -880,6 +889,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	private let onData: @Sendable (Data) -> Void
 	private let onClose: @Sendable (CloseReason) -> Void
 	private let onEvent: @Sendable (String) -> Void
+	private let onDiagnosticEvent: @Sendable (String, [String: String]) -> Void
 
 	var isActive: Bool {
 		(channel?.isActive ?? false) && (sshChildChannel?.isActive ?? false)
@@ -888,15 +898,18 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	init(
 		onData: @escaping @Sendable (Data) -> Void,
 		onClose: @escaping @Sendable (CloseReason) -> Void,
-		onEvent: @escaping @Sendable (String) -> Void = { _ in }
+		onEvent: @escaping @Sendable (String) -> Void = { _ in },
+		onDiagnosticEvent: @escaping @Sendable (String, [String: String]) -> Void = { _, _ in }
 	) {
 		self.onData = onData
 		self.onClose = onClose
 		self.onEvent = onEvent
+		self.onDiagnosticEvent = onDiagnosticEvent
 	}
 
 	func connect(host: String, port: Int, username: String, password: String?) async throws {
 		disconnect()
+		diagnostic("connect.begin", ["passwordProvided": boolString(password?.isEmpty == false)])
 		log("connecting to \(host):\(port) as \(username)")
 		channel = nil
 		sshChildChannel = nil
@@ -906,16 +919,19 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		let authDelegate = PasswordOrNoneAuthDelegate(
 			username: username,
 			password: password ?? "",
-			logger: { [weak self] message in self?.log(message) }
+			logger: { [weak self] message in self?.log(message) },
+			diagnostic: { [weak self] event, metadata in self?.diagnostic(event, metadata) }
 		)
 		self.authDelegate = authDelegate
 		let hostKeyDelegate = AcceptAllHostKeysDelegate(
-			logger: { [weak self] message in self?.log(message) }
+			logger: { [weak self] message in self?.log(message) },
+			diagnostic: { [weak self] event, metadata in self?.diagnostic(event, metadata) }
 		)
 
 		let bootstrap = NIOTSConnectionBootstrap(group: group)
 			.connectTimeout(.seconds(10))
 			.channelInitializer { channel in
+				self.diagnostic("tcp.connected")
 				self.log("TCP connected, adding SSH handler")
 				return channel.pipeline.addHandler(
 					NIOSSHHandler(
@@ -930,8 +946,15 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 			}
 
 		log("bootstrap.connect...")
-		channel = try await bootstrap.connect(host: host, port: port).get()
-		log("connected")
+		diagnostic("tcp.connect.begin")
+		do {
+			channel = try await bootstrap.connect(host: host, port: port).get()
+			diagnostic("tcp.connect.success")
+			log("connected")
+		} catch {
+			diagnostic("tcp.connect.failure", Self.sanitizedDiagnosticMetadata(for: error))
+			throw error
+		}
 	}
 
 	func startShell(
@@ -940,8 +963,18 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		startupFallbackPolicy: StartupCommandFallbackPolicy = .plainShellOnBootstrapFailure
 	) async throws {
 		pendingTerminalSize = size
+		diagnostic(
+			"shell.start.begin",
+			[
+				"hasStartupCommand": boolString(startupCommand != nil),
+				"fallbackPolicy": startupFallbackPolicy.diagnosticDescription,
+			]
+		)
 		log("startShell \(size.columns)x\(size.rows) px=\(size.pixelWidth)x\(size.pixelHeight)")
-		guard let channel else { throw SSHConnectionError.notConnected }
+		guard let channel else {
+			diagnostic("shell.start.failure", Self.sanitizedDiagnosticMetadata(for: SSHConnectionError.notConnected))
+			throw SSHConnectionError.notConnected
+		}
 
 		do {
 			if let startupCommand {
@@ -949,10 +982,12 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 					let childChannel = try await openPreparedSessionChannel(on: channel)
 					sshChildChannel = childChannel
 					try await requestExec(startupCommand, on: childChannel)
+					diagnostic("shell.start.execBootstrapSuccess")
 					log("remote shell bootstrap started")
 					sendWindowChange(pendingTerminalSize, force: true)
 				} catch {
 					closeActiveStartupChannelIfNeeded()
+					diagnostic("shell.start.execBootstrapFailure", Self.sanitizedDiagnosticMetadata(for: error))
 					switch startupFallbackPolicy {
 					case .plainShellOnBootstrapFailure:
 						log("remote shell bootstrap failed, opening fresh plain shell channel: \(error)")
@@ -965,16 +1000,20 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 			} else {
 				try await startPlainShell(on: channel, fallback: false)
 			}
+			diagnostic("shell.start.success")
 		} catch {
+			diagnostic("shell.start.failure", Self.sanitizedDiagnosticMetadata(for: error))
 			disconnect()
 			throw error
 		}
 	}
 
 	private func startPlainShell(on channel: Channel, fallback: Bool) async throws {
+		diagnostic("plainShell.start.begin", ["fallback": boolString(fallback)])
 		let childChannel = try await openPreparedSessionChannel(on: channel)
 		sshChildChannel = childChannel
 		try await requestShell(on: childChannel)
+		diagnostic("plainShell.start.success", ["fallback": boolString(fallback)])
 		log(fallback ? "shell started (fresh fallback channel)" : "shell started")
 		sendWindowChange(pendingTerminalSize, force: true)
 	}
@@ -995,51 +1034,60 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		let authDelegate = self.authDelegate
 		let onData = self.onData
 		let onClose = self.onClose
-		return try await withTimeout(
-			channel.eventLoop.flatSubmit {
-				self.log("creating session channel...")
-				let sshHandler = try! channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
-				let promise = channel.eventLoop.makePromise(of: Channel.self)
+		diagnostic("sessionChannel.open.begin")
+		do {
+			let childChannel = try await withTimeout(
+				channel.eventLoop.flatSubmit {
+					self.log("creating session channel...")
+					let sshHandler = try! channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
+					let promise = channel.eventLoop.makePromise(of: Channel.self)
 
-				if authDelegate?.hasFailed == true {
-					promise.fail(SSHConnectionError.authenticationFailed)
-					return promise.futureResult
-				}
-
-				authDelegate?.onExhausted = {
-					promise.fail(SSHConnectionError.authenticationFailed)
-				}
-
-				sshHandler.createChannel(promise) { childChannel, channelType in
-					self.log("child channel init, type=\(channelType)")
-					guard channelType == .session else {
-						return childChannel.eventLoop.makeFailedFuture(SSHConnectionError.invalidChannelType)
+					if authDelegate?.hasFailed == true {
+						promise.fail(SSHConnectionError.authenticationFailed)
+						return promise.futureResult
 					}
 
-					let childID = ObjectIdentifier(childChannel)
-					return childChannel.pipeline.addHandlers([
-						SSHChannelDataHandler(onData: onData),
-						SSHChannelLifecycleHandler(
-							isDisconnecting: { [weak self] in self?.isDisconnecting ?? false },
-							onClose: { [weak self] reason in
-								guard let self,
-								      let activeChannel = self.sshChildChannel,
-								      ObjectIdentifier(activeChannel) == childID
-								else { return }
-								self.sshChildChannel = nil
-								self.channel = nil
-								self.authDelegate = nil
-								onClose(reason)
-							}
-						),
-					])
-				}
-				return promise.futureResult
-			},
-			on: channel.eventLoop,
-			timeout: Self.sessionStartupTimeout,
-			error: .timedOut("establishing the SSH session")
-		).get()
+					authDelegate?.onExhausted = {
+						promise.fail(SSHConnectionError.authenticationFailed)
+					}
+
+					sshHandler.createChannel(promise) { childChannel, channelType in
+						self.diagnostic("sessionChannel.child.init")
+						self.log("child channel init, type=\(channelType)")
+						guard channelType == .session else {
+							return childChannel.eventLoop.makeFailedFuture(SSHConnectionError.invalidChannelType)
+						}
+
+						let childID = ObjectIdentifier(childChannel)
+						return childChannel.pipeline.addHandlers([
+							SSHChannelDataHandler(onData: onData),
+							SSHChannelLifecycleHandler(
+								isDisconnecting: { [weak self] in self?.isDisconnecting ?? false },
+								onClose: { [weak self] reason in
+									guard let self,
+									      let activeChannel = self.sshChildChannel,
+									      ObjectIdentifier(activeChannel) == childID
+									else { return }
+									self.sshChildChannel = nil
+									self.channel = nil
+									self.authDelegate = nil
+									onClose(reason)
+								}
+							),
+						])
+					}
+					return promise.futureResult
+				},
+				on: channel.eventLoop,
+				timeout: Self.sessionStartupTimeout,
+				error: .timedOut("establishing the SSH session")
+			).get()
+			diagnostic("sessionChannel.open.success")
+			return childChannel
+		} catch {
+			diagnostic("sessionChannel.open.failure", Self.sanitizedDiagnosticMetadata(for: error))
+			throw error
+		}
 	}
 
 	private func requestPTY(on childChannel: Channel, size: TerminalWindowSize) async throws {
@@ -1052,32 +1100,53 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 			terminalPixelHeight: size.pixelHeight,
 			terminalModes: .init([:])
 		)
-		try await withTimeout(
-			childChannel.triggerUserOutboundEvent(request),
-			on: childChannel.eventLoop,
-			timeout: Self.channelRequestTimeout,
-			error: .timedOut("allocating a remote PTY")
-		).get()
+		diagnostic("pty.request.begin")
+		do {
+			try await withTimeout(
+				childChannel.triggerUserOutboundEvent(request),
+				on: childChannel.eventLoop,
+				timeout: Self.channelRequestTimeout,
+				error: .timedOut("allocating a remote PTY")
+			).get()
+			diagnostic("pty.request.success")
+		} catch {
+			diagnostic("pty.request.failure", Self.sanitizedDiagnosticMetadata(for: error))
+			throw error
+		}
 	}
 
 	private func requestExec(_ command: String, on childChannel: Channel) async throws {
 		let request = SSHChannelRequestEvent.ExecRequest(command: command, wantReply: true)
-		try await withTimeout(
-			childChannel.triggerUserOutboundEvent(request),
-			on: childChannel.eventLoop,
-			timeout: Self.channelRequestTimeout,
-			error: .timedOut("starting the remote shell")
-		).get()
+		diagnostic("exec.request.begin")
+		do {
+			try await withTimeout(
+				childChannel.triggerUserOutboundEvent(request),
+				on: childChannel.eventLoop,
+				timeout: Self.channelRequestTimeout,
+				error: .timedOut("starting the remote shell")
+			).get()
+			diagnostic("exec.request.success")
+		} catch {
+			diagnostic("exec.request.failure", Self.sanitizedDiagnosticMetadata(for: error))
+			throw error
+		}
 	}
 
 	private func requestShell(on childChannel: Channel) async throws {
 		let request = SSHChannelRequestEvent.ShellRequest(wantReply: true)
-		try await withTimeout(
-			childChannel.triggerUserOutboundEvent(request),
-			on: childChannel.eventLoop,
-			timeout: Self.channelRequestTimeout,
-			error: .timedOut("starting the remote shell")
-		).get()
+		diagnostic("shell.request.begin")
+		do {
+			try await withTimeout(
+				childChannel.triggerUserOutboundEvent(request),
+				on: childChannel.eventLoop,
+				timeout: Self.channelRequestTimeout,
+				error: .timedOut("starting the remote shell")
+			).get()
+			diagnostic("shell.request.success")
+		} catch {
+			diagnostic("shell.request.failure", Self.sanitizedDiagnosticMetadata(for: error))
+			throw error
+		}
 	}
 
 	private func closeActiveStartupChannelIfNeeded() {
@@ -1190,6 +1259,27 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		return promise.futureResult
 	}
 
+	private func boolString(_ value: Bool) -> String {
+		value ? "true" : "false"
+	}
+
+	private func diagnostic(_ event: String, _ metadata: [String: String] = [:]) {
+		onDiagnosticEvent(event, metadata)
+	}
+
+	private static func sanitizedDiagnosticMetadata(for error: Error) -> [String: String] {
+		var metadata: [String: String] = [
+			"errorType": String(reflecting: type(of: error)),
+		]
+		if let sshError = error as? SSHConnectionError {
+			metadata["errorDescription"] = sshError.description
+		}
+		let nsError = error as NSError
+		metadata["errorDomain"] = nsError.domain
+		metadata["errorCode"] = String(nsError.code)
+		return metadata
+	}
+
 	private func log(_ message: String) {
 		print("[SSH] \(message)")
 		onEvent(message)
@@ -1199,6 +1289,15 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		isDisconnecting = true
 		let childChannel = sshChildChannel
 		let parentChannel = channel
+		if parentChannel != nil || childChannel != nil {
+			diagnostic(
+				"disconnect",
+				[
+					"hadParentChannel": boolString(parentChannel != nil),
+					"hadChildChannel": boolString(childChannel != nil),
+				]
+			)
+		}
 		sshChildChannel = nil
 		channel = nil
 		authDelegate = nil
@@ -1223,15 +1322,22 @@ private final nonisolated class PasswordOrNoneAuthDelegate: NIOSSHClientUserAuth
 	private let username: String
 	private let password: String
 	private let logger: @Sendable (String) -> Void
+	private let diagnostic: @Sendable (String, [String: String]) -> Void
 	private var attemptedNone = false
 	private var attemptedPassword = false
 	var hasFailed = false
 	var onExhausted: (() -> Void)?
 
-	init(username: String, password: String, logger: @escaping @Sendable (String) -> Void) {
+	init(
+		username: String,
+		password: String,
+		logger: @escaping @Sendable (String) -> Void,
+		diagnostic: @escaping @Sendable (String, [String: String]) -> Void
+	) {
 		self.username = username
 		self.password = password
 		self.logger = logger
+		self.diagnostic = diagnostic
 	}
 
 	func nextAuthenticationType(
@@ -1239,11 +1345,20 @@ private final nonisolated class PasswordOrNoneAuthDelegate: NIOSSHClientUserAuth
 		nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
 	) {
 		logger("auth callback: available=\(availableMethods) attemptedNone=\(attemptedNone) attemptedPassword=\(attemptedPassword)")
+		diagnostic(
+			"auth.challenge",
+			[
+				"passwordAvailable": Self.boolString(availableMethods.contains(.password)),
+				"attemptedNone": Self.boolString(attemptedNone),
+				"attemptedPassword": Self.boolString(attemptedPassword),
+			]
+		)
 
 		// Always try "none" first — Tailscale SSH accepts this
 		// when the client is an authorized tailnet node.
 		if !attemptedNone {
 			attemptedNone = true
+			diagnostic("auth.try.none", [:])
 			logger("trying none auth")
 			nextChallengePromise.succeed(.init(
 				username: username,
@@ -1256,6 +1371,7 @@ private final nonisolated class PasswordOrNoneAuthDelegate: NIOSSHClientUserAuth
 		// Fall back to password if available
 		if !attemptedPassword, !password.isEmpty, availableMethods.contains(.password) {
 			attemptedPassword = true
+			diagnostic("auth.try.password", [:])
 			logger("trying password auth")
 			nextChallengePromise.succeed(.init(
 				username: username,
@@ -1266,25 +1382,36 @@ private final nonisolated class PasswordOrNoneAuthDelegate: NIOSSHClientUserAuth
 		}
 
 		// No more methods
+		diagnostic("auth.exhausted", [:])
 		logger("no more auth methods, failing")
 		hasFailed = true
 		onExhausted?()
 		onExhausted = nil
 		nextChallengePromise.fail(SSHConnectionError.authenticationFailed)
 	}
+
+	private static func boolString(_ value: Bool) -> String {
+		value ? "true" : "false"
+	}
 }
 
 private final nonisolated class AcceptAllHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate, @unchecked Sendable {
 	private let logger: @Sendable (String) -> Void
+	private let diagnostic: @Sendable (String, [String: String]) -> Void
 
-	init(logger: @escaping @Sendable (String) -> Void) {
+	init(
+		logger: @escaping @Sendable (String) -> Void,
+		diagnostic: @escaping @Sendable (String, [String: String]) -> Void
+	) {
 		self.logger = logger
+		self.diagnostic = diagnostic
 	}
 
 	func validateHostKey(
 		hostKey: NIOSSHPublicKey,
 		validationCompletePromise: EventLoopPromise<Void>
 	) {
+		diagnostic("hostKey.accepted", [:])
 		logger("accepting host key: \(hostKey)")
 		validationCompletePromise.succeed(())
 	}

@@ -25,6 +25,7 @@ final class SSHTerminalSession {
 	/// Called with raw bytes received from the remote shell.
 	var onRemoteOutput: ((Data) -> Void)?
 	var onEvent: ((String) -> Void)?
+	var onDiagnosticEvent: ((String, [String: String]) -> Void)?
 
 	/// Whether the terminal tab is the selected foreground tab.
 	private(set) var isForeground = true
@@ -48,6 +49,11 @@ final class SSHTerminalSession {
 			onEvent: { message in
 				DispatchQueue.main.async {
 					relay.session?.onEvent?(message)
+				}
+			},
+			onDiagnosticEvent: { event, metadata in
+				DispatchQueue.main.async {
+					relay.session?.onDiagnosticEvent?(event, metadata)
 				}
 			}
 		)

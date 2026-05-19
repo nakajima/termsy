@@ -710,6 +710,51 @@ struct TermsyTests {
 	}
 
 	@MainActor
+	@Test func appActivationStartsReconnectOnlyForSelectedTab() {
+		let firstSession = Session(
+			hostname: "one.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let secondSession = Session(
+			hostname: "two.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let coordinator = ViewCoordinator()
+		defer {
+			for tab in coordinator.tabs {
+				tab.close()
+			}
+		}
+		coordinator.openTab(for: firstSession)
+		let backgroundTab = coordinator.tabs[0]
+		coordinator.openTab(for: secondSession)
+		let selectedTab = coordinator.tabs[1]
+		backgroundTab.isConnected = true
+		selectedTab.isConnected = true
+		let oldBackgroundView = backgroundTab.terminalView
+		let oldSelectedView = selectedTab.terminalView
+
+		coordinator.appDidBecomeActive()
+
+		#expect(coordinator.selectedTab?.id == selectedTab.id)
+		#expect(selectedTab.isRestoring)
+		#expect(selectedTab.restorationMode == .backgroundReconnect)
+		#expect(selectedTab.terminalView !== oldSelectedView)
+		#expect(backgroundTab.isRestoring)
+		#expect(backgroundTab.restorationMode == .backgroundReconnect)
+		#expect(backgroundTab.terminalView === oldBackgroundView)
+
+		coordinator.selectTab(backgroundTab.id)
+		#expect(backgroundTab.terminalView !== oldBackgroundView)
+	}
+
+	@MainActor
 	@Test func terminalInputSendFailureUsesBackgroundRestorationReconnect() {
 		let session = Session(
 			hostname: "prod.example.com",
@@ -844,6 +889,10 @@ struct TermsyTests {
 		@MainActor
 		@Test func didMoveToWindowAppliesDisplayActivitySynchronously() {
 			let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+			defer {
+				view.stop()
+				view.removeFromSuperview()
+			}
 
 			// Mark display active before the view has a window.
 			view.setDisplayActive(true)
@@ -877,6 +926,7 @@ struct TermsyTests {
 				Issue.record("expected selected tab")
 				return
 			}
+			defer { tab.close() }
 			tab.disconnect()
 
 			guard let window = makeTestWindow() else {
