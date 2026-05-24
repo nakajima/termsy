@@ -39,6 +39,13 @@ struct TerminalOverlay: View {
 			case .connected, .awaitingPassword, .failed:
 				EmptyView()
 			}
+
+			TerminalFileDropOverlayView(
+				state: tab.fileDropOverlayState,
+				onDismissError: {
+					tab.dismissFileDropError()
+				}
+			)
 		}
 		.safeAreaInset(edge: .bottom) {
 			if showsConnectionLogToggle {
@@ -50,7 +57,7 @@ struct TerminalOverlay: View {
 				.padding(.bottom)
 			}
 		}
-		.allowsHitTesting(tab.showsConnectionLogPanel || tab.needsPassword)
+		.allowsHitTesting(tab.showsConnectionLogPanel || tab.needsPassword || tab.fileDropOverlayState.blocksInput)
 		.alert("Password Required", isPresented: .init(
 			get: { tab.needsPassword && !tab.isLocalShell },
 			set: { if !$0 { tab.needsPassword = false } }

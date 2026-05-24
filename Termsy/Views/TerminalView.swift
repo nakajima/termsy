@@ -11,6 +11,7 @@
 
 	import TermsyGhosttyCore
 	import UIKit
+	import UniformTypeIdentifiers
 
 	@MainActor
 	protocol TerminalViewDelegate: AnyObject {
@@ -23,10 +24,12 @@
 		func terminalView(_ view: TerminalView, requestsMoveTabSelectionBy offset: Int)
 		func terminalViewRequestsShowSettings(_ view: TerminalView)
 		func terminalViewShouldDismissAuxiliaryUI(_ view: TerminalView) -> Bool
+		func terminalView(_ view: TerminalView, didReceiveFileDropURLs urls: [URL])
+		func terminalView(_ view: TerminalView, didFailFileDropWithMessage message: String)
 	}
 
 	@MainActor
-	final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate, UIGestureRecognizerDelegate {
+	final class TerminalView: UIView, UIKeyInput, UIContextMenuInteractionDelegate, UIGestureRecognizerDelegate, UIDropInteractionDelegate {
 		enum PresentationMode {
 			case interactive
 			case passivePreview
@@ -87,6 +90,7 @@
 				reloadInputViews()
 			}
 		}
+		private var isTerminalInputBlocked = false
 
 		private let keyboardAccessoryBar = TerminalKeyboardAccessoryView(theme: TerminalTheme.current.appTheme)
 		private var firstResponderTask: Task<Void, Never>?
@@ -262,6 +266,7 @@
 			}
 
 			addInteraction(UIContextMenuInteraction(delegate: self))
+			addInteraction(UIDropInteraction(delegate: self))
 		}
 
 		@available(*, unavailable)
@@ -578,6 +583,21 @@
 
 		func restoreKeyboardFocusIfNeeded(retryCount: Int = 20) {
 			requestFirstResponder(retryCount: retryCount)
+		}
+
+		func setTerminalInputBlocked(_ isBlocked: Bool) {
+			guard isTerminalInputBlocked != isBlocked else { return }
+			isTerminalInputBlocked = isBlocked
+			if isBlocked {
+				keyRepeatController.reset()
+				clearArmedSoftwareModifiers()
+			}
+		}
+
+		func insertDirectTerminalText(_ text: String) {
+			guard !text.isEmpty else { return }
+			restoreKeyboardFocusIfNeeded(retryCount: 10)
+			sendSoftwarePlainText(text)
 		}
 
 		func recoverDisplayAfterAppActivation(retryCount: Int = 30) {
@@ -1120,7 +1140,7 @@
 			case #selector(copy(_:)):
 				return hasTerminalSelection
 			case #selector(paste(_:)):
-				return canPasteFromClipboard
+				return !isTerminalInputBlocked && canPasteFromClipboard
 			case #selector(selectAll(_:)):
 				return surface != nil
 			default:
@@ -1133,6 +1153,7 @@
 		}
 
 		override func paste(_: Any?) {
+			guard !isTerminalInputBlocked else { return }
 			_ = performPasteFromClipboard()
 		}
 
@@ -1143,6 +1164,7 @@
 		// MARK: - UIKeyInput
 
 		func insertText(_ text: String) {
+			guard !isTerminalInputBlocked else { return }
 			guard surface != nil else { return }
 			guard !keyRepeatController.hasActiveKey else { return }
 
@@ -1165,6 +1187,7 @@
 		}
 
 		func deleteBackward() {
+			guard !isTerminalInputBlocked else { return }
 			guard surface != nil else { return }
 			guard !keyRepeatController.hasActiveKey else { return }
 			sendSoftwareSpecialKey(macKeycode: 0x0033) // Backspace
@@ -1202,6 +1225,7 @@
 		}
 
 		private func handleKeyboardAccessoryAction(_ action: TerminalKeyboardAccessoryView.Action) {
+			guard !isTerminalInputBlocked else { return }
 			requestFirstResponder()
 			switch action {
 			case .control:
@@ -1303,6 +1327,10 @@
 		// MARK: - Hardware Keyboard
 
 		override func pressesBegan(_ presses: Set<UIPress>, with _: UIPressesEvent?) {
+			guard !isTerminalInputBlocked else {
+				keyRepeatController.reset()
+				return
+			}
 			for press in presses {
 				guard let key = press.key, let surface else { continue }
 				let keyCode = UInt16(key.keyCode.rawValue)
@@ -1323,6 +1351,10 @@
 		}
 
 		override func pressesEnded(_ presses: Set<UIPress>, with _: UIPressesEvent?) {
+			guard !isTerminalInputBlocked else {
+				keyRepeatController.reset()
+				return
+			}
 			for press in presses {
 				guard let key = press.key, let surface else { continue }
 				let keyCode = UInt16(key.keyCode.rawValue)
@@ -1456,6 +1488,57 @@
 			guard let surface else { return false }
 			return action.withCString { cString in
 				ghostty_surface_binding_action(surface, cString, UInt(action.utf8.count))
+			}
+		}
+
+		func dropInteraction(_: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
+			allDropItemsAreFileURLs(session)
+		}
+
+		func dropInteraction(
+			_: UIDropInteraction,
+			sessionDidUpdate session: UIDropSession
+		) -> UIDropProposal {
+			guard allDropItemsAreFileURLs(session) else {
+				return UIDropProposal(operation: .forbidden)
+			}
+			return UIDropProposal(operation: .copy)
+		}
+
+		func dropInteraction(_: UIDropInteraction, performDrop session: UIDropSession) {
+			let providers = session.items.map(\.itemProvider)
+			guard allDropItemsAreFileURLs(session) else {
+				delegate?.terminalView(self, didFailFileDropWithMessage: TerminalFileDropError.noFileURLs.localizedDescription)
+				return
+			}
+			restoreKeyboardFocusIfNeeded(retryCount: 10)
+			loadDroppedFileURLs(from: providers)
+		}
+
+		private func allDropItemsAreFileURLs(_ session: UIDropSession) -> Bool {
+			!session.items.isEmpty && session.items.allSatisfy {
+				$0.itemProvider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+			}
+		}
+
+		private func loadDroppedFileURLs(from providers: [NSItemProvider]) {
+			let collector = TerminalDroppedFileURLCollector(count: providers.count) { [weak self] loadedURLs, message in
+				Task { @MainActor [weak self] in
+					guard let self else { return }
+					if let message {
+						self.delegate?.terminalView(self, didFailFileDropWithMessage: message)
+					} else if !loadedURLs.isEmpty {
+						self.delegate?.terminalView(self, didReceiveFileDropURLs: loadedURLs)
+					} else {
+						self.delegate?.terminalView(self, didFailFileDropWithMessage: TerminalFileDropError.noFileURLs.localizedDescription)
+					}
+				}
+			}
+
+			for (index, provider) in providers.enumerated() {
+				provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
+					collector.finish(index: index, item: item, error: error)
+				}
 			}
 		}
 
@@ -1990,6 +2073,56 @@
 				? theme.primaryTextUIColor
 				: theme.secondaryTextUIColor
 			button.configuration = configuration
+		}
+	}
+
+	private final class TerminalDroppedFileURLCollector: @unchecked Sendable {
+		private let lock = NSLock()
+		private nonisolated(unsafe) var remaining: Int
+		private nonisolated(unsafe) var urls: [URL?]
+		private nonisolated(unsafe) var failureMessage: String?
+		private let completion: @Sendable ([URL], String?) -> Void
+
+		nonisolated init(
+			count: Int,
+			completion: @escaping @Sendable ([URL], String?) -> Void
+		) {
+			self.remaining = count
+			self.urls = Array<URL?>(repeating: nil, count: count)
+			self.completion = completion
+		}
+
+		nonisolated func finish(index: Int, item: NSSecureCoding?, error: Error?) {
+			let shouldFinish: Bool
+			let loadedURLs: [URL]
+			let message: String?
+
+			lock.lock()
+			if let error {
+				failureMessage = "Could not load dropped file: \(error.localizedDescription)"
+			} else if let url = Self.fileURL(from: item), url.isFileURL {
+				urls[index] = url
+			} else {
+				failureMessage = "Drop contains no file URLs."
+			}
+
+			remaining -= 1
+			shouldFinish = remaining == 0
+			loadedURLs = shouldFinish ? urls.compactMap { $0 } : []
+			message = shouldFinish ? failureMessage : nil
+			lock.unlock()
+
+			if shouldFinish {
+				completion(loadedURLs, message)
+			}
+		}
+
+		private nonisolated static func fileURL(from item: NSSecureCoding?) -> URL? {
+			if let url = item as? URL { return url }
+			if let url = item as? NSURL { return url as URL }
+			if let data = item as? Data { return URL(dataRepresentation: data, relativeTo: nil) }
+			if let string = item as? String { return URL(string: string) }
+			return nil
 		}
 	}
 

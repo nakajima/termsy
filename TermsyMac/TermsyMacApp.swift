@@ -31,8 +31,13 @@
 			MacTerminalWindowManager.shared.openInitialWindowIfNeeded()
 		}
 
+		func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
+			MacTerminalWindowManager.shared.beginApplicationTermination()
+			return .terminateNow
+		}
+
 		func applicationWillTerminate(_: Notification) {
-			MacTerminalWindowManager.shared.persistWindowLayoutNow()
+			MacTerminalWindowManager.shared.beginApplicationTermination()
 		}
 
 		func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

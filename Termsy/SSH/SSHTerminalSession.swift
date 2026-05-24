@@ -103,6 +103,26 @@ final class SSHTerminalSession {
 		connection.disconnect()
 	}
 
+	func prepareFileDropDirectory(dropID: String) async throws -> String {
+		try await connection.prepareFileDropDirectory(dropID: dropID)
+	}
+
+	func uploadFileForDrop(
+		localURL: URL,
+		remoteDirectory: String,
+		remoteFileName: String,
+		posixPermissions: Int,
+		onProgress: @escaping @Sendable (Int64) -> Void
+	) async throws -> String {
+		try await connection.uploadFileForDrop(
+			localURL: localURL,
+			remoteDirectory: remoteDirectory,
+			remoteFileName: remoteFileName,
+			posixPermissions: posixPermissions,
+			onProgress: onProgress
+		)
+	}
+
 	// MARK: - Foreground / Background
 
 	func enterForeground() {

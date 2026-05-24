@@ -13,6 +13,8 @@
 		var onRenameTabRequest: (() -> Void)?
 		var onStartRecordingRequest: (() -> Void)?
 		var onStopRecordingRequest: (() -> Void)?
+		var onFileDrop: (([URL]) -> Void)?
+		var onFileDropFailure: ((String) -> Void)?
 		var isRecording = false
 
 		private enum ClipboardConfirmationAction {
@@ -39,6 +41,7 @@
 		private var markedTextState = MacMarkedTextState()
 		private var handledMarkedTextCommand = false
 		private var isDisplayActive = false
+		private var isTerminalInputBlocked = false
 		private var lastMouseLocation: CGPoint?
 
 		override var acceptsFirstResponder: Bool { true }
@@ -47,6 +50,7 @@
 		override init(frame frameRect: NSRect) {
 			super.init(frame: frameRect)
 			wantsLayer = true
+			registerForDraggedTypes([.fileURL])
 			applyTheme(TerminalTheme.current.appTheme)
 		}
 
@@ -190,6 +194,23 @@
 		func setDisplayActive(_ isActive: Bool) {
 			isDisplayActive = isActive
 			applyDisplayActivity()
+		}
+
+		func setTerminalInputBlocked(_ isBlocked: Bool) {
+			guard isTerminalInputBlocked != isBlocked else { return }
+			isTerminalInputBlocked = isBlocked
+			if isBlocked {
+				keyTextAccumulator = nil
+				handledMarkedTextCommand = false
+				markedTextState.clear()
+				sendPreedit("")
+			}
+		}
+
+		func insertDirectTerminalText(_ text: String) {
+			guard !text.isEmpty else { return }
+			window?.makeFirstResponder(self)
+			sendDirectText(text)
 		}
 
 		private func presentNextClipboardConfirmationIfNeeded() {
@@ -548,6 +569,7 @@
 		}
 
 		override func keyDown(with event: NSEvent) {
+			guard !isTerminalInputBlocked else { return }
 			guard let surface else {
 				interpretKeyEvents([event])
 				return
@@ -619,10 +641,12 @@
 		}
 
 		override func keyUp(with event: NSEvent) {
+			guard !isTerminalInputBlocked else { return }
 			_ = sendKeyAction(GHOSTTY_ACTION_RELEASE, event: event)
 		}
 
 		override func flagsChanged(with event: NSEvent) {
+			guard !isTerminalInputBlocked else { return }
 			guard !markedTextState.hasMarkedText else { return }
 			guard let action = modifierAction(for: event) else { return }
 			_ = sendKeyAction(action, event: event)
@@ -701,12 +725,44 @@
 			)
 		}
 
+		override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+			droppedFileURLs(from: sender).isEmpty ? [] : .copy
+		}
+
+		override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+			droppedFileURLs(from: sender).isEmpty ? [] : .copy
+		}
+
+		override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+			let urls = droppedFileURLs(from: sender)
+			guard !urls.isEmpty else {
+				onFileDropFailure?(TerminalFileDropError.noFileURLs.localizedDescription)
+				return false
+			}
+			window?.makeFirstResponder(self)
+			onFileDrop?(urls)
+			return true
+		}
+
+		private func droppedFileURLs(from draggingInfo: NSDraggingInfo) -> [URL] {
+			let options: [NSPasteboard.ReadingOptionKey: Any] = [
+				.urlReadingFileURLsOnly: true,
+			]
+			let objects = draggingInfo.draggingPasteboard.readObjects(
+				forClasses: [NSURL.self],
+				options: options
+			) ?? []
+			return objects.compactMap { object in
+				(object as? NSURL).map { $0 as URL }
+			}
+		}
+
 		func canPerformAction(_ action: Selector, withSender _: Any?) -> Bool {
 			switch action {
 			case #selector(copy(_:)):
 				return hasTerminalSelection
 			case #selector(paste(_:)):
-				return canPasteFromClipboard
+				return !isTerminalInputBlocked && canPasteFromClipboard
 			case #selector(selectAll(_:)):
 				return surface != nil
 			case #selector(renameTab(_:)):
@@ -725,6 +781,7 @@
 		}
 
 		@IBAction func paste(_: Any?) {
+			guard !isTerminalInputBlocked else { return }
 			_ = performBindingAction("paste_from_clipboard")
 		}
 
@@ -770,6 +827,7 @@
 
 	extension MacTerminalView: @preconcurrency NSTextInputClient {
 		func insertText(_ string: Any, replacementRange _: NSRange) {
+			guard !isTerminalInputBlocked else { return }
 			let text: String
 			if let attributed = string as? NSAttributedString {
 				text = attributed.string

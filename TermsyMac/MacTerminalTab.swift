@@ -22,6 +22,7 @@
 		var hasStarted = false
 		private(set) var isRecording = false
 		private(set) var recordingDataByteCount: Int64 = 0
+		var fileDropOverlayState = TerminalFileDropOverlayState.idle
 		var onRequestClose: (() -> Void)?
 		var onRequestRename: (() -> Void)?
 		var onRequestStartRecording: (() -> Void)?
@@ -34,6 +35,8 @@
 		@ObservationIgnored private var terminalDidFinish = false
 		@ObservationIgnored private var terminalRecorder: TerminalSessionRecorder?
 		@ObservationIgnored private var shellActivityState: ShellActivityState?
+		@ObservationIgnored private var fileDropBatches: [TerminalFileDropBatch] = []
+		@ObservationIgnored private var fileDropTask: Task<Void, Never>?
 		@ObservationIgnored private static var didLogTerminalIOActivation = false
 
 		init(source: Source) {
@@ -145,6 +148,7 @@
 
 		func close() {
 			_ = stopRecording()
+			cancelFileDropQueue()
 			acceptsTerminalOutput = false
 			terminalView.stop()
 			localShellSession?.stop()
@@ -246,7 +250,14 @@
 			terminalView.onStopRecordingRequest = { [weak self] in
 				self?.onRequestStopRecording?()
 			}
+			terminalView.onFileDrop = { [weak self] urls in
+				self?.handleDroppedFileURLs(urls)
+			}
+			terminalView.onFileDropFailure = { [weak self] message in
+				self?.handleFileDropFailure(message: message)
+			}
 			terminalView.isRecording = isRecording
+			terminalView.setTerminalInputBlocked(fileDropOverlayState.blocksInput)
 		}
 
 		private func configureTransport() {
@@ -317,6 +328,156 @@
 			sshSession?.resize(size)
 		}
 
+		private func handleDroppedFileURLs(_ urls: [URL]) {
+			guard !urls.isEmpty else { return }
+			switch source {
+			case .localShell:
+				insertLocalShellDroppedPaths(urls)
+			case .ssh:
+				enqueueRemoteFileDrop(urls: urls)
+			}
+		}
+
+		private func handleFileDropFailure(message: String) {
+			setFileDropOverlayState(.error(message))
+		}
+
+		func dismissFileDropError() {
+			guard fileDropOverlayState.errorMessage != nil else { return }
+			setFileDropOverlayState(.idle)
+		}
+
+		private func insertLocalShellDroppedPaths(_ urls: [URL]) {
+			do {
+				let text = try TerminalFileDropSupport.localShellInsertText(for: urls)
+				terminalView.insertDirectTerminalText(text)
+			} catch {
+				setFileDropOverlayState(.error(error.localizedDescription))
+			}
+		}
+
+		private func enqueueRemoteFileDrop(urls: [URL]) {
+			guard fileDropOverlayState.errorMessage == nil else { return }
+			fileDropBatches.append(TerminalFileDropBatch(urls: urls))
+			refreshQueuedFileDropCount()
+			startRemoteFileDropQueueIfNeeded()
+		}
+
+		private func startRemoteFileDropQueueIfNeeded() {
+			guard fileDropTask == nil else { return }
+			fileDropTask = Task { @MainActor [weak self] in
+				await self?.processRemoteFileDropQueue()
+			}
+		}
+
+		private func processRemoteFileDropQueue() async {
+			defer { fileDropTask = nil }
+			while !fileDropBatches.isEmpty {
+				let batch = fileDropBatches.removeFirst()
+				do {
+					try await uploadRemoteFileDropBatch(batch)
+				} catch {
+					fileDropBatches.removeAll()
+					setFileDropOverlayState(.error(error.localizedDescription))
+					return
+				}
+			}
+			setFileDropOverlayState(.idle)
+		}
+
+		private func uploadRemoteFileDropBatch(_ batch: TerminalFileDropBatch) async throws {
+			guard let sshSession, sshSession.isActive else { throw TerminalFileDropError.notConnected }
+			let prepared = try TerminalFileDropSupport.prepareSSHUploadBatch(urls: batch.urls)
+			defer { prepared.stopAccessingSecurityScopedResources() }
+
+			let totalBytes = prepared.files.reduce(Int64(0)) { $0 + max($1.byteCount, 0) }
+			updateFileDropProgress(
+				fileCount: prepared.files.count,
+				totalBytes: totalBytes,
+				completedBytes: 0,
+				currentFileName: prepared.files.first?.displayName
+			)
+
+			let remoteDirectory = try await sshSession.prepareFileDropDirectory(dropID: batch.id)
+			var remotePaths: [String] = []
+			var completedBytes: Int64 = 0
+
+			for file in prepared.files {
+				try Task.checkCancellation()
+				let completedBeforeFile = completedBytes
+				updateFileDropProgress(
+					fileCount: prepared.files.count,
+					totalBytes: totalBytes,
+					completedBytes: completedBeforeFile,
+					currentFileName: file.displayName
+				)
+				let remotePath = try await sshSession.uploadFileForDrop(
+					localURL: file.sourceURL,
+					remoteDirectory: remoteDirectory,
+					remoteFileName: file.remoteFileName,
+					posixPermissions: file.posixPermissions,
+					onProgress: { [weak self] uploadedBytes in
+						Task { @MainActor [weak self] in
+							self?.updateFileDropProgress(
+								fileCount: prepared.files.count,
+								totalBytes: totalBytes,
+								completedBytes: completedBeforeFile + min(uploadedBytes, max(file.byteCount, 0)),
+								currentFileName: file.displayName
+							)
+						}
+					}
+				)
+				completedBytes += max(file.byteCount, 0)
+				remotePaths.append(remotePath)
+				updateFileDropProgress(
+					fileCount: prepared.files.count,
+					totalBytes: totalBytes,
+					completedBytes: completedBytes,
+					currentFileName: file.displayName
+				)
+			}
+
+			terminalView.insertDirectTerminalText(TerminalFileDropSupport.shellQuotedArgumentList(remotePaths))
+		}
+
+		private func updateFileDropProgress(
+			fileCount: Int,
+			totalBytes: Int64,
+			completedBytes: Int64,
+			currentFileName: String?
+		) {
+			setFileDropOverlayState(.uploading(
+				activeFileCount: fileCount,
+				queuedBatchCount: fileDropBatches.count,
+				completedBytes: completedBytes,
+				totalBytes: totalBytes,
+				currentFileName: currentFileName
+			))
+		}
+
+		private func refreshQueuedFileDropCount() {
+			guard fileDropOverlayState.isUploading else { return }
+			setFileDropOverlayState(.uploading(
+				activeFileCount: fileDropOverlayState.activeFileCount,
+				queuedBatchCount: fileDropBatches.count,
+				completedBytes: fileDropOverlayState.completedBytes,
+				totalBytes: fileDropOverlayState.totalBytes,
+				currentFileName: fileDropOverlayState.currentFileName
+			))
+		}
+
+		private func setFileDropOverlayState(_ state: TerminalFileDropOverlayState) {
+			fileDropOverlayState = state
+			terminalView.setTerminalInputBlocked(state.blocksInput)
+		}
+
+		private func cancelFileDropQueue() {
+			fileDropTask?.cancel()
+			fileDropTask = nil
+			fileDropBatches.removeAll()
+			setFileDropOverlayState(.idle)
+		}
+
 		private func handleLocalShellClose(_ reason: LocalShellSession.CloseReason) {
 			hasStarted = false
 			acceptsTerminalOutput = false
@@ -382,8 +543,32 @@
 			)
 		}
 
+		var isActive: Bool {
+			sshSession.connection.isActive
+		}
+
 		func write(_ data: Data) {
 			sshSession.connection.send(data)
+		}
+
+		func prepareFileDropDirectory(dropID: String) async throws -> String {
+			try await sshSession.prepareFileDropDirectory(dropID: dropID)
+		}
+
+		func uploadFileForDrop(
+			localURL: URL,
+			remoteDirectory: String,
+			remoteFileName: String,
+			posixPermissions: Int,
+			onProgress: @escaping @Sendable (Int64) -> Void
+		) async throws -> String {
+			try await sshSession.uploadFileForDrop(
+				localURL: localURL,
+				remoteDirectory: remoteDirectory,
+				remoteFileName: remoteFileName,
+				posixPermissions: posixPermissions,
+				onProgress: onProgress
+			)
 		}
 
 		func resize(_ size: TerminalWindowSize) {

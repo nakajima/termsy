@@ -12,6 +12,7 @@ import SwiftUI
 	import AppKit
 #elseif canImport(UIKit)
 	import UIKit
+	import UniformTypeIdentifiers
 #endif
 
 struct ContentView: View {
@@ -48,6 +49,20 @@ struct ContentView: View {
 						.padding(.top, 44)
 					TabBarRepresentable()
 						.frame(height: 44)
+					#if canImport(UIKit)
+						if launchConfiguration.showsFileDropUITestFixtures {
+							VStack {
+								HStack {
+									TerminalFileDropUITestFixturesView()
+										.padding(.top, 60)
+										.padding(.leading, 16)
+									Spacer()
+								}
+								Spacer()
+							}
+							.zIndex(20)
+						}
+					#endif
 				}
 				.termsyTerminalSystemGestureBehavior()
 			}
@@ -182,6 +197,8 @@ struct ContentView: View {
 		case .sessionPicker:
 			openScreenshotTerminal(using: seededSessions, readinessLabel: "session-picker")
 			coordinator.isShowingSessionPicker = true
+		case .fileDrop:
+			openFileDropUITestTerminal(using: seededSessions, readinessLabel: "file-drop")
 		}
 	}
 
@@ -243,7 +260,70 @@ struct ContentView: View {
 			announceScreenshotReadiness(readinessLabel)
 		#endif
 	}
+
+	private func openFileDropUITestTerminal(using sessions: [Session], readinessLabel: String) {
+		guard let primarySession = sessions.first(where: { $0.hostname == AppStoreScreenshotFixtures.primaryHostname }) ?? sessions.first else {
+			return
+		}
+
+		coordinator.openPassivePreviewTab(
+			for: primarySession,
+			transcript: AppStoreScreenshotFixtures.terminalTranscript,
+			screenshotReadyLabel: readinessLabel
+		)
+	}
 }
+
+#if canImport(UIKit)
+	private struct TerminalFileDropUITestFixturesView: View {
+		var body: some View {
+			HStack(spacing: 10) {
+				dragSource(
+					title: "File URL",
+					identifier: "uitest.fileDrop.fileSource",
+					itemProvider: Self.fileItemProvider
+				)
+				dragSource(
+					title: "Text",
+					identifier: "uitest.fileDrop.textSource",
+					itemProvider: Self.textItemProvider
+				)
+			}
+		}
+
+		private func dragSource(
+			title: String,
+			identifier: String,
+			itemProvider: @escaping () -> NSItemProvider
+		) -> some View {
+			Text(title)
+				.font(.caption.weight(.semibold))
+				.foregroundStyle(.black)
+				.padding(.horizontal, 12)
+				.padding(.vertical, 8)
+				.background(.yellow, in: RoundedRectangle(cornerRadius: 8))
+				.accessibilityElement(children: .ignore)
+				.accessibilityIdentifier(identifier)
+				.onDrag(itemProvider)
+		}
+
+		nonisolated private static func fileItemProvider() -> NSItemProvider {
+			let url = FileManager.default.temporaryDirectory
+				.appendingPathComponent("termsy-file-drop-ui-test.txt", isDirectory: false)
+			try? "Termsy file drop UI test\n".write(to: url, atomically: true, encoding: .utf8)
+			let provider = NSItemProvider(
+				item: url.dataRepresentation as NSData,
+				typeIdentifier: UTType.fileURL.identifier
+			)
+			provider.suggestedName = url.lastPathComponent
+			return provider
+		}
+
+		nonisolated private static func textItemProvider() -> NSItemProvider {
+			NSItemProvider(object: "not a file" as NSString)
+		}
+	}
+#endif
 
 // MARK: - Terminal Container
 

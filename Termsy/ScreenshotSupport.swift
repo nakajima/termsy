@@ -9,12 +9,14 @@ struct AppLaunchConfiguration {
 		case backgroundReconnect = "background-reconnect"
 		case sessionPicker = "session-picker"
 		case settings
+		case fileDrop = "file-drop"
 	}
 
 	let screenshotScenario: ScreenshotScenario?
 	let screenshotDatabasePath: String?
 	let startsTerminalRecording: Bool
 	let usesInteractiveTerminalForUITests: Bool
+	let showsFileDropUITestFixtures: Bool
 
 	static let current = AppLaunchConfiguration(environment: ProcessInfo.processInfo.environment)
 
@@ -23,6 +25,7 @@ struct AppLaunchConfiguration {
 		self.screenshotDatabasePath = environment["TERMSY_SCREENSHOT_DB_PATH"]
 		self.startsTerminalRecording = environment["TERMSY_SCREENSHOT_RECORDING"] == "1"
 		self.usesInteractiveTerminalForUITests = environment["TERMSY_UI_TEST_INTERACTIVE_TERMINAL"] == "1"
+		self.showsFileDropUITestFixtures = environment["TERMSY_UI_TEST_FILE_DROP_FIXTURES"] == "1"
 	}
 
 	var isScreenshotMode: Bool {

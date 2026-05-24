@@ -80,7 +80,15 @@
 							.stroke(theme.divider, lineWidth: 1)
 					}
 				}
+
+				TerminalFileDropOverlayView(
+					state: terminal.fileDropOverlayState,
+					onDismissError: {
+						terminal.dismissFileDropError()
+					}
+				)
 			}
+			.environment(\.appTheme, theme)
 			.frame(minWidth: 700, minHeight: 450)
 			.background(.clear)
 			.sheet(isPresented: $isShowingConnectSheet) {
@@ -107,7 +115,7 @@
 					onWindowTitleChange(terminal.windowTitle)
 				}
 			}
-			.onChange(of: window) { _ in
+			.onChange(of: window) { _, _ in
 				onWindowAppearanceChange()
 				onWindowTitleChange(terminal.windowTitle)
 			}

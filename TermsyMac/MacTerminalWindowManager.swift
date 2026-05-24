@@ -30,6 +30,7 @@
 		private var pendingTabSource: MacTerminalTab.Source?
 		private var hasOpenedInitialWindow = false
 		private var isRestoringPersistedLayout = false
+		private var isApplicationTerminating = false
 
 		private init() {}
 
@@ -97,16 +98,25 @@
 
 		func controllerDidClose(_ controller: MacTerminalWindowController) {
 			controllers.removeValue(forKey: controller.id)
+			guard !isApplicationTerminating else { return }
 			windowLayoutDidChange()
 		}
 
 		func windowLayoutDidChange() {
+			guard !isApplicationTerminating else { return }
 			refreshTabGroupObservations()
 			persistWindowLayoutIfNeeded()
 		}
 
 		func persistWindowLayoutNow() {
+			guard !isApplicationTerminating else { return }
 			persistWindowLayout()
+		}
+
+		func beginApplicationTermination() {
+			guard !isApplicationTerminating else { return }
+			persistWindowLayout()
+			isApplicationTerminating = true
 		}
 
 		func selectTabNumber(_ number: Int) {

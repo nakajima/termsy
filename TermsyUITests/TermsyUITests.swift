@@ -145,6 +145,38 @@ final class TermsyUITests: XCTestCase {
 		waitForSelected(firstTab)
 	}
 
+	@MainActor
+	func testDraggingFileURLOntoTerminalShowsDisconnectedSSHDropError() throws {
+		let app = launchFileDropUITestTerminal()
+
+		dragFileDropFixture("uitest.fileDrop.fileSource", in: app)
+
+		let errorTitle = app.staticTexts["fileDrop.error.title"]
+		XCTAssertTrue(errorTitle.waitForExistence(timeout: 8), "File drop error overlay did not appear")
+		XCTAssertEqual(errorTitle.label, "File Upload Failed")
+
+		let errorMessage = app.staticTexts["fileDrop.error.message"]
+		XCTAssertTrue(errorMessage.waitForExistence(timeout: 2), "File drop error message did not appear")
+		XCTAssertTrue(errorMessage.label.contains("SSH session is not connected."), "Unexpected file drop error: \(errorMessage.label)")
+
+		let dismissButton = app.buttons["fileDrop.error.dismiss"]
+		XCTAssertTrue(dismissButton.waitForExistence(timeout: 2), "Dismiss button did not appear")
+		dismissButton.tap()
+		XCTAssertFalse(errorTitle.waitForExistence(timeout: 2), "File drop error overlay did not dismiss")
+	}
+
+	@MainActor
+	func testDraggingTextOntoTerminalIsIgnoredByFileDropHandler() throws {
+		let app = launchFileDropUITestTerminal()
+
+		dragFileDropFixture("uitest.fileDrop.textSource", in: app)
+
+		XCTAssertFalse(
+			app.staticTexts["fileDrop.error.title"].waitForExistence(timeout: 2),
+			"Text drops should be rejected before the file-drop handler shows an error"
+		)
+	}
+
 	private func waitForSelected(
 		_ element: XCUIElement,
 		timeout: TimeInterval = 5,
@@ -155,6 +187,40 @@ final class TermsyUITests: XCTestCase {
 		let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
 		let result = XCTWaiter.wait(for: [expectation], timeout: timeout)
 		XCTAssertEqual(result, .completed, "Element did not become selected", file: file, line: line)
+	}
+
+	@MainActor
+	private func launchFileDropUITestTerminal(
+		file: StaticString = #filePath,
+		line: UInt = #line
+	) -> XCUIApplication {
+		let app = XCUIApplication()
+		configureLaunchEnvironment(for: app, scenario: "file-drop")
+		app.launchEnvironment["TERMSY_UI_TEST_FILE_DROP_FIXTURES"] = "1"
+		XCUIDevice.shared.orientation = .landscapeLeft
+		app.launch()
+		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not reach foreground", file: file, line: line)
+		XCTAssertTrue(app.otherElements["screen.terminal"].waitForExistence(timeout: 10), "Terminal screen did not appear", file: file, line: line)
+		XCTAssertTrue(app.descendants(matching: .any)["uitest.fileDrop.fileSource"].waitForExistence(timeout: 10), "File drag source did not appear", file: file, line: line)
+		XCTAssertTrue(app.descendants(matching: .any)["uitest.fileDrop.textSource"].waitForExistence(timeout: 10), "Text drag source did not appear", file: file, line: line)
+		return app
+	}
+
+	@MainActor
+	private func dragFileDropFixture(
+		_ identifier: String,
+		in app: XCUIApplication,
+		file: StaticString = #filePath,
+		line: UInt = #line
+	) {
+		let source = app.descendants(matching: .any)[identifier]
+		let terminal = app.otherElements["screen.terminal"]
+		XCTAssertTrue(source.waitForExistence(timeout: 5), "Drag source \(identifier) did not appear", file: file, line: line)
+		XCTAssertTrue(terminal.waitForExistence(timeout: 5), "Terminal screen did not appear", file: file, line: line)
+
+		let start = source.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+		let end = terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.65))
+		start.press(forDuration: 1.0, thenDragTo: end)
 	}
 
 	private enum ScreenshotPlan {
