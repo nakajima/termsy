@@ -349,9 +349,20 @@
 				ghostty_surface_set_focus(surface, false)
 			}
 			hostManagedSurface?.free()
+			removeSurfaceSublayers()
 			hostManagedSurface = nil
 			surface = nil
 			lastAppliedSurfaceMetrics = nil
+		}
+
+		private func removeSurfaceSublayers() {
+			CATransaction.begin()
+			CATransaction.setDisableActions(true)
+			layer.sublayers?.forEach { sublayer in
+				sublayer.contents = nil
+				sublayer.removeFromSuperlayer()
+			}
+			CATransaction.commit()
 		}
 
 		func feedData(_ data: Data) {

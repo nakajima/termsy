@@ -632,6 +632,12 @@ class TerminalTab: Identifiable {
 	}
 
 	private func resetSSHSessionForNewConnection(attempt: Int) -> SSHTerminalSession {
+		let newSession = replaceSSHSession(attempt: attempt)
+		logConnectionEvent("Attempt \(attempt): created fresh SSH transport")
+		return newSession
+	}
+
+	private func replaceSSHSession(attempt: Int? = nil) -> SSHTerminalSession {
 		let previousSession = sshSession
 		let terminalSize = previousSession.terminalSize
 		let wasForeground = previousSession.isForeground
@@ -649,7 +655,6 @@ class TerminalTab: Identifiable {
 		if !wasForeground {
 			newSession.enterBackground()
 		}
-		logConnectionEvent("Attempt \(attempt): created fresh SSH transport")
 		return newSession
 	}
 
@@ -769,11 +774,64 @@ class TerminalTab: Identifiable {
 		onTerminalViewReplacementRequested?()
 	}
 
+	#if os(iOS)
+		func releaseTerminalSurfaceForInactiveHost() {
+			guard !isDisplayActive else { return }
+			guard !isPassivePreview else { return }
+			guard terminalView.surface != nil else { return }
+
+			let snapshotJPEGData = terminalView.capturePersistedSnapshotJPEGData()
+			if let snapshotJPEGData {
+				session?.lastTerminalSnapshotJPEGData = snapshotJPEGData
+			}
+			let snapshot = snapshotJPEGData.flatMap(UIImage.init(data:)) ?? restorationSnapshot
+			let wasConnectionActive = connectionIsActive
+			let wasConnecting = phase == .connecting
+			let shouldReconnectOnSelection = wasConnectionActive || wasConnecting || phase == .connected || restorationMode != nil
+
+			recordConnectionDiagnosticEvent(
+				"surface.releaseInactive",
+				metadata: [
+					"hadSnapshot": snapshot != nil,
+					"wasConnectionActive": wasConnectionActive,
+					"wasConnecting": wasConnecting,
+				]
+			)
+			logConnectionEvent("Released inactive terminal surface; reconnect will resume when selected")
+
+			connectTask?.cancel()
+			connectTask = nil
+			scheduledConnectionTask?.cancel()
+			scheduledConnectionTask = nil
+
+			switch endpoint {
+			case .remote:
+				if wasConnectionActive || wasConnecting {
+					_ = replaceSSHSession()
+				}
+			case .localShell:
+				break
+			}
+
+			if phase == .connected || wasConnecting || wasConnectionActive {
+				phase = .idle
+			}
+			if shouldReconnectOnSelection {
+				beginRestoration(.backgroundReconnect, snapshot: snapshot ?? restorationSnapshot)
+			}
+			terminalView.stop()
+		}
+	#endif
+
 	func capturePersistedSnapshotJPEGData() -> Data? {
-		guard case .remote = endpoint,
-		      let jpegData = terminalView.capturePersistedSnapshotJPEGData()
-		else {
+		guard case .remote = endpoint else {
 			return nil
+		}
+		guard terminalView.surface != nil, terminalView.hasAttachedWindow else {
+			return session?.lastTerminalSnapshotJPEGData
+		}
+		guard let jpegData = terminalView.capturePersistedSnapshotJPEGData() else {
+			return session?.lastTerminalSnapshotJPEGData
 		}
 		session?.lastTerminalSnapshotJPEGData = jpegData
 		if restorationMode == .launch {

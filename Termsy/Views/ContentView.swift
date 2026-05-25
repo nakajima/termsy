@@ -332,15 +332,23 @@ private struct TerminalContainer: View {
 
 	var body: some View {
 		ZStack {
-			ForEach(coordinator.tabs) { tab in
-				let isSelected = tab.id == coordinator.selectedTabID
-				TerminalHostRepresentable(tab: tab)
-					.ignoresSafeArea(.container, edges: .bottom)
-					.opacity(isSelected ? 1 : 0)
-					.allowsHitTesting(isSelected)
-					.accessibilityHidden(!isSelected)
-					.zIndex(isSelected ? 1 : 0)
-			}
+			#if os(iOS)
+				if let selectedTab = coordinator.selectedTab {
+					TerminalHostRepresentable(tab: selectedTab)
+						.id(selectedTab.id)
+						.ignoresSafeArea(.container, edges: .bottom)
+				}
+			#else
+				ForEach(coordinator.tabs) { tab in
+					let isSelected = tab.id == coordinator.selectedTabID
+					TerminalHostRepresentable(tab: tab)
+						.ignoresSafeArea(.container, edges: .bottom)
+						.opacity(isSelected ? 1 : 0)
+						.allowsHitTesting(isSelected)
+						.accessibilityHidden(!isSelected)
+						.zIndex(isSelected ? 1 : 0)
+				}
+			#endif
 		}
 		.frame(maxWidth: .infinity, maxHeight: .infinity)
 		.accessibilityIdentifier("screen.terminal")
