@@ -86,10 +86,15 @@ struct TerminalOverlay: View {
 	private var snapshotBackdrop: some View {
 		#if canImport(UIKit)
 			if let snapshot = tab.displaySnapshot {
-				Image(uiImage: snapshot)
-					.resizable()
-					.scaledToFill()
-					.ignoresSafeArea()
+				GeometryReader { proxy in
+					Image(uiImage: snapshot)
+						.resizable()
+						.scaledToFill()
+						.frame(width: proxy.size.width, height: proxy.size.height)
+						.clipped()
+				}
+				.background(theme.background)
+				.clipped()
 			} else {
 				theme.background
 			}

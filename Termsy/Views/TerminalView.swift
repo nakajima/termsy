@@ -373,6 +373,14 @@
 			hostManagedSurface?.write(data)
 		}
 
+		func flushPendingDisplay() {
+			guard let surface else { return }
+			GhosttyApp.shared.tick()
+			ghostty_surface_refresh(surface)
+			ghostty_surface_draw(surface)
+			updateSublayerFrames()
+		}
+
 		func processExited(code: UInt32 = 0, runtimeMs: UInt64 = 0) {
 			hostManagedSurface?.processExit(code: code, runtimeMs: runtimeMs)
 		}

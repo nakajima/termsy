@@ -117,8 +117,12 @@ class TerminalTab: Identifiable {
 	@ObservationIgnored private(set) var isDisplayActive = false
 	@ObservationIgnored private var connectTask: Task<Void, Never>?
 	@ObservationIgnored private var scheduledConnectionTask: Task<Void, Never>?
+	@ObservationIgnored private var restorationRevealTask: Task<Void, Never>?
+	@ObservationIgnored private var restorationFirstRemoteOutputAt: Date?
 	@ObservationIgnored private let activationReconnectDelayNanoseconds: UInt64 = 750_000_000
 	@ObservationIgnored private let reconnectRetryDelayNanoseconds: UInt64 = 2_000_000_000
+	@ObservationIgnored private let restorationRevealQuietDelayNanoseconds: UInt64 = 250_000_000
+	@ObservationIgnored private let restorationRevealMaximumDelayNanoseconds: UInt64 = 800_000_000
 	@ObservationIgnored private var remoteConnectAttempt = 0
 	@ObservationIgnored private var wantsConnection = true
 	@ObservationIgnored private var lastRemoteOutputAt: Date?
@@ -672,36 +676,72 @@ class TerminalTab: Identifiable {
 	}
 
 	private func finishRestorationPresentation() {
+		restorationRevealTask?.cancel()
+		restorationRevealTask = nil
+		restorationFirstRemoteOutputAt = nil
 		restorationMode = nil
 		restorationSnapshot = nil
 		notifyOverlayStateChanged()
 	}
 
 	private func beginRestoration(_ mode: RestorationMode, snapshot: UIImage?) {
+		restorationRevealTask?.cancel()
+		restorationRevealTask = nil
+		restorationFirstRemoteOutputAt = nil
 		restorationMode = mode
 		restorationSnapshot = snapshot
 		notifyOverlayStateChanged()
+	}
+
+	private func scheduleRestorationRevealAfterRemoteOutput() {
+		guard restorationMode != nil else { return }
+		let now = Date()
+		if restorationFirstRemoteOutputAt == nil {
+			restorationFirstRemoteOutputAt = now
+		}
+		restorationRevealTask?.cancel()
+		let firstOutputAt = restorationFirstRemoteOutputAt ?? now
+		let elapsedSeconds = max(0, now.timeIntervalSince(firstOutputAt))
+		let elapsedNanoseconds = UInt64(elapsedSeconds * 1_000_000_000)
+		let remainingMaximumDelay: UInt64
+		if restorationRevealMaximumDelayNanoseconds > elapsedNanoseconds {
+			remainingMaximumDelay = restorationRevealMaximumDelayNanoseconds - elapsedNanoseconds
+		} else {
+			remainingMaximumDelay = 0
+		}
+		let delay = min(restorationRevealQuietDelayNanoseconds, remainingMaximumDelay)
+		restorationRevealTask = Task { @MainActor [weak self] in
+			if delay > 0 {
+				try? await Task.sleep(nanoseconds: delay)
+			}
+			guard !Task.isCancelled, let self else { return }
+			self.terminalView.flushPendingDisplay()
+			self.restorationRevealTask = nil
+			self.finishRestorationPresentation()
+		}
 	}
 
 	private func configureSSHSessionCallbacks(for sshSession: SSHTerminalSession? = nil, attempt: Int? = nil) {
 		let sshSession = sshSession ?? self.sshSession
 		sshSession.onRemoteOutput = { [weak self, weak sshSession] data in
 			guard let self, let sshSession, self.sshSession === sshSession else { return }
+			let wasRestoring = self.restorationMode != nil
 			self.lastRemoteOutputAt = Date()
-			if self.restorationMode != nil {
-				self.finishRestorationPresentation()
-			}
 			if self.phase == .connecting {
 				self.phase = .connected
 				self.connectionError = nil
 				self.notifyOverlayStateChanged()
 			}
+			self.recordTerminalOutput(data)
+			self.terminalView.feedData(data)
+			if wasRestoring {
+				self.terminalView.flushPendingDisplay()
+				self.scheduleRestorationRevealAfterRemoteOutput()
+			}
 			if let onFirstRemoteOutput = self.onFirstRemoteOutput {
 				self.onFirstRemoteOutput = nil
 				onFirstRemoteOutput()
 			}
-			self.recordTerminalOutput(data)
-			self.terminalView.feedData(data)
 		}
 		sshSession.onClose = { [weak self, weak sshSession] reason in
 			guard let self, let sshSession, self.sshSession === sshSession else { return }

@@ -69,6 +69,7 @@
 			self.theme = theme
 			view.wantsLayer = true
 			view.layer?.backgroundColor = theme.backgroundUIColor.cgColor
+			view.layer?.masksToBounds = true
 			terminalTab.applyTheme(theme)
 			updateOverlay()
 		}
@@ -135,6 +136,7 @@
 				let host = NSHostingController(rootView: AnyView(overlayView))
 				host.view.wantsLayer = true
 				host.view.layer?.backgroundColor = NSColor.clear.cgColor
+				host.view.layer?.masksToBounds = true
 				host.view.frame = view.bounds
 				host.view.autoresizingMask = [.width, .height]
 				host.view.isHidden = !overlayNeedsInteraction

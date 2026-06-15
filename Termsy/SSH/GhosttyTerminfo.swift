@@ -1,6 +1,8 @@
 import Foundation
 
 enum GhosttyTerminfo {
+	static let terminalName = "xterm-ghostty"
+
 	static let source = #"""
 	xterm-ghostty|ghostty|Ghostty,
 		am,

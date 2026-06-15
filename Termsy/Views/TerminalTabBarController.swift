@@ -54,6 +54,7 @@
 
 		override func viewDidLoad() {
 			super.viewDidLoad()
+			view.clipsToBounds = true
 			setNeedsUpdateOfScreenEdgesDeferringSystemGestures()
 			terminalTab.onOverlayStateChange = { [weak self] in
 				self?.updateOverlay()
@@ -179,6 +180,7 @@
 			} else {
 				let host = UIHostingController(rootView: AnyView(overlayView))
 				host.view.backgroundColor = .clear
+				host.view.clipsToBounds = true
 				host.view.frame = view.bounds
 				host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 				host.view.isHidden = !overlayNeedsInteraction

@@ -881,6 +881,11 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		let resultFuture: EventLoopFuture<SSHCommandResult>
 	}
 
+	private struct PreparedSessionChannel {
+		let channel: Channel
+		let ptySize: TerminalWindowSize
+	}
+
 	private static let sessionStartupTimeout: TimeAmount = .seconds(10)
 	private static let channelRequestTimeout: TimeAmount = .seconds(10)
 	private static let fileUploadQueue = DispatchQueue(label: "termsy.ssh.file-upload", qos: .utility)
@@ -986,12 +991,12 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		do {
 			if let startupCommand {
 				do {
-					let childChannel = try await openPreparedSessionChannel(on: channel)
-					sshChildChannel = childChannel
-					try await requestExec(startupCommand, on: childChannel)
+					let preparedChannel = try await openPreparedSessionChannel(on: channel)
+					sshChildChannel = preparedChannel.channel
+					try await requestExec(startupCommand, on: preparedChannel.channel)
 					diagnostic("shell.start.execBootstrapSuccess")
 					log("remote shell bootstrap started")
-					sendWindowChange(pendingTerminalSize, force: true)
+					sendStartupWindowChangeIfNeeded(allocatedSize: preparedChannel.ptySize)
 				} catch {
 					closeActiveStartupChannelIfNeeded()
 					diagnostic("shell.start.execBootstrapFailure", Self.sanitizedDiagnosticMetadata(for: error))
@@ -1017,20 +1022,21 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 	private func startPlainShell(on channel: Channel, fallback: Bool) async throws {
 		diagnostic("plainShell.start.begin", ["fallback": boolString(fallback)])
-		let childChannel = try await openPreparedSessionChannel(on: channel)
-		sshChildChannel = childChannel
-		try await requestShell(on: childChannel)
+		let preparedChannel = try await openPreparedSessionChannel(on: channel)
+		sshChildChannel = preparedChannel.channel
+		try await requestShell(on: preparedChannel.channel)
 		diagnostic("plainShell.start.success", ["fallback": boolString(fallback)])
 		log(fallback ? "shell started (fresh fallback channel)" : "shell started")
-		sendWindowChange(pendingTerminalSize, force: true)
+		sendStartupWindowChangeIfNeeded(allocatedSize: preparedChannel.ptySize)
 	}
 
-	private func openPreparedSessionChannel(on channel: Channel) async throws -> Channel {
+	private func openPreparedSessionChannel(on channel: Channel) async throws -> PreparedSessionChannel {
 		let childChannel = try await openSessionChannel(on: channel)
+		let ptySize = pendingTerminalSize
 		do {
-			try await requestPTY(on: childChannel, size: pendingTerminalSize)
+			try await requestPTY(on: childChannel, size: ptySize)
 			log("PTY allocated")
-			return childChannel
+			return PreparedSessionChannel(channel: childChannel, ptySize: ptySize)
 		} catch {
 			childChannel.close(mode: .all, promise: nil)
 			throw error
@@ -1100,7 +1106,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	private func requestPTY(on childChannel: Channel, size: TerminalWindowSize) async throws {
 		let request = SSHChannelRequestEvent.PseudoTerminalRequest(
 			wantReply: true,
-			term: "xterm-256color",
+			term: GhosttyTerminfo.terminalName,
 			terminalCharacterWidth: size.columns,
 			terminalRowHeight: size.rows,
 			terminalPixelWidth: size.pixelWidth,
@@ -1184,6 +1190,11 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 	func resize(_ size: TerminalWindowSize) {
 		sendWindowChange(size, force: false)
+	}
+
+	private func sendStartupWindowChangeIfNeeded(allocatedSize: TerminalWindowSize) {
+		guard pendingTerminalSize.columns != allocatedSize.columns || pendingTerminalSize.rows != allocatedSize.rows else { return }
+		sendWindowChange(pendingTerminalSize, force: true)
 	}
 
 	private func sendWindowChange(_ size: TerminalWindowSize, force: Bool) {
