@@ -113,6 +113,22 @@ final class TermsyUITests: XCTestCase {
 	}
 
 	@MainActor
+	func testPasswordPromptAcceptsKeyboardInput() throws {
+		let app = XCUIApplication()
+		configureLaunchEnvironment(for: app, scenario: "password-prompt")
+		XCUIDevice.shared.orientation = .landscapeLeft
+		app.launch()
+		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not reach foreground")
+
+		let passwordField = app.secureTextFields["passwordPrompt.field"]
+		XCTAssertTrue(passwordField.waitForExistence(timeout: 10), "Password prompt field did not appear")
+		passwordField.tap()
+		passwordField.typeText("keyboard-test-password")
+
+		XCTAssertEqual(app.state, .runningForeground, "App crashed while typing into the password prompt")
+	}
+
+	@MainActor
 	func testTerminalCommandShiftBracketSwitchesTabs() throws {
 		let app = XCUIApplication()
 		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.terminal.scenario)

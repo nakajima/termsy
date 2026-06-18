@@ -1193,15 +1193,15 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	}
 
 	private func sendStartupWindowChangeIfNeeded(allocatedSize: TerminalWindowSize) {
-		guard pendingTerminalSize.columns != allocatedSize.columns || pendingTerminalSize.rows != allocatedSize.rows else { return }
+		guard pendingTerminalSize != allocatedSize else { return }
 		sendWindowChange(pendingTerminalSize, force: true)
 	}
 
 	private func sendWindowChange(_ size: TerminalWindowSize, force: Bool) {
 		let previousSize = pendingTerminalSize
 		pendingTerminalSize = size
-		// Re-sending the same character grid can make remote TUIs redraw on tab switches.
-		guard force || size.columns != previousSize.columns || size.rows != previousSize.rows else { return }
+		// Re-sending the same terminal geometry can make remote TUIs redraw on tab switches.
+		guard force || size != previousSize else { return }
 		guard let sshChildChannel, sshChildChannel.isActive else { return }
 		sshChildChannel.eventLoop.execute {
 			guard sshChildChannel.isActive else { return }

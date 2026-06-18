@@ -22,7 +22,7 @@ enum GhosttyConfigBuilder {
 			"cursor-style = \(cursorStyle)",
 			"cursor-style-blink = \(cursorBlink)",
 			"background-opacity = \(backgroundOpacity.formatted(.number.precision(.fractionLength(0 ... 3))))",
-			"term = xterm-256color",
+			"term = \(GhosttyTerminfo.terminalName)",
 		]
 		if let fontFamily = TerminalFontSettings.family {
 			lines.append("font-family = \(quotedConfigValue(fontFamily))")

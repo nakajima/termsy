@@ -79,7 +79,7 @@
 			if pid == 0 {
 				chdir(profile.workingDirectory)
 				setenv("SHELL", shellPath, 1)
-				setenv("TERM", "xterm-256color", 1)
+				setenv("TERM", GhosttyTerminfo.terminalName, 1)
 				setenv("COLORTERM", "truecolor", 1)
 				setenv("TERM_PROGRAM", ShellTitleIntegration.termProgram, 1)
 				if !ShellTitleIntegration.termProgramVersion.isEmpty {

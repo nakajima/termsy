@@ -172,6 +172,7 @@
 			.environment(\.appTheme, theme)
 
 			let overlayNeedsInteraction = terminalTab.showsOverlay
+			terminalView?.setKeyboardFocusSuspended(overlayNeedsInteraction)
 
 			if let existing = overlayHostController {
 				existing.rootView = AnyView(overlayView)

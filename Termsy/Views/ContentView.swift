@@ -199,6 +199,8 @@ struct ContentView: View {
 			coordinator.isShowingSessionPicker = true
 		case .fileDrop:
 			openFileDropUITestTerminal(using: seededSessions, readinessLabel: "file-drop")
+		case .passwordPrompt:
+			openPasswordPromptUITestTerminal(using: seededSessions, readinessLabel: "password-prompt")
 		}
 	}
 
@@ -271,6 +273,19 @@ struct ContentView: View {
 			transcript: AppStoreScreenshotFixtures.terminalTranscript,
 			screenshotReadyLabel: readinessLabel
 		)
+	}
+
+	private func openPasswordPromptUITestTerminal(using sessions: [Session], readinessLabel: String) {
+		guard let primarySession = sessions.first(where: { $0.hostname == AppStoreScreenshotFixtures.primaryHostname }) ?? sessions.first else {
+			return
+		}
+
+		coordinator.openPassivePreviewTab(
+			for: primarySession,
+			transcript: AppStoreScreenshotFixtures.terminalTranscript
+		)
+		coordinator.selectedTab?.needsPassword = true
+		announceScreenshotReadiness(readinessLabel)
 	}
 }
 
@@ -360,6 +375,9 @@ private struct TabKeyboardShortcuts: View {
 
 	private var shortcutsEnabled: Bool {
 		if coordinator.isPresentingAuxiliaryUI {
+			return false
+		}
+		if coordinator.selectedTab?.showsOverlay == true {
 			return false
 		}
 		#if os(macOS)

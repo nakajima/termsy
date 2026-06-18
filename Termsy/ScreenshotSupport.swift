@@ -10,6 +10,7 @@ struct AppLaunchConfiguration {
 		case sessionPicker = "session-picker"
 		case settings
 		case fileDrop = "file-drop"
+		case passwordPrompt = "password-prompt"
 	}
 
 	let screenshotScenario: ScreenshotScenario?

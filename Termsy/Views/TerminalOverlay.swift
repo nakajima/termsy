@@ -40,12 +40,29 @@ struct TerminalOverlay: View {
 				EmptyView()
 			}
 
+			if showsPasswordPrompt {
+				Color.black.opacity(0.28)
+					.ignoresSafeArea()
+					.transition(.opacity)
+
+				PasswordPromptView(
+					detailText: tab.detailText,
+					password: $password,
+					onConnect: submitPassword,
+					onCancel: cancelPasswordPrompt
+				)
+				.padding()
+				.transition(.opacity.combined(with: .scale(scale: 0.98)))
+				.zIndex(2)
+			}
+
 			TerminalFileDropOverlayView(
 				state: tab.fileDropOverlayState,
 				onDismissError: {
 					tab.dismissFileDropError()
 				}
 			)
+			.zIndex(3)
 		}
 		.safeAreaInset(edge: .bottom) {
 			if showsConnectionLogToggle {
@@ -57,23 +74,12 @@ struct TerminalOverlay: View {
 				.padding(.bottom)
 			}
 		}
-		.allowsHitTesting(tab.showsConnectionLogPanel || tab.needsPassword || tab.fileDropOverlayState.blocksInput)
-		.alert("Password Required", isPresented: .init(
-			get: { tab.needsPassword && !tab.isLocalShell },
-			set: { if !$0 { tab.needsPassword = false } }
-		)) {
-			SecureField("Password", text: $password)
-			Button("Connect") {
-				let pw = password
+		.allowsHitTesting(tab.showsConnectionLogPanel || showsPasswordPrompt || tab.fileDropOverlayState.blocksInput)
+		.animation(.easeInOut(duration: 0.16), value: showsPasswordPrompt)
+		.onChange(of: tab.needsPassword) { _, needsPassword in
+			if !needsPassword {
 				password = ""
-				onRetryWithPassword(pw)
 			}
-			Button("Cancel", role: .cancel) {
-				password = ""
-				tab.connectionError = "Authentication cancelled"
-			}
-		} message: {
-			Text(tab.detailText)
 		}
 		.onChange(of: tab.connectionError) { _, error in
 			if error != nil {
@@ -105,6 +111,79 @@ struct TerminalOverlay: View {
 
 	private var showsConnectionLogToggle: Bool {
 		tab.showsConnectionLogPanel
+	}
+
+	private var showsPasswordPrompt: Bool {
+		tab.needsPassword && !tab.isLocalShell
+	}
+
+	private func submitPassword() {
+		let pw = password
+		password = ""
+		onRetryWithPassword(pw)
+	}
+
+	private func cancelPasswordPrompt() {
+		password = ""
+		tab.connectionError = "Authentication cancelled"
+	}
+}
+
+private struct PasswordPromptView: View {
+	@Environment(\.appTheme) private var theme
+	let detailText: String
+	@Binding var password: String
+	let onConnect: () -> Void
+	let onCancel: () -> Void
+	@FocusState private var passwordFieldFocused: Bool
+
+	var body: some View {
+		VStack(alignment: .leading, spacing: 16) {
+			VStack(alignment: .leading, spacing: 6) {
+				Text("Password Required")
+					.font(.headline)
+					.foregroundStyle(theme.primaryText)
+
+				Text(detailText)
+					.font(.subheadline)
+					.foregroundStyle(theme.secondaryText)
+					.lineLimit(2)
+			}
+
+			SecureField("Password", text: $password)
+				.textFieldStyle(.roundedBorder)
+				.focused($passwordFieldFocused)
+				.submitLabel(.go)
+				.onSubmit(onConnect)
+				.accessibilityIdentifier("passwordPrompt.field")
+
+			HStack(spacing: 12) {
+				Button("Cancel", role: .cancel, action: onCancel)
+					.keyboardShortcut(.cancelAction)
+
+				Spacer()
+
+				Button("Connect", action: onConnect)
+					.buttonStyle(.borderedProminent)
+					.tint(theme.accent)
+			}
+		}
+		.padding(22)
+		.frame(maxWidth: 420)
+		.background(theme.cardBackground.opacity(0.97), in: RoundedRectangle(cornerRadius: 16))
+		.overlay {
+			RoundedRectangle(cornerRadius: 16)
+				.stroke(theme.divider, lineWidth: 1)
+		}
+		.shadow(color: .black.opacity(0.22), radius: 24, y: 12)
+		.accessibilityElement(children: .contain)
+		.accessibilityIdentifier("passwordPrompt")
+		.onAppear {
+			Task { @MainActor in
+				await Task.yield()
+				passwordFieldFocused = true
+			}
+		}
 	}
 }
 
@@ -184,6 +263,37 @@ private struct ConnectionLogPanel: View {
 	.padding()
 	.background(TerminalTheme.mocha.appTheme.background)
 	.environment(\.appTheme, TerminalTheme.mocha.appTheme)
+}
+
+#Preview("Password Prompt") {
+	PasswordPromptView(
+		detailText: "pat@example.local",
+		password: .constant(""),
+		onConnect: {},
+		onCancel: {}
+	)
+	.padding()
+	.background(TerminalTheme.mocha.appTheme.background)
+	.environment(\.appTheme, TerminalTheme.mocha.appTheme)
+}
+
+#Preview("Terminal Overlay Password") {
+	let tab: TerminalTab = {
+		var session = Session(
+			hostname: "example.local",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: true
+		)
+		session.id = 1
+		let tab = TerminalTab(session: session)
+		tab.needsPassword = true
+		return tab
+	}()
+	TerminalOverlay(tab: tab, onReconnect: {}, onRetryWithPassword: { _ in })
+		.background(TerminalTheme.mocha.appTheme.background)
+		.environment(\.appTheme, TerminalTheme.mocha.appTheme)
 }
 
 #Preview("Terminal Overlay Connection Log") {

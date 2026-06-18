@@ -1004,6 +1004,91 @@ struct TermsyTests {
 			#expect(tab.terminalView.isDisplayActive)
 			#expect(tab.terminalView.isUserInteractionEnabled)
 		}
+
+		@MainActor
+		@Test func kittyGraphicsRenderVisiblePixels() async {
+			let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 240))
+			defer {
+				view.stop()
+				view.removeFromSuperview()
+			}
+
+			guard let window = makeTestWindow(frame: view.frame) else {
+				Issue.record("expected window scene")
+				return
+			}
+			window.addSubview(view)
+			view.setDisplayActive(true)
+			view.layoutIfNeeded()
+			await Task.yield()
+
+			let esc = "\u{001B}"
+			let greenTwoByTwoPNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAD0lEQVR4nGNg+M8AQhAKABvyA/1tVLjHAAAAAElFTkSuQmCC"
+			let firstChunk = String(greenTwoByTwoPNG.prefix(48))
+			let secondChunk = String(greenTwoByTwoPNG.dropFirst(48))
+			let placeholder = "\u{10EEEE}"
+			let row0 = "\u{0305}"
+			let row1 = "\u{030D}"
+			let col0 = "\u{0305}"
+			let col1 = "\u{030D}"
+			let col2 = "\u{030E}"
+			let col3 = "\u{0310}"
+			let imageID = 31_337
+			let placeholders = "\(esc)[38;2;0;122;105m"
+				+ "\(placeholder)\(row0)\(col0)\(placeholder)\(row0)\(col1)\(placeholder)\(row0)\(col2)\(placeholder)\(row0)\(col3)\r\n"
+				+ "\(placeholder)\(row1)\(col0)\(placeholder)\(row1)\(col1)\(placeholder)\(row1)\(col2)\(placeholder)\(row1)\(col3)\(esc)[39m"
+			let sequence = "\(esc)[2J\(esc)[H"
+				+ "\(esc)_Gq=2,i=\(imageID),f=100,m=1;\(firstChunk)\(esc)\\"
+				+ "\(esc)_Gm=0;\(secondChunk)\(esc)\\"
+				+ "\(esc)_Gq=2,a=p,U=1,i=\(imageID),c=4,r=2,C=1;\(esc)\\"
+				+ "\(esc)[H\(placeholders)"
+			for byte in sequence.utf8 {
+				view.feedData(Data([byte]))
+			}
+			for _ in 0 ..< 10 {
+				view.flushPendingDisplay()
+				try? await Task.sleep(nanoseconds: 50_000_000)
+			}
+
+			guard let snapshot = view.captureSnapshot() else {
+				Issue.record("expected terminal snapshot")
+				return
+			}
+			let greenPixels = countPixels(in: snapshot) { red, green, blue, alpha in
+				alpha > 180 && red < 80 && green > 140 && blue < 80
+			}
+			#expect(greenPixels > 20)
+		}
+
+		private func countPixels(
+			in image: UIImage,
+			matching predicate: (UInt8, UInt8, UInt8, UInt8) -> Bool
+		) -> Int {
+			guard let cgImage = image.cgImage else { return 0 }
+			let width = cgImage.width
+			let height = cgImage.height
+			let bytesPerPixel = 4
+			let bytesPerRow = width * bytesPerPixel
+			var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
+			guard let context = CGContext(
+				data: &pixels,
+				width: width,
+				height: height,
+				bitsPerComponent: 8,
+				bytesPerRow: bytesPerRow,
+				space: CGColorSpaceCreateDeviceRGB(),
+				bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+			) else { return 0 }
+			context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+			var count = 0
+			for offset in stride(from: 0, to: pixels.count, by: bytesPerPixel) {
+				if predicate(pixels[offset], pixels[offset + 1], pixels[offset + 2], pixels[offset + 3]) {
+					count += 1
+				}
+			}
+			return count
+		}
 	#endif
 
 	@Test func sessionTrimmedOptionalStripsWhitespaceAndReturnsNilForEmpty() {

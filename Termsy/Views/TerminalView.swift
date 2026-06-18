@@ -91,6 +91,7 @@
 			}
 		}
 		private var isTerminalInputBlocked = false
+		private var isKeyboardFocusSuspended = false
 
 		private let keyboardAccessoryBar = TerminalKeyboardAccessoryView(theme: TerminalTheme.current.appTheme)
 		private var firstResponderTask: Task<Void, Never>?
@@ -428,6 +429,7 @@
 				"interaction=\(isUserInteractionEnabled)",
 				"firstResponder=\(isFirstResponder)",
 				"shouldHoldFirstResponder=\(shouldHoldFirstResponder)",
+				"keyboardFocusSuspended=\(isKeyboardFocusSuspended)",
 				"displayLink=\(displayLinkState)",
 				"lastTickAge=\(lastTickAge)",
 				"bounds=\(boundsDescription)",
@@ -535,8 +537,15 @@
 			if shouldBeActive {
 				ghostty_surface_set_occlusion(surface, false)
 				startDisplayLink()
-				ghostty_surface_set_focus(surface, true)
-				requestFirstResponder()
+				ghostty_surface_set_focus(surface, !isKeyboardFocusSuspended)
+				if isKeyboardFocusSuspended {
+					cancelFirstResponderRequest()
+					if isFirstResponder {
+						resignFirstResponder()
+					}
+				} else {
+					requestFirstResponder()
+				}
 				ghostty_surface_refresh(surface)
 				ghostty_surface_draw(surface)
 			} else {
@@ -547,7 +556,7 @@
 		}
 
 		private var shouldHoldFirstResponder: Bool {
-			presentationMode == .interactive && isDisplayActive && window != nil && surface != nil
+			presentationMode == .interactive && !isKeyboardFocusSuspended && isDisplayActive && window != nil && surface != nil
 		}
 
 		private func requestFirstResponder(
@@ -610,6 +619,28 @@
 			if isBlocked {
 				keyRepeatController.reset()
 				clearArmedSoftwareModifiers()
+			}
+		}
+
+		func setKeyboardFocusSuspended(_ isSuspended: Bool) {
+			guard isKeyboardFocusSuspended != isSuspended else { return }
+			isKeyboardFocusSuspended = isSuspended
+			DiagnosticLogStore.shared.record(
+				"terminalView.keyboardFocusSuspendedChanged",
+				metadata: ["suspended": isSuspended, "state": diagnosticStateSummary()]
+			)
+			if isSuspended {
+				cancelFirstResponderRequest()
+				keyRepeatController.reset()
+				clearArmedSoftwareModifiers()
+				if isFirstResponder {
+					resignFirstResponder()
+				}
+			} else if shouldHoldFirstResponder {
+				requestFirstResponder()
+			}
+			if let surface, isDisplayActive, window != nil {
+				ghostty_surface_set_focus(surface, !isSuspended)
 			}
 		}
 
@@ -1118,10 +1149,10 @@
 			return showsSoftwareKeyboardAccessory ? keyboardAccessoryBar : nil
 		}
 
-		override var canBecomeFirstResponder: Bool { presentationMode == .interactive }
+		override var canBecomeFirstResponder: Bool { presentationMode == .interactive && !isKeyboardFocusSuspended }
 
 		override var keyCommands: [UIKeyCommand]? {
-			guard presentationMode == .interactive else { return nil }
+			guard presentationMode == .interactive, !isKeyboardFocusSuspended else { return nil }
 			return [
 				appShortcutCommand(input: "[", modifiers: [.command, .shift], action: #selector(selectPreviousTabFromKeyCommand(_:)), title: "Previous Tab"),
 				appShortcutCommand(input: "]", modifiers: [.command, .shift], action: #selector(selectNextTabFromKeyCommand(_:)), title: "Next Tab"),
@@ -1159,7 +1190,7 @@
 			case #selector(copy(_:)):
 				return hasTerminalSelection
 			case #selector(paste(_:)):
-				return !isTerminalInputBlocked && canPasteFromClipboard
+				return !isTerminalInputBlocked && !isKeyboardFocusSuspended && canPasteFromClipboard
 			case #selector(selectAll(_:)):
 				return surface != nil
 			default:
@@ -1172,7 +1203,7 @@
 		}
 
 		override func paste(_: Any?) {
-			guard !isTerminalInputBlocked else { return }
+			guard !isTerminalInputBlocked, !isKeyboardFocusSuspended else { return }
 			_ = performPasteFromClipboard()
 		}
 
@@ -1183,7 +1214,7 @@
 		// MARK: - UIKeyInput
 
 		func insertText(_ text: String) {
-			guard !isTerminalInputBlocked else { return }
+			guard !isTerminalInputBlocked, !isKeyboardFocusSuspended else { return }
 			guard surface != nil else { return }
 			guard !keyRepeatController.hasActiveKey else { return }
 
@@ -1206,7 +1237,7 @@
 		}
 
 		func deleteBackward() {
-			guard !isTerminalInputBlocked else { return }
+			guard !isTerminalInputBlocked, !isKeyboardFocusSuspended else { return }
 			guard surface != nil else { return }
 			guard !keyRepeatController.hasActiveKey else { return }
 			sendSoftwareSpecialKey(macKeycode: 0x0033) // Backspace
@@ -1244,7 +1275,7 @@
 		}
 
 		private func handleKeyboardAccessoryAction(_ action: TerminalKeyboardAccessoryView.Action) {
-			guard !isTerminalInputBlocked else { return }
+			guard !isTerminalInputBlocked, !isKeyboardFocusSuspended else { return }
 			requestFirstResponder()
 			switch action {
 			case .control:
@@ -1346,7 +1377,7 @@
 		// MARK: - Hardware Keyboard
 
 		override func pressesBegan(_ presses: Set<UIPress>, with _: UIPressesEvent?) {
-			guard !isTerminalInputBlocked else {
+			guard !isTerminalInputBlocked, !isKeyboardFocusSuspended else {
 				keyRepeatController.reset()
 				return
 			}
@@ -1370,7 +1401,7 @@
 		}
 
 		override func pressesEnded(_ presses: Set<UIPress>, with _: UIPressesEvent?) {
-			guard !isTerminalInputBlocked else {
+			guard !isTerminalInputBlocked, !isKeyboardFocusSuspended else {
 				keyRepeatController.reset()
 				return
 			}
@@ -1493,7 +1524,7 @@
 
 		@discardableResult
 		private func performPasteFromClipboard() -> Bool {
-			guard canPasteFromClipboard else { return false }
+			guard !isTerminalInputBlocked, !isKeyboardFocusSuspended, canPasteFromClipboard else { return false }
 			ClipboardAccessAuthorization.noteUserInitiatedPaste(for: self)
 			let didStartPaste = performBindingAction("paste_from_clipboard")
 			if !didStartPaste {
