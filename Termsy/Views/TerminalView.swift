@@ -568,12 +568,23 @@
 			guard shouldHoldFirstResponder else {
 				DiagnosticLogStore.shared.record(
 					"terminalView.requestFirstResponder.skipped",
-					metadata: ["retryCount": retryCount, "forceReacquire": forceReacquire, "state": diagnosticStateSummary()]
+					metadata: [
+						"retryCount": retryCount,
+						"forceReacquire": forceReacquire,
+						"keepCheckingAfterSuccess": keepCheckingAfterSuccess,
+						"state": diagnosticStateSummary(),
+					]
 				)
 				return
 			}
 			if isFirstResponder {
-				guard forceReacquire else { return }
+				guard forceReacquire else {
+					scheduleFirstResponderRetry(
+						retryCount: retryCount,
+						keepCheckingAfterSuccess: keepCheckingAfterSuccess
+					)
+					return
+				}
 				resignFirstResponder()
 			}
 
@@ -589,6 +600,16 @@
 					"state": diagnosticStateSummary(),
 				]
 			)
+			scheduleFirstResponderRetry(
+				retryCount: retryCount,
+				keepCheckingAfterSuccess: keepCheckingAfterSuccess
+			)
+		}
+
+		private func scheduleFirstResponderRetry(
+			retryCount: Int,
+			keepCheckingAfterSuccess: Bool
+		) {
 			guard retryCount > 0 else { return }
 			guard keepCheckingAfterSuccess || !isFirstResponder else { return }
 
@@ -602,8 +623,8 @@
 						if keepCheckingAfterSuccess { continue }
 						return
 					}
-					// New tabs and app activation can race UIKit responder changes.
-					// Keep retrying long enough for transient UI to hand focus back.
+					// New tabs, app activation, and transient system UI can race UIKit responder changes.
+					// Keep retrying long enough for UIKit to hand focus back.
 					_ = self.becomeFirstResponder()
 				}
 			}
@@ -611,6 +632,10 @@
 
 		func restoreKeyboardFocusIfNeeded(retryCount: Int = 20) {
 			requestFirstResponder(retryCount: retryCount)
+		}
+
+		func maintainKeyboardFocusDuringTransientSystemUI(retryCount: Int = 80) {
+			requestFirstResponder(retryCount: retryCount, keepCheckingAfterSuccess: true)
 		}
 
 		func setTerminalInputBlocked(_ isBlocked: Bool) {
@@ -1527,7 +1552,9 @@
 			guard !isTerminalInputBlocked, !isKeyboardFocusSuspended, canPasteFromClipboard else { return false }
 			ClipboardAccessAuthorization.noteUserInitiatedPaste(for: self)
 			let didStartPaste = performBindingAction("paste_from_clipboard")
-			if !didStartPaste {
+			if didStartPaste {
+				maintainKeyboardFocusDuringTransientSystemUI()
+			} else {
 				ClipboardAccessAuthorization.clear(for: self)
 			}
 			return didStartPaste

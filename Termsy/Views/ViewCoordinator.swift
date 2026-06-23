@@ -204,7 +204,17 @@ class ViewCoordinator {
 		)
 	}
 
+	func appDidEnterForegroundInactive() {
+		DiagnosticLogStore.shared.record(
+			"coordinator.appDidEnterForegroundInactive",
+			metadata: diagnosticSnapshotMetadata(reason: "appDidEnterForegroundInactive")
+		)
+	}
+
 	func appDidEnterBackground() {
+		if appIsActive {
+			appWillResignActive()
+		}
 		DiagnosticLogStore.shared.record(
 			"coordinator.appDidEnterBackground.begin",
 			metadata: diagnosticSnapshotMetadata(reason: "appDidEnterBackground.begin")

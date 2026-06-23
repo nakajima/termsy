@@ -119,7 +119,7 @@ struct ContentView: View {
 			case .active:
 				coordinator.appDidBecomeActive()
 			case .inactive:
-				coordinator.appWillResignActive()
+				coordinator.appDidEnterForegroundInactive()
 			case .background:
 				coordinator.appDidEnterBackground()
 			@unknown default:
@@ -145,7 +145,7 @@ struct ContentView: View {
 				"notification.UIScene.willDeactivate",
 				metadata: ["application": ApplicationActivity.diagnosticStateDescription]
 			)
-			coordinator.appWillResignActive()
+			coordinator.appDidEnterForegroundInactive()
 		}
 		.onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { _ in
 			DiagnosticLogStore.shared.record(

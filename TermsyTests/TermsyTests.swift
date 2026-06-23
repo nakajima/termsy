@@ -973,6 +973,42 @@ struct TermsyTests {
 		}
 
 		@MainActor
+		@Test func foregroundInactiveSystemUIDoesNotDisableTerminalInteraction() {
+			let coordinator = ViewCoordinator()
+			coordinator.openTab(for: Session(
+				hostname: "prod.example.com",
+				username: "pat",
+				tmuxSessionName: nil,
+				port: 22,
+				autoconnect: false
+			))
+			guard let tab = coordinator.selectedTab else {
+				Issue.record("expected selected tab")
+				return
+			}
+			defer {
+				ApplicationActivity.isActive = true
+				tab.close()
+			}
+			tab.disconnect()
+
+			guard let window = makeTestWindow() else {
+				Issue.record("expected window scene")
+				return
+			}
+			window.addSubview(tab.terminalView)
+			#expect(tab.terminalView.isUserInteractionEnabled)
+
+			coordinator.appDidEnterForegroundInactive()
+			#expect(tab.isDisplayActive)
+			#expect(tab.terminalView.isDisplayActive)
+			#expect(tab.terminalView.isUserInteractionEnabled)
+
+			coordinator.appDidEnterBackground()
+			#expect(!tab.terminalView.isUserInteractionEnabled)
+		}
+
+		@MainActor
 		@Test func appActivationReenablesTerminalDisplayInteraction() {
 			let coordinator = ViewCoordinator()
 			coordinator.openTab(for: Session(
