@@ -134,6 +134,9 @@ class ViewCoordinator {
 		tab.onConnectionEstablished = { [weak self] session in
 			self?.persistLastConnectedAt(session)
 		}
+		tab.onSessionFontSizeChange = { [weak self] session in
+			self?.persistSessionFontSize(session)
+		}
 		tabs.append(tab)
 		selectTab(tab.id, persistWorkspace: false)
 		if persistWorkspace {
@@ -307,6 +310,18 @@ class ViewCoordinator {
 		}
 	}
 
+	#if os(iOS)
+		func reclaimInactiveTerminalSurfacesAfterMemoryWarning() {
+			DiagnosticLogStore.shared.record(
+				"coordinator.memoryWarning.reclaimInactiveSurfaces",
+				metadata: diagnosticSnapshotMetadata(reason: "memoryWarning.reclaimInactiveSurfaces")
+			)
+			for tab in tabs where tab.id != selectedTabID {
+				tab.releaseTerminalSurfaceForInactiveHost()
+			}
+		}
+	#endif
+
 	func selectTab(_ id: UUID?, persistWorkspace: Bool = true) {
 		let previousID = selectedTabID
 		DiagnosticLogStore.shared.record(
@@ -440,6 +455,20 @@ class ViewCoordinator {
 			}
 		} catch {
 			print("[DB] failed to persist lastConnectedAt for \(session.username)@\(session.hostname): \(error)")
+		}
+	}
+
+	private func persistSessionFontSize(_ session: Session) {
+		guard let databaseContext, let sessionID = session.id else { return }
+		do {
+			try databaseContext.writer.write { db in
+				try db.execute(
+					sql: "UPDATE session SET fontSize = ? WHERE id = ?",
+					arguments: [session.fontSize.map { Double($0) }, sessionID]
+				)
+			}
+		} catch {
+			print("[DB] failed to persist fontSize for \(session.username)@\(session.hostname): \(error)")
 		}
 	}
 

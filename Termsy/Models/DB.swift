@@ -90,6 +90,12 @@ struct DB {
 			}
 		}
 
+		migrator.registerMigration("AddSessionFontSize") { db in
+			try db.alter(table: "session") { t in
+				t.add(column: "fontSize", .real)
+			}
+		}
+
 		try migrator.migrate(queue)
 	}
 }

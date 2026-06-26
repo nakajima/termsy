@@ -8,9 +8,9 @@ import Foundation
 enum TerminalFontSettings {
 	static let familyKey = "terminalFontFamily"
 	static let sizeKey = "terminalFontSize"
-	static let defaultSize: Float = 14
-	static let minimumSize: Float = 8
-	static let maximumSize: Float = 36
+	nonisolated static let defaultSize: Float = 14
+	nonisolated static let minimumSize: Float = 8
+	nonisolated static let maximumSize: Float = 36
 
 	static var family: String? {
 		normalizedFamily(UserDefaults.standard.string(forKey: familyKey))
@@ -20,14 +20,14 @@ enum TerminalFontSettings {
 		normalizedSize(UserDefaults.standard.object(forKey: sizeKey)) ?? defaultSize
 	}
 
-	static func normalizedFamily(_ rawValue: String?) -> String? {
+	nonisolated static func normalizedFamily(_ rawValue: String?) -> String? {
 		guard let rawValue else { return nil }
 		let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
 		guard !trimmed.isEmpty else { return nil }
 		return trimmed
 	}
 
-	static func normalizedSize(_ rawValue: Any?) -> Float? {
+	nonisolated static func normalizedSize(_ rawValue: Any?) -> Float? {
 		guard let rawValue else { return nil }
 		let numericValue: Double
 		switch rawValue {
@@ -46,7 +46,7 @@ enum TerminalFontSettings {
 		return clampedSize(Float(numericValue))
 	}
 
-	static func clampedSize(_ rawValue: Float) -> Float {
+	nonisolated static func clampedSize(_ rawValue: Float) -> Float {
 		min(max(rawValue.rounded(), minimumSize), maximumSize)
 	}
 

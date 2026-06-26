@@ -112,9 +112,6 @@
 
 		func teardownTerminal() {
 			terminalTab.setDisplayActive(false)
-			#if os(iOS)
-				terminalTab.releaseTerminalSurfaceForInactiveHost()
-			#endif
 			terminalTab.onOverlayStateChange = nil
 			terminalTab.onTerminalViewReplacementRequested = nil
 			terminalView?.removeFromSuperview()

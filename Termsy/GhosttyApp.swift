@@ -15,8 +15,8 @@
 
 		private var runtime: GhosttyRuntime?
 
-		private static func buildConfigText(theme: TerminalTheme) -> String {
-			GhosttyConfigBuilder.buildConfigText(theme: theme)
+		private static func buildConfigText(theme: TerminalTheme, fontSize: Float? = nil) -> String {
+			GhosttyConfigBuilder.buildConfigText(theme: theme, fontSize: fontSize)
 		}
 
 		var app: ghostty_app_t? {
@@ -118,6 +118,17 @@
 		func reloadConfig(theme: TerminalTheme? = nil) {
 			let theme = theme ?? TerminalTheme.current
 			_ = runtime?.updateConfig(text: Self.buildConfigText(theme: theme))
+		}
+
+		func updateSurfaceConfig(_ surface: ghostty_surface_t, fontSize: Float) {
+			_ = runtime?.updateSurfaceConfig(
+				surface,
+				text: Self.buildConfigText(theme: TerminalTheme.current, fontSize: fontSize)
+			)
+		}
+
+		func clearSurfaceConfig(_ surface: ghostty_surface_t) {
+			runtime?.clearSurfaceConfig(surface)
 		}
 	}
 #endif

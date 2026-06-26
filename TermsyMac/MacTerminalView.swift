@@ -42,6 +42,7 @@
 		private var handledMarkedTextCommand = false
 		private var isDisplayActive = false
 		private var isTerminalInputBlocked = false
+		private(set) var fontSize = TerminalFontSettings.size
 		private var lastMouseLocation: CGPoint?
 
 		override var acceptsFirstResponder: Bool { true }
@@ -64,6 +65,12 @@
 		func applyTheme(_ theme: AppTheme) {
 			let opacity = TerminalBackgroundSettings.storedEffectiveOpacity()
 			layer?.backgroundColor = theme.backgroundUIColor.withAlphaComponent(CGFloat(opacity)).cgColor
+		}
+
+		func setFontSize(_ rawValue: Float) {
+			let normalizedSize = TerminalFontSettings.clampedSize(rawValue)
+			guard fontSize != normalizedSize else { return }
+			fontSize = normalizedSize
 		}
 
 		func start() {
@@ -96,7 +103,7 @@
 					app: app,
 					surfaceUserdata: ghosttySurfaceUserdata?.opaquePointer,
 					scaleFactor: Double(scale),
-					fontSize: TerminalFontSettings.size
+					fontSize: fontSize
 				) { cfg in
 					cfg.platform_tag = GHOSTTY_PLATFORM_MACOS
 					cfg.platform = ghostty_platform_u(

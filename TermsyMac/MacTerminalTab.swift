@@ -210,6 +210,15 @@
 			}
 		}
 
+		private var resolvedTerminalFontSize: Float {
+			switch source {
+			case .localShell:
+				TerminalFontSettings.size
+			case let .ssh(session):
+				session.resolvedTerminalFontSize
+			}
+		}
+
 		private func recordTerminalInput(_ data: Data) {
 			guard let terminalRecorder, !data.isEmpty else { return }
 			recordingDataByteCount += Int64(data.count)
@@ -227,6 +236,7 @@
 		}
 
 		private func configureTerminalView() {
+			terminalView.setFontSize(resolvedTerminalFontSize)
 			terminalView.onWrite = { [weak self] data in
 				self?.handleTerminalInput(data)
 			}

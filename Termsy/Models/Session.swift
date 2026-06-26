@@ -17,6 +17,7 @@ struct Session: Codable, FetchableRecord, MutablePersistableRecord, Identifiable
 	var tmuxSessionName: String?
 	var initialWorkingDirectory: String?
 	var customTitle: String?
+	var fontSize: Float?
 	var tabOrder: Int?
 	var isOpen: Bool = false
 	var lastTerminalSnapshotJPEGData: Data?
@@ -46,6 +47,7 @@ extension Session {
 		static let tmuxSessionName = Column(CodingKeys.tmuxSessionName)
 		static let initialWorkingDirectory = Column(CodingKeys.initialWorkingDirectory)
 		static let customTitle = Column(CodingKeys.customTitle)
+		static let fontSize = Column(CodingKeys.fontSize)
 		static let tabOrder = Column(CodingKeys.tabOrder)
 		static let isOpen = Column(CodingKeys.isOpen)
 		static let lastTerminalSnapshotJPEGData = Column(CodingKeys.lastTerminalSnapshotJPEGData)
@@ -63,6 +65,7 @@ extension Session {
 		port: Int,
 		autoconnect: Bool,
 		customTitle: String? = nil,
+		fontSize: Float? = nil,
 		tabOrder: Int? = nil,
 		isOpen: Bool = false
 	) {
@@ -73,6 +76,7 @@ extension Session {
 		self.tmuxSessionName = tmuxSessionName
 		self.initialWorkingDirectory = initialWorkingDirectory
 		self.customTitle = customTitle
+		self.fontSize = fontSize.map(TerminalFontSettings.clampedSize)
 		self.tabOrder = tabOrder
 		self.isOpen = isOpen
 		self.lastTerminalSnapshotJPEGData = nil
@@ -140,6 +144,7 @@ extension Session {
 	}
 
 	var trimmedCustomTitle: String? { Self.trimmedOptional(customTitle) }
+	var resolvedTerminalFontSize: Float { fontSize.map(TerminalFontSettings.clampedSize) ?? TerminalFontSettings.size }
 	var trimmedTmuxSessionName: String? { Self.trimmedOptional(tmuxSessionName) }
 	var trimmedInitialWorkingDirectory: String? { Self.trimmedOptional(initialWorkingDirectory) }
 

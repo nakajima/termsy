@@ -13,12 +13,13 @@ enum GhosttyConfigBuilder {
 		return "\"\(escaped)\""
 	}
 
-	static func buildConfigText(theme: TerminalTheme) -> String {
+	static func buildConfigText(theme: TerminalTheme, fontSize: Float? = nil) -> String {
 		let cursorStyle = UserDefaults.standard.string(forKey: "cursorStyle") ?? "block"
 		let cursorBlink = UserDefaults.standard.object(forKey: "cursorBlink") as? Bool ?? true
 		let backgroundOpacity = TerminalBackgroundSettings.storedEffectiveOpacity()
+		let resolvedFontSize = TerminalFontSettings.clampedSize(fontSize ?? TerminalFontSettings.size)
 		var lines = [
-			"font-size = \(Int(TerminalFontSettings.size))",
+			"font-size = \(Int(resolvedFontSize))",
 			"cursor-style = \(cursorStyle)",
 			"cursor-style-blink = \(cursorBlink)",
 			"background-opacity = \(backgroundOpacity.formatted(.number.precision(.fractionLength(0 ... 3))))",

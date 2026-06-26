@@ -154,6 +154,9 @@ struct ContentView: View {
 			)
 			coordinator.appDidEnterBackground()
 		}
+		.onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+			coordinator.reclaimInactiveTerminalSurfacesAfterMemoryWarning()
+		}
 		#endif
 		.task {
 			guard !didAutoconnect else { return }

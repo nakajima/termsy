@@ -71,6 +71,7 @@ public final class GhosttyRuntime {
 
 	public private(set) var app: ghostty_app_t?
 	private var config: ghostty_config_t?
+	private var surfaceConfigs: [UInt: ghostty_config_t] = [:]
 	private let callbackBox: GhosttyRuntimeCallbackBox
 	private let configURL: URL
 
@@ -170,6 +171,9 @@ public final class GhosttyRuntime {
 		if let config {
 			ghostty_config_free(config)
 		}
+		for surfaceConfig in surfaceConfigs.values {
+			ghostty_config_free(surfaceConfig)
+		}
 		try? FileManager.default.removeItem(at: configURL)
 	}
 
@@ -188,6 +192,31 @@ public final class GhosttyRuntime {
 		config = nextConfig
 		ghostty_app_update_config(app, nextConfig)
 		return true
+	}
+
+	@discardableResult
+	public func updateSurfaceConfig(_ surface: ghostty_surface_t, text: String) -> Bool {
+		let surfaceConfigURL = FileManager.default.temporaryDirectory
+			.appendingPathComponent("termsy-ghostty-surface-\(UUID().uuidString).conf")
+		guard let nextConfig = Self.loadConfig(text: text, url: surfaceConfigURL) else { return false }
+		try? FileManager.default.removeItem(at: surfaceConfigURL)
+		let key = surfaceConfigKey(surface)
+		if let previousConfig = surfaceConfigs[key] {
+			ghostty_config_free(previousConfig)
+		}
+		surfaceConfigs[key] = nextConfig
+		ghostty_surface_update_config(surface, nextConfig)
+		return true
+	}
+
+	public func clearSurfaceConfig(_ surface: ghostty_surface_t) {
+		let key = surfaceConfigKey(surface)
+		guard let surfaceConfig = surfaceConfigs.removeValue(forKey: key) else { return }
+		ghostty_config_free(surfaceConfig)
+	}
+
+	private func surfaceConfigKey(_ surface: ghostty_surface_t) -> UInt {
+		UInt(bitPattern: surface)
 	}
 
 	private static func loadConfig(text: String, url: URL) -> ghostty_config_t? {

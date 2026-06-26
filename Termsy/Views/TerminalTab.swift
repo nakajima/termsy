@@ -100,6 +100,7 @@ class TerminalTab: Identifiable {
 	var onRequestShowSettings: (() -> Void)?
 	var onRequestDismissAuxiliaryUI: (() -> Bool)?
 	var onConnectionEstablished: ((Session) -> Void)?
+	var onSessionFontSizeChange: ((Session) -> Void)?
 	var onOverlayStateChange: (() -> Void)?
 	var onTerminalViewReplacementRequested: (() -> Void)?
 	var reportedTitle = ""
@@ -1497,7 +1498,20 @@ class TerminalTab: Identifiable {
 
 	private func configureTerminalView() {
 		terminalView.delegate = self
+		terminalView.onFontSizeChange = { [weak self] fontSize in
+			self?.rememberSessionFontSize(fontSize)
+		}
+		terminalView.setFontSize(session?.resolvedTerminalFontSize ?? TerminalFontSettings.size)
 		terminalView.setTerminalInputBlocked(fileDropOverlayState.blocksInput)
+	}
+
+	private func rememberSessionFontSize(_ rawValue: Float) {
+		guard var updatedSession = session else { return }
+		let normalizedSize = TerminalFontSettings.clampedSize(rawValue)
+		guard updatedSession.fontSize != normalizedSize else { return }
+		updatedSession.fontSize = normalizedSize
+		session = updatedSession
+		onSessionFontSizeChange?(updatedSession)
 	}
 
 	func rename(to title: String?) {

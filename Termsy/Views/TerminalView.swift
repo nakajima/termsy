@@ -78,6 +78,7 @@
 		private let scrollPhysics = TerminalScrollPhysics()
 		private var pinchBaselineFontSize: Float?
 		private var pinchAppliedFontSize: Float?
+		private(set) var fontSize = TerminalFontSettings.size
 		private var lastAppliedSurfaceMetrics: AppliedSurfaceMetrics?
 		private(set) var isDisplayActive = false
 		private var currentTheme = TerminalTheme.current.appTheme
@@ -97,6 +98,7 @@
 		private var firstResponderTask: Task<Void, Never>?
 
 		weak var delegate: (any TerminalViewDelegate)?
+		var onFontSizeChange: ((Float) -> Void)?
 
 		var autocapitalizationType: UITextAutocapitalizationType {
 			get { .none }
@@ -180,7 +182,7 @@
 			inputAssistantItem.allowsHidingShortcuts = false
 			applyTheme(TerminalTheme.current.appTheme)
 			isUserInteractionEnabled = false
-			let supportsPinchTextResize = UIDevice.current.userInterfaceIdiom == .phone
+			let supportsPinchTextResize = UIDevice.current.userInterfaceIdiom == .phone || UIDevice.current.userInterfaceIdiom == .pad
 			isMultipleTouchEnabled = supportsPinchTextResize
 			clipsToBounds = true
 
@@ -283,6 +285,15 @@
 			keyboardAccessoryBar.applyTheme(theme)
 		}
 
+		func setFontSize(_ rawValue: Float) {
+			let normalizedSize = TerminalFontSettings.clampedSize(rawValue)
+			guard fontSize != normalizedSize else { return }
+			fontSize = normalizedSize
+			guard let surface else { return }
+			GhosttyApp.shared.updateSurfaceConfig(surface, fontSize: normalizedSize)
+			syncSize(force: true)
+		}
+
 		func setPresentationMode(_ mode: PresentationMode) {
 			guard presentationMode != mode else { return }
 			presentationMode = mode
@@ -329,7 +340,7 @@
 					app: app,
 					surfaceUserdata: ghosttySurfaceUserdata?.opaquePointer,
 					scaleFactor: Double(scale),
-					fontSize: TerminalFontSettings.size
+					fontSize: fontSize
 				) { cfg in
 					cfg.platform_tag = GHOSTTY_PLATFORM_IOS
 					cfg.platform = ghostty_platform_u(
@@ -348,6 +359,7 @@
 			clipboardConfirmer.denyOutstandingReadConfirmations()
 			if let surface {
 				ghostty_surface_set_focus(surface, false)
+				GhosttyApp.shared.clearSurfaceConfig(surface)
 			}
 			hostManagedSurface?.free()
 			removeSurfaceSublayers()
@@ -1019,7 +1031,7 @@
 				guard !isDirectSelectionActive else { return }
 				requestFirstResponder()
 				cancelActiveScrollAnimationForInteraction()
-				let currentSize = TerminalFontSettings.size
+				let currentSize = fontSize
 				pinchBaselineFontSize = currentSize
 				pinchAppliedFontSize = currentSize
 
@@ -1032,11 +1044,15 @@
 				let nextSize = TerminalFontSettings.clampedSize(baselineSize * Float(recognizer.scale))
 				guard pinchAppliedFontSize != nextSize else { return }
 				pinchAppliedFontSize = nextSize
-				TerminalFontSettings.persistSize(nextSize)
-				GhosttyApp.shared.reloadConfig()
-				syncSize(force: true)
+				setFontSize(nextSize)
 
 			case .ended, .cancelled, .failed:
+				if let baselineSize = pinchBaselineFontSize,
+				   let appliedSize = pinchAppliedFontSize,
+				   appliedSize != baselineSize
+				{
+					onFontSizeChange?(appliedSize)
+				}
 				pinchBaselineFontSize = nil
 				pinchAppliedFontSize = nil
 

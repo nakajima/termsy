@@ -223,7 +223,80 @@ struct TermsyTests {
 		}
 	}
 
+	@Test func sessionFontSizePersists() throws {
+		let db = DB.memory()
+		try db.migrate()
+
+		var session = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false,
+			fontSize: 19
+		)
+
+		try db.queue.write { database in
+			try session.save(database)
+			let savedSession = try Session.fetchOne(database, key: session.id)
+			#expect(savedSession?.fontSize == 19)
+			#expect(savedSession?.resolvedTerminalFontSize == 19)
+		}
+	}
+
 	#if canImport(UIKit)
+		@MainActor
+		@Test func terminalTabAppliesSavedFontSize() {
+			let session = Session(
+				hostname: "prod.example.com",
+				username: "pat",
+				tmuxSessionName: nil,
+				port: 22,
+				autoconnect: false,
+				fontSize: 21
+			)
+
+			let tab = TerminalTab(session: session)
+			#expect(tab.terminalView.fontSize == 21)
+		}
+
+		@MainActor
+		@Test func terminalViewEnablesPinchFontResizeOnIPad() {
+			let view = TerminalView(frame: .zero)
+			guard UIDevice.current.userInterfaceIdiom == .pad else { return }
+
+			#expect(view.isMultipleTouchEnabled)
+			#expect(view.gestureRecognizers?.contains { $0 is UIPinchGestureRecognizer } == true)
+		}
+
+		@MainActor
+		@Test func terminalTabFontSizeChangePersistsToSavedSession() throws {
+			let db = DB.memory()
+			try db.migrate()
+			let coordinator = ViewCoordinator()
+			coordinator.configureDatabaseContext(.readWrite { db.queue })
+
+			var session = Session(
+				hostname: "prod.example.com",
+				username: "pat",
+				tmuxSessionName: nil,
+				port: 22,
+				autoconnect: false
+			)
+			try db.queue.write { database in
+				try session.save(database)
+			}
+
+			coordinator.openTab(for: session)
+			coordinator.selectedTab?.terminalView.onFontSizeChange?(22)
+
+			let savedSession = try db.queue.read { database in
+				try Session.fetchOne(database, key: session.id)
+			}
+			#expect(coordinator.selectedTab?.session?.fontSize == 22)
+			#expect(savedSession?.fontSize == 22)
+		}
+
 		@MainActor
 		@Test func restoredOpenSessionLoadsPersistedSnapshot() throws {
 			let db = DB.memory()
