@@ -250,6 +250,7 @@ struct SessionListContent: View {
 	@State private var directConnectError: String?
 	@State private var remoteTmuxLookupState: RemoteTmuxSessionLookupState = .idle
 	@State private var selectedItemID: ItemID?
+	@State private var editingSession: Session?
 	@State private var isFilterFocused = true
 
 	private let variant: Variant
@@ -257,6 +258,7 @@ struct SessionListContent: View {
 	private let onOpenSession: (Session) -> Void
 	private let onOpenNewSession: () -> Void
 	private let onClose: () -> Void
+	private let onSessionSaved: (Session) -> Void
 	private let onAppearWithSessions: ([Session]) -> Void
 	private let selectionPageJump = 8
 	private let rowHorizontalSpacing: CGFloat = 8
@@ -270,6 +272,7 @@ struct SessionListContent: View {
 		onOpenSession: @escaping (Session) -> Void,
 		onOpenNewSession: @escaping () -> Void = {},
 		onClose: @escaping () -> Void = {},
+		onSessionSaved: @escaping (Session) -> Void = { _ in },
 		onAppearWithSessions: @escaping ([Session]) -> Void = { _ in }
 	) {
 		self.variant = variant
@@ -277,6 +280,7 @@ struct SessionListContent: View {
 		self.onOpenSession = onOpenSession
 		self.onOpenNewSession = onOpenNewSession
 		self.onClose = onClose
+		self.onSessionSaved = onSessionSaved
 		self.onAppearWithSessions = onAppearWithSessions
 	}
 
@@ -425,7 +429,7 @@ struct SessionListContent: View {
 			.background(theme.background)
 			.background {
 				SessionListKeyboardHandler(
-					isEnabled: !isFilterFocused,
+					isEnabled: editingSession == nil && !isFilterFocused,
 					handlesClose: variant.handlesEscape,
 					onMoveSelection: moveSelection,
 					onMovePage: moveSelectionByPage,
@@ -458,6 +462,12 @@ struct SessionListContent: View {
 			}
 			.task(id: remoteTmuxLookupTarget) {
 				await refreshRemoteTmuxSessions(for: remoteTmuxLookupTarget)
+			}
+		}
+		.sheet(item: $editingSession) { session in
+			NavigationStack {
+				SessionEditView(session: session, onSave: onSessionSaved)
+					.termsyNavigationBarAppearance(theme)
 			}
 		}
 	}
@@ -634,6 +644,9 @@ struct SessionListContent: View {
 			.contentShape(Rectangle())
 		}
 		.buttonStyle(.plain)
+		.sessionEditActions(for: session) { session in
+			editingSession = session
+		}
 		.accessibilityIdentifier("row.session.\(session.normalizedTargetKey)")
 		.accessibilityValue(isSelected ? "selected" : "not selected")
 		.listRowInsets(denseRowInsets)
@@ -872,6 +885,29 @@ struct SessionListContent: View {
 }
 
 private extension View {
+	@ViewBuilder
+	func sessionEditActions(for session: Session, onEdit: @escaping (Session) -> Void) -> some View {
+		#if os(iOS)
+			swipeActions(edge: .leading, allowsFullSwipe: false) {
+				Button {
+					onEdit(session)
+				} label: {
+					Label("Edit", systemImage: "pencil")
+				}
+				.accessibilityIdentifier("action.editSession.\(session.normalizedTargetKey)")
+			}
+			.contextMenu {
+				Button {
+					onEdit(session)
+				} label: {
+					Label("Edit Session", systemImage: "pencil")
+				}
+			}
+		#else
+			self
+		#endif
+	}
+
 	@ViewBuilder
 	func sessionListKeyboardShortcut(_ key: KeyEquivalent, modifiers: EventModifiers, enabled: Bool) -> some View {
 		if enabled {

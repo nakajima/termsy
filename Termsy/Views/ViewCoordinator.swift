@@ -95,6 +95,13 @@ class ViewCoordinator {
 		open(tab: TerminalTab(session: session))
 	}
 
+	func updateOpenTabs(with session: Session) {
+		guard let sessionID = session.id else { return }
+		for tab in tabs where tab.session?.id == sessionID {
+			tab.session = session
+		}
+	}
+
 	func openPassivePreviewTab(
 		for session: Session,
 		transcript: String,

@@ -90,6 +90,12 @@ extension Session {
 		try Session.fetchAll(db).first { $0.normalizedTargetKey == other.normalizedTargetKey }
 	}
 
+	static func conflictingSession(_ other: Session, excludingID excludedID: Int64, in db: Database) throws -> Session? {
+		try Session.fetchAll(db).first { session in
+			session.id != excludedID && session.normalizedTargetKey == other.normalizedTargetKey
+		}
+	}
+
 	static func fetchSavedSessions(_ db: Database) throws -> [Session] {
 		try Session
 			.order(

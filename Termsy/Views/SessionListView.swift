@@ -21,6 +21,9 @@ struct SessionListView: View {
 			onOpenNewSession: {
 				coordinator.openNewTabUI()
 			},
+			onSessionSaved: { session in
+				coordinator.updateOpenTabs(with: session)
+			},
 			onAppearWithSessions: { sessions in
 				if sessions.isEmpty {
 					coordinator.isShowingConnectView = true

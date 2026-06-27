@@ -29,7 +29,10 @@ struct SessionPickerView: View {
 				},
 				onOpenSession: openSession,
 				onOpenNewSession: openNewSession,
-				onClose: close
+				onClose: close,
+				onSessionSaved: { session in
+					coordinator.updateOpenTabs(with: session)
+				}
 			)
 			.navigationTitle("Sessions")
 			.termsyInlineNavigationTitle()

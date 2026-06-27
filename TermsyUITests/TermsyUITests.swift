@@ -89,6 +89,37 @@ final class TermsyUITests: XCTestCase {
 	}
 
 	@MainActor
+	func testSavedSessionCanEditCwdAndTmuxSession() throws {
+		let app = XCUIApplication()
+		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.savedSessions.scenario)
+		XCUIDevice.shared.orientation = .landscapeLeft
+		app.launch()
+		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not reach foreground")
+
+		let originalRow = app.buttons["row.session.root@pimux:22#-"]
+		XCTAssertTrue(originalRow.waitForExistence(timeout: 10), "Saved session row did not appear")
+		originalRow.swipeRight()
+
+		let identifiedEditButton = app.buttons["action.editSession.root@pimux:22#-"]
+		let editButton = identifiedEditButton.waitForExistence(timeout: 2) ? identifiedEditButton : app.buttons["Edit"]
+		XCTAssertTrue(editButton.waitForExistence(timeout: 5), "Edit action did not appear")
+		editButton.tap()
+
+		let cwdField = app.textFields["field.sessionEdit.cwd"]
+		let tmuxField = app.textFields["field.sessionEdit.tmuxSessionName"]
+		XCTAssertTrue(cwdField.waitForExistence(timeout: 5), "Cwd field did not appear")
+		XCTAssertTrue(tmuxField.exists, "Tmux field did not appear")
+
+		RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.5))
+		app.typeText("~/src/ops\n")
+		app.typeText("ops")
+		app.buttons["Save"].tap()
+
+		let updatedRow = app.buttons["row.session.root@pimux:22#ops@cwd:~/src/ops"]
+		XCTAssertTrue(updatedRow.waitForExistence(timeout: 5), "Updated saved session row did not appear")
+	}
+
+	@MainActor
 	func testSessionFilterControlNAndControlPMoveSelection() throws {
 		let app = XCUIApplication()
 		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.savedSessions.scenario)

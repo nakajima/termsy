@@ -737,6 +737,42 @@ struct TermsyTests {
 		}
 	}
 
+	@Test func conflictingSessionIgnoresExcludedID() throws {
+		let db = DB.memory()
+		try db.migrate()
+
+		var original = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: "api",
+			initialWorkingDirectory: "~/src/api",
+			port: 22,
+			autoconnect: false
+		)
+		var duplicate = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: "worker",
+			initialWorkingDirectory: "~/src/worker",
+			port: 22,
+			autoconnect: false
+		)
+
+		try db.queue.write { database in
+			try original.save(database)
+			try duplicate.save(database)
+
+			var edited = original
+			edited.tmuxSessionName = "api"
+			edited.initialWorkingDirectory = "~/src/api"
+			#expect(try Session.conflictingSession(edited, excludingID: original.id!, in: database) == nil)
+
+			edited.tmuxSessionName = "worker"
+			edited.initialWorkingDirectory = "~/src/worker"
+			#expect(try Session.conflictingSession(edited, excludingID: original.id!, in: database)?.id == duplicate.id)
+		}
+	}
+
 	@MainActor
 	@Test func cleanSSHExitWhileBackgroundedSchedulesReconnectInsteadOfClosingTab() {
 		let session = Session(
