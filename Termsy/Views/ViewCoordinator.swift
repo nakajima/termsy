@@ -141,8 +141,8 @@ class ViewCoordinator {
 		tab.onConnectionEstablished = { [weak self] session in
 			self?.persistLastConnectedAt(session)
 		}
-		tab.onSessionFontSizeChange = { [weak self] session in
-			self?.persistSessionFontSize(session)
+		tab.onTerminalFontSizeChange = { [weak self] fontSize in
+			self?.persistSessionFontSize(fontSize, forTabID: tabID)
 		}
 		tabs.append(tab)
 		selectTab(tab.id, persistWorkspace: false)
@@ -465,13 +465,21 @@ class ViewCoordinator {
 		}
 	}
 
-	private func persistSessionFontSize(_ session: Session) {
-		guard let databaseContext, let sessionID = session.id else { return }
+	private func persistSessionFontSize(_ rawValue: Float, forTabID tabID: UUID) {
+		guard let databaseContext else { return }
+		guard let tab = tabs.first(where: { $0.id == tabID }) else { return }
+		guard var session = tab.session, let sessionID = session.id else { return }
+		let normalizedSize = TerminalFontSettings.clampedSize(rawValue)
+		guard session.fontSize != normalizedSize else { return }
+
+		session.fontSize = normalizedSize
+		tab.session = session
+
 		do {
 			try databaseContext.writer.write { db in
 				try db.execute(
 					sql: "UPDATE session SET fontSize = ? WHERE id = ?",
-					arguments: [session.fontSize.map { Double($0) }, sessionID]
+					arguments: [Double(normalizedSize), sessionID]
 				)
 			}
 		} catch {

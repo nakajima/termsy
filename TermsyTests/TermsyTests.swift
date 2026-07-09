@@ -106,6 +106,29 @@ struct TermsyTests {
 				charactersIgnoringModifiers: "["
 			) == nil)
 		}
+
+		@Test func terminalFontSizeShortcutsUseCommandPlusAndMinus() {
+			#expect(TerminalView.fontSizeAdjustment(
+				modifierFlags: .command,
+				characters: "=",
+				charactersIgnoringModifiers: "="
+			) == 1)
+			#expect(TerminalView.fontSizeAdjustment(
+				modifierFlags: [.command, .shift],
+				characters: "+",
+				charactersIgnoringModifiers: "="
+			) == 1)
+			#expect(TerminalView.fontSizeAdjustment(
+				modifierFlags: .command,
+				characters: "-",
+				charactersIgnoringModifiers: "-"
+			) == -1)
+			#expect(TerminalView.fontSizeAdjustment(
+				modifierFlags: [.command, .alternate],
+				characters: "=",
+				charactersIgnoringModifiers: "="
+			) == nil)
+		}
 	#endif
 
 	@MainActor
@@ -288,7 +311,7 @@ struct TermsyTests {
 			}
 
 			coordinator.openTab(for: session)
-			coordinator.selectedTab?.terminalView.onFontSizeChange?(22)
+			coordinator.selectedTab?.terminalView.setFontSize(22, notifyChange: true)
 
 			let savedSession = try db.queue.read { database in
 				try Session.fetchOne(database, key: session.id)

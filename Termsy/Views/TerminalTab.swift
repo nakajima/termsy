@@ -100,7 +100,7 @@ class TerminalTab: Identifiable {
 	var onRequestShowSettings: (() -> Void)?
 	var onRequestDismissAuxiliaryUI: (() -> Bool)?
 	var onConnectionEstablished: ((Session) -> Void)?
-	var onSessionFontSizeChange: ((Session) -> Void)?
+	var onTerminalFontSizeChange: ((Float) -> Void)?
 	var onOverlayStateChange: (() -> Void)?
 	var onTerminalViewReplacementRequested: (() -> Void)?
 	var reportedTitle = ""
@@ -821,11 +821,12 @@ class TerminalTab: Identifiable {
 			guard !isPassivePreview else { return }
 			guard terminalView.surface != nil else { return }
 
+			let displaySnapshot = terminalView.captureSnapshot()
 			let snapshotJPEGData = terminalView.capturePersistedSnapshotJPEGData()
 			if let snapshotJPEGData {
 				session?.lastTerminalSnapshotJPEGData = snapshotJPEGData
 			}
-			let snapshot = snapshotJPEGData.flatMap(UIImage.init(data:)) ?? restorationSnapshot
+			let snapshot = displaySnapshot ?? snapshotJPEGData.flatMap(UIImage.init(data:)) ?? restorationSnapshot
 			let wasConnectionActive = connectionIsActive
 			let wasConnecting = phase == .connecting
 			let shouldReconnectOnSelection = wasConnectionActive || wasConnecting || phase == .connected || restorationMode != nil
@@ -1498,20 +1499,8 @@ class TerminalTab: Identifiable {
 
 	private func configureTerminalView() {
 		terminalView.delegate = self
-		terminalView.onFontSizeChange = { [weak self] fontSize in
-			self?.rememberSessionFontSize(fontSize)
-		}
 		terminalView.setFontSize(session?.resolvedTerminalFontSize ?? TerminalFontSettings.size)
 		terminalView.setTerminalInputBlocked(fileDropOverlayState.blocksInput)
-	}
-
-	private func rememberSessionFontSize(_ rawValue: Float) {
-		guard var updatedSession = session else { return }
-		let normalizedSize = TerminalFontSettings.clampedSize(rawValue)
-		guard updatedSession.fontSize != normalizedSize else { return }
-		updatedSession.fontSize = normalizedSize
-		session = updatedSession
-		onSessionFontSizeChange?(updatedSession)
 	}
 
 	func rename(to title: String?) {
@@ -1733,6 +1722,10 @@ extension TerminalTab: TerminalViewDelegate {
 
 	func terminalViewShouldDismissAuxiliaryUI(_: TerminalView) -> Bool {
 		onRequestDismissAuxiliaryUI?() ?? false
+	}
+
+	func terminalView(_: TerminalView, didChangeFontSize fontSize: Float) {
+		onTerminalFontSizeChange?(fontSize)
 	}
 
 	func terminalView(_: TerminalView, didReceiveFileDropURLs urls: [URL]) {

@@ -24,6 +24,7 @@
 		func terminalView(_ view: TerminalView, requestsMoveTabSelectionBy offset: Int)
 		func terminalViewRequestsShowSettings(_ view: TerminalView)
 		func terminalViewShouldDismissAuxiliaryUI(_ view: TerminalView) -> Bool
+		func terminalView(_ view: TerminalView, didChangeFontSize fontSize: Float)
 		func terminalView(_ view: TerminalView, didReceiveFileDropURLs urls: [URL])
 		func terminalView(_ view: TerminalView, didFailFileDropWithMessage message: String)
 	}
@@ -98,7 +99,6 @@
 		private var firstResponderTask: Task<Void, Never>?
 
 		weak var delegate: (any TerminalViewDelegate)?
-		var onFontSizeChange: ((Float) -> Void)?
 
 		var autocapitalizationType: UITextAutocapitalizationType {
 			get { .none }
@@ -285,10 +285,13 @@
 			keyboardAccessoryBar.applyTheme(theme)
 		}
 
-		func setFontSize(_ rawValue: Float) {
+		func setFontSize(_ rawValue: Float, notifyChange: Bool = false) {
 			let normalizedSize = TerminalFontSettings.clampedSize(rawValue)
 			guard fontSize != normalizedSize else { return }
 			fontSize = normalizedSize
+			if notifyChange {
+				delegate?.terminalView(self, didChangeFontSize: normalizedSize)
+			}
 			guard let surface else { return }
 			GhosttyApp.shared.updateSurfaceConfig(surface, fontSize: normalizedSize)
 			syncSize(force: true)
@@ -1044,15 +1047,9 @@
 				let nextSize = TerminalFontSettings.clampedSize(baselineSize * Float(recognizer.scale))
 				guard pinchAppliedFontSize != nextSize else { return }
 				pinchAppliedFontSize = nextSize
-				setFontSize(nextSize)
+				setFontSize(nextSize, notifyChange: true)
 
 			case .ended, .cancelled, .failed:
-				if let baselineSize = pinchBaselineFontSize,
-				   let appliedSize = pinchAppliedFontSize,
-				   appliedSize != baselineSize
-				{
-					onFontSizeChange?(appliedSize)
-				}
 				pinchBaselineFontSize = nil
 				pinchAppliedFontSize = nil
 
@@ -1201,6 +1198,10 @@
 				appShortcutCommand(input: "}", modifiers: [.command, .shift], action: #selector(selectNextTabFromKeyCommand(_:)), title: nil),
 				appShortcutCommand(input: "{", modifiers: .command, action: #selector(selectPreviousTabFromKeyCommand(_:)), title: nil),
 				appShortcutCommand(input: "}", modifiers: .command, action: #selector(selectNextTabFromKeyCommand(_:)), title: nil),
+				appShortcutCommand(input: "+", modifiers: .command, action: #selector(increaseFontSizeFromKeyCommand(_:)), title: "Increase Font Size"),
+				appShortcutCommand(input: "+", modifiers: [.command, .shift], action: #selector(increaseFontSizeFromKeyCommand(_:)), title: nil),
+				appShortcutCommand(input: "=", modifiers: .command, action: #selector(increaseFontSizeFromKeyCommand(_:)), title: nil),
+				appShortcutCommand(input: "-", modifiers: .command, action: #selector(decreaseFontSizeFromKeyCommand(_:)), title: "Decrease Font Size"),
 			]
 		}
 
@@ -1224,6 +1225,14 @@
 
 		@objc private func selectNextTabFromKeyCommand(_: UIKeyCommand) {
 			delegate?.terminalView(self, requestsMoveTabSelectionBy: 1)
+		}
+
+		@objc private func increaseFontSizeFromKeyCommand(_: UIKeyCommand) {
+			adjustFontSize(by: 1)
+		}
+
+		@objc private func decreaseFontSizeFromKeyCommand(_: UIKeyCommand) {
+			adjustFontSize(by: -1)
 		}
 
 		override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
@@ -1499,6 +1508,29 @@
 			}
 		}
 
+		nonisolated static func fontSizeAdjustment(
+			modifierFlags: UIKeyModifierFlags,
+			characters: String,
+			charactersIgnoringModifiers: String
+		) -> Float? {
+			let modifiers = modifierFlags.intersection([.shift, .control, .alternate, .command])
+			guard modifiers == .command || modifiers == [.command, .shift] else { return nil }
+
+			let charactersIgnoringModifiers = charactersIgnoringModifiers.trimmingCharacters(in: .whitespacesAndNewlines)
+			let characters = characters.trimmingCharacters(in: .whitespacesAndNewlines)
+			if charactersIgnoringModifiers == "=" || characters == "=" || characters == "+" {
+				return 1
+			}
+			if charactersIgnoringModifiers == "-" || characters == "-" || characters == "_" {
+				return -1
+			}
+			return nil
+		}
+
+		private func adjustFontSize(by delta: Float) {
+			setFontSize(fontSize + delta, notifyChange: true)
+		}
+
 		private func handleAppShortcutIfNeeded(for key: UIKey) -> Bool {
 			let modifiers = key.modifierFlags.intersection([.shift, .control, .alternate, .command])
 			if key.keyCode == .keyboardEscape, modifiers.isEmpty {
@@ -1506,6 +1538,15 @@
 			}
 
 			guard key.modifierFlags.contains(.command) else { return false }
+
+			if let fontSizeAdjustment = Self.fontSizeAdjustment(
+				modifierFlags: key.modifierFlags,
+				characters: key.characters,
+				charactersIgnoringModifiers: key.charactersIgnoringModifiers
+			) {
+				adjustFontSize(by: fontSizeAdjustment)
+				return true
+			}
 
 			if let offset = Self.tabNavigationOffset(
 				keyCode: key.keyCode,
