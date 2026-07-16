@@ -872,12 +872,18 @@ struct SessionListContent: View {
 		guard !sessionsToDelete.isEmpty else { return }
 
 		do {
-			try dbContext.writer.write { db in
+			let remainingHostKeys = try dbContext.writer.write { db -> Set<String> in
 				for session in sessionsToDelete {
 					try session.delete(db)
 				}
+				return Set(try Session.fetchAll(db).map(\.normalizedSSHHostKey))
 			}
-			sessionsToDelete.forEach(Keychain.removePassword)
+			for session in sessionsToDelete {
+				Keychain.removePassword(
+					for: session,
+					preservingHostPassword: remainingHostKeys.contains(session.normalizedSSHHostKey)
+				)
+			}
 		} catch {
 			print("[DB] failed to delete sessions: \(error)")
 		}

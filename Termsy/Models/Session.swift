@@ -175,8 +175,12 @@ extension Session {
 		return "\(baseTitle):\(port)"
 	}
 
+	var normalizedSSHHostKey: String {
+		"\(normalizedUsername)@\(normalizedHostname):\(port)"
+	}
+
 	var normalizedTargetKey: String {
-		let baseKey = "\(normalizedUsername)@\(normalizedHostname):\(port)#\(normalizedTmuxSessionName)"
+		let baseKey = "\(normalizedSSHHostKey)#\(normalizedTmuxSessionName)"
 		guard let trimmedInitialWorkingDirectory else { return baseKey }
 		return "\(baseKey)@cwd:\(trimmedInitialWorkingDirectory)"
 	}

@@ -9,8 +9,13 @@ import Security
 enum Keychain {
 	private nonisolated static func service() -> String { "com.termsy.ssh" }
 
-	private nonisolated static func account(for session: Session) -> String {
-		"session:\(session.id ?? 0)"
+	private nonisolated static func hostAccount(for session: Session) -> String {
+		"host:\(session.normalizedSSHHostKey)"
+	}
+
+	private nonisolated static func sessionAccount(for session: Session) -> String? {
+		guard let id = session.id else { return nil }
+		return "session:\(id)"
 	}
 
 	private nonisolated static func normalizedTargetAccount(for session: Session) -> String {
@@ -34,55 +39,66 @@ enum Keychain {
 	}
 
 	nonisolated static func password(for session: Session) -> String? {
-		if let password = readPassword(account: account(for: session)) {
-			upsertPassword(password, account: normalizedTargetAccount(for: session))
+		let canonicalAccount = hostAccount(for: session)
+		if let password = readPassword(account: canonicalAccount) {
+			removeLegacyPasswords(for: session)
 			return password
 		}
 
-		if let password = readPassword(account: normalizedTargetAccount(for: session)) {
-			upsertPassword(password, account: account(for: session))
+		for account in legacyAccounts(for: session) {
+			guard let password = readPassword(account: account) else { continue }
+			if upsertPassword(password, account: canonicalAccount) {
+				removeLegacyPasswords(for: session)
+			}
 			return password
 		}
 
-		let tmuxAwareLegacyAccount = legacyAccount(for: session)
-		if let legacyPassword = readPassword(account: tmuxAwareLegacyAccount) {
-			setPassword(legacyPassword, for: session)
-			removePassword(account: tmuxAwareLegacyAccount)
-			return legacyPassword
-		}
-
-		guard session.normalizedTmuxSessionName == "-",
-		      let legacyPassword = readPassword(account: legacyAccountWithoutTmux(for: session))
-		else {
-			return nil
-		}
-
-		setPassword(legacyPassword, for: session)
-		removePassword(account: legacyAccountWithoutTmux(for: session))
-		return legacyPassword
+		return nil
 	}
 
 	nonisolated static func setPassword(_ password: String, for session: Session) {
-		upsertPassword(password, account: account(for: session))
-		upsertPassword(password, account: normalizedTargetAccount(for: session))
-	}
-
-	nonisolated static func removePassword(for session: Session) {
-		removePassword(account: account(for: session))
-		removePassword(account: normalizedTargetAccount(for: session))
-		removePassword(account: legacyAccount(for: session))
-		removePassword(account: legacyAccountWithoutTmux(for: session))
-	}
-
-	nonisolated static func movePasswordIfNeeded(from source: Session, to destination: Session) {
-		if password(for: destination) != nil {
-			removePassword(for: source)
-			return
+		if upsertPassword(password, account: hostAccount(for: session)) {
+			removeLegacyPasswords(for: session)
 		}
+	}
 
-		guard let password = password(for: source) else { return }
-		setPassword(password, for: destination)
-		removePassword(for: source)
+	nonisolated static func removePassword(for session: Session, preservingHostPassword: Bool = false) {
+		if !preservingHostPassword {
+			removePassword(account: hostAccount(for: session))
+		}
+		removeLegacyPasswords(for: session)
+	}
+
+	nonisolated static func migratePasswords(for sessions: [Session]) {
+		for session in sessions {
+			_ = password(for: session)
+		}
+	}
+
+	nonisolated static func migratePasswordIfNeeded(for session: Session) {
+		_ = password(for: session)
+	}
+
+	private nonisolated static func legacyAccounts(for session: Session) -> [String] {
+		var accounts: [String] = []
+		if let sessionAccount = sessionAccount(for: session) {
+			accounts.append(sessionAccount)
+		}
+		accounts.append(normalizedTargetAccount(for: session))
+
+		let tmuxAwareAccount = legacyAccount(for: session)
+		let accountWithoutTmux = legacyAccountWithoutTmux(for: session)
+		if tmuxAwareAccount != accountWithoutTmux {
+			accounts.append(tmuxAwareAccount)
+		}
+		accounts.append(accountWithoutTmux)
+		return accounts
+	}
+
+	private nonisolated static func removeLegacyPasswords(for session: Session) {
+		for account in legacyAccounts(for: session) {
+			removePassword(account: account)
+		}
 	}
 
 	private nonisolated static func readPassword(account: String) -> String? {
@@ -106,7 +122,7 @@ enum Keychain {
 		return String(data: data, encoding: .utf8)
 	}
 
-	private nonisolated static func upsertPassword(_ password: String, account: String) {
+	private nonisolated static func upsertPassword(_ password: String, account: String) -> Bool {
 		let data = Data(password.utf8)
 		let query: [String: Any] = [
 			kSecClass as String: kSecClassGenericPassword,
@@ -117,12 +133,14 @@ enum Keychain {
 			kSecValueData as String: data,
 		]
 		let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
-
-		if status == errSecItemNotFound {
-			var attrs = query
-			attrs[kSecValueData as String] = data
-			SecItemAdd(attrs as CFDictionary, nil)
+		if status == errSecSuccess {
+			return true
 		}
+		guard status == errSecItemNotFound else { return false }
+
+		var attrs = query
+		attrs[kSecValueData as String] = data
+		return SecItemAdd(attrs as CFDictionary, nil) == errSecSuccess
 	}
 
 	private nonisolated static func removePassword(account: String) {

@@ -5,6 +5,7 @@
 //  Created by Pat Nakajima on 4/2/26.
 //
 
+import GRDB
 import GRDBQuery
 import SwiftUI
 #if os(macOS)
@@ -26,8 +27,12 @@ struct TermsyApp: App {
 			metadata: ["screenshotMode": launchConfiguration.isScreenshotMode]
 		)
 		self.launchConfiguration = launchConfiguration
-		self.db = DB.path(launchConfiguration.databasePath)
+		let db = DB.path(launchConfiguration.databasePath)
+		self.db = db
 		launchConfiguration.preparePersistentStateIfNeeded(using: db)
+		if let sessions = try? db.queue.read({ db in try Session.fetchSavedSessions(db) }) {
+			Keychain.migratePasswords(for: sessions)
+		}
 		#if os(macOS)
 			NSWindow.allowsAutomaticWindowTabbing = false
 		#endif

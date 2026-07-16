@@ -8,6 +8,7 @@
 import Foundation
 import GRDB
 import GRDBQuery
+import Security
 #if canImport(UIKit)
 	import UIKit
 #endif
@@ -675,6 +676,98 @@ struct TermsyTests {
 			try Session.fetchSavedSessions(database)
 		}
 		#expect(sessions.map(\.hostname) == ["new.example.com", "old.example.com", "draft.example.com"])
+	}
+
+	@Test func sshCredentialHostKeyIsSharedAcrossTmuxSessionsAndWorkingDirectories() {
+		let apiSession = Session(
+			hostname: " Prod.Example.com ",
+			username: "PAT",
+			tmuxSessionName: "api",
+			initialWorkingDirectory: "~/src/api",
+			port: 2222,
+			autoconnect: false
+		)
+		let workerSession = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: "worker",
+			initialWorkingDirectory: "~/src/worker",
+			port: 2222,
+			autoconnect: false
+		)
+
+		#expect(apiSession.normalizedSSHHostKey == "pat@prod.example.com:2222")
+		#expect(apiSession.normalizedSSHHostKey == workerSession.normalizedSSHHostKey)
+	}
+
+	@Test func sshCredentialHostKeyDistinguishesUsersAndPorts() {
+		let baseSession = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let otherUserSession = Session(
+			hostname: "prod.example.com",
+			username: "deploy",
+			tmuxSessionName: nil,
+			port: 22,
+			autoconnect: false
+		)
+		let otherPortSession = Session(
+			hostname: "prod.example.com",
+			username: "pat",
+			tmuxSessionName: nil,
+			port: 2222,
+			autoconnect: false
+		)
+
+		#expect(baseSession.normalizedSSHHostKey != otherUserSession.normalizedSSHHostKey)
+		#expect(baseSession.normalizedSSHHostKey != otherPortSession.normalizedSSHHostKey)
+	}
+
+	@Test func legacyTargetPasswordMigratesAndIsSharedWithSiblingSessions() {
+		let uniqueHost = "\(UUID().uuidString.lowercased()).example.com"
+		let sourceSession = Session(
+			hostname: uniqueHost,
+			username: "pat",
+			tmuxSessionName: "api",
+			initialWorkingDirectory: "~/src/api",
+			port: 22,
+			autoconnect: false
+		)
+		let siblingSession = Session(
+			hostname: uniqueHost,
+			username: "pat",
+			tmuxSessionName: "worker",
+			initialWorkingDirectory: "~/src/worker",
+			port: 22,
+			autoconnect: false
+		)
+		let password = UUID().uuidString
+		let legacyAccount = "target:\(sourceSession.normalizedTargetKey)"
+		let legacyQuery: [String: Any] = [
+			kSecClass as String: kSecClassGenericPassword,
+			kSecAttrService as String: "com.termsy.ssh",
+			kSecAttrAccount as String: legacyAccount,
+		]
+
+		SecItemDelete(legacyQuery as CFDictionary)
+		Keychain.removePassword(for: sourceSession)
+		defer {
+			SecItemDelete(legacyQuery as CFDictionary)
+			Keychain.removePassword(for: sourceSession)
+		}
+
+		var legacyItem = legacyQuery
+		legacyItem[kSecValueData as String] = Data(password.utf8)
+		#expect(SecItemAdd(legacyItem as CFDictionary, nil) == errSecSuccess)
+
+		Keychain.migratePasswords(for: [siblingSession, sourceSession])
+
+		#expect(Keychain.password(for: siblingSession) == password)
+		#expect(SecItemCopyMatching(legacyQuery as CFDictionary, nil) == errSecItemNotFound)
 	}
 
 	@Test func sameHostDifferentTmuxNamesPersistAsSeparateSessions() throws {

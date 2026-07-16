@@ -130,7 +130,7 @@ struct SessionEditView: View {
 			}
 
 			if session.normalizedTargetKey != persistedSession.normalizedTargetKey {
-				Keychain.movePasswordIfNeeded(from: session, to: persistedSession)
+				Keychain.migratePasswordIfNeeded(for: session)
 			}
 			onSave(persistedSession)
 			dismiss()

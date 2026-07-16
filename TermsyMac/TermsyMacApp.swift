@@ -1,5 +1,6 @@
 #if os(macOS)
 	import AppKit
+	import GRDB
 	import SwiftUI
 
 	@main
@@ -10,7 +11,11 @@
 
 		init() {
 			NSWindow.allowsAutomaticWindowTabbing = true
-			self.db = DB.path(URL.documentsDirectory.appending(path: "termsy.db").path)
+			let db = DB.path(URL.documentsDirectory.appending(path: "termsy.db").path)
+			self.db = db
+			if let sessions = try? db.queue.read({ db in try Session.fetchSavedSessions(db) }) {
+				Keychain.migratePasswords(for: sessions)
+			}
 			MacTerminalWindowManager.shared.configure(db: db)
 		}
 
