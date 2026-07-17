@@ -95,8 +95,8 @@ struct TerminalOverlay: View {
 				GeometryReader { proxy in
 					Image(uiImage: snapshot)
 						.resizable()
-						.scaledToFill()
-						.frame(width: proxy.size.width, height: proxy.size.height)
+						.scaledToFit()
+						.frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
 						.clipped()
 				}
 				.background(theme.background)
