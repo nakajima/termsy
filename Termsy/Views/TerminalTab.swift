@@ -8,6 +8,7 @@
 import Foundation
 import Observation
 import SwiftUI
+
 import UIKit
 
 /// Represents a single open terminal tab.

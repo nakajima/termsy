@@ -49,16 +49,36 @@
 						}
 					},
 					action: { target, action in
-						guard target.tag == GHOSTTY_TARGET_SURFACE,
-						      let surface = target.target.surface,
-						      action.tag == GHOSTTY_ACTION_SET_TITLE,
-						      let cTitle = action.action.set_title.title,
-						      let view = GhosttySurfaceUserdata.object(fromOpaque: ghostty_surface_userdata(surface), as: MacTerminalView.self)
-						else { return }
+						switch action.tag {
+						case GHOSTTY_ACTION_SET_TITLE:
+							guard target.tag == GHOSTTY_TARGET_SURFACE,
+							      let surface = target.target.surface,
+							      let cTitle = action.action.set_title.title,
+							      let view = GhosttySurfaceUserdata.object(fromOpaque: ghostty_surface_userdata(surface), as: MacTerminalView.self)
+							else { return false }
 
-						let title = String(cString: cTitle)
-						Task { @MainActor [weak view] in
-							view?.handleTitleChange(title)
+							let title = String(cString: cTitle)
+							Task { @MainActor [weak view] in
+								view?.handleTitleChange(title)
+							}
+							return true
+
+						case GHOSTTY_ACTION_OPEN_URL:
+							let value = action.action.open_url
+							guard value.len > 0, let cURL = value.url else { return false }
+							let data = Data(bytes: cURL, count: Int(value.len))
+							guard let string = String(data: data, encoding: .utf8),
+							      let url = URL(string: string),
+							      url.scheme != nil
+							else { return false }
+
+							Task { @MainActor in
+								NSWorkspace.shared.open(url)
+							}
+							return true
+
+						default:
+							return false
 						}
 					},
 					closeSurface: { _, _ in },

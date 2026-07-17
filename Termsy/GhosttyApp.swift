@@ -40,11 +40,12 @@
 						      let view = GhosttySurfaceUserdata.object(fromOpaque: ghostty_surface_userdata(surface), as: TerminalView.self),
 						      action.tag == GHOSTTY_ACTION_SET_TITLE,
 						      let cTitle = action.action.set_title.title
-						else { return }
+						else { return false }
 						let title = String(cString: cTitle)
 						Task { @MainActor [weak view] in
 							view?.handleTitleChange(title)
 						}
+						return true
 					},
 					closeSurface: { _, _ in },
 					confirmReadClipboard: { userdata, string, opaquePtr, request in
