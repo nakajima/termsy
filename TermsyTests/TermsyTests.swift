@@ -1267,6 +1267,29 @@ struct TermsyTests {
 		}
 
 		@MainActor
+		@Test func persistedTerminalSnapshotRetainsNativePixelDimensions() throws {
+			let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+			defer {
+				view.stop()
+				view.removeFromSuperview()
+			}
+
+			guard let window = makeTestWindow(frame: view.frame) else {
+				Issue.record("expected window scene")
+				return
+			}
+			window.addSubview(view)
+			view.layoutIfNeeded()
+
+			let capturedImage = try #require(view.captureSnapshot())
+			let persistedData = try #require(view.capturePersistedSnapshotJPEGData())
+			let persistedImage = try #require(UIImage(data: persistedData))
+
+			#expect(persistedImage.cgImage?.width == capturedImage.cgImage?.width)
+			#expect(persistedImage.cgImage?.height == capturedImage.cgImage?.height)
+		}
+
+		@MainActor
 		@Test func kittyGraphicsRenderVisiblePixels() async {
 			let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 240))
 			defer {
