@@ -93,9 +93,18 @@ struct TerminalOverlay: View {
 		#if canImport(UIKit)
 			if let snapshot = tab.displaySnapshot {
 				GeometryReader { proxy in
+					let scale = min(
+						1,
+						min(proxy.size.width / snapshot.size.width, proxy.size.height / snapshot.size.height)
+					)
+					let fittedSize = CGSize(
+						width: snapshot.size.width * scale,
+						height: snapshot.size.height * scale
+					)
+
 					Image(uiImage: snapshot)
 						.resizable()
-						.scaledToFit()
+						.frame(width: fittedSize.width, height: fittedSize.height)
 						.frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
 						.clipped()
 				}
