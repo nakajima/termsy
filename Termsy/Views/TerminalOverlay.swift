@@ -95,14 +95,17 @@ struct TerminalOverlay: View {
 				GeometryReader { proxy in
 					let scale = min(
 						1,
-						min(proxy.size.width / snapshot.size.width, proxy.size.height / snapshot.size.height)
+						min(
+							proxy.size.width / snapshot.viewportSize.width,
+							proxy.size.height / snapshot.viewportSize.height
+						)
 					)
 					let fittedSize = CGSize(
-						width: snapshot.size.width * scale,
-						height: snapshot.size.height * scale
+						width: snapshot.viewportSize.width * scale,
+						height: snapshot.viewportSize.height * scale
 					)
 
-					Image(uiImage: snapshot)
+					Image(uiImage: snapshot.image)
 						.resizable()
 						.frame(width: fittedSize.width, height: fittedSize.height)
 						.frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)

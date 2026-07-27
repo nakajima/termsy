@@ -21,6 +21,8 @@ struct Session: Codable, FetchableRecord, MutablePersistableRecord, Identifiable
 	var tabOrder: Int?
 	var isOpen: Bool = false
 	var lastTerminalSnapshotJPEGData: Data?
+	var lastTerminalSnapshotWidth: Double?
+	var lastTerminalSnapshotHeight: Double?
 	var autoconnect: Bool = true
 	var port: Int = 22
 	var createdAt: Date
@@ -51,6 +53,8 @@ extension Session {
 		static let tabOrder = Column(CodingKeys.tabOrder)
 		static let isOpen = Column(CodingKeys.isOpen)
 		static let lastTerminalSnapshotJPEGData = Column(CodingKeys.lastTerminalSnapshotJPEGData)
+		static let lastTerminalSnapshotWidth = Column(CodingKeys.lastTerminalSnapshotWidth)
+		static let lastTerminalSnapshotHeight = Column(CodingKeys.lastTerminalSnapshotHeight)
 		static let autoconnect = Column(CodingKeys.autoconnect)
 		static let port = Column(CodingKeys.port)
 		static let createdAt = Column(CodingKeys.createdAt)
@@ -80,6 +84,8 @@ extension Session {
 		self.tabOrder = tabOrder
 		self.isOpen = isOpen
 		self.lastTerminalSnapshotJPEGData = nil
+		self.lastTerminalSnapshotWidth = nil
+		self.lastTerminalSnapshotHeight = nil
 		self.port = port
 		self.autoconnect = autoconnect
 		self.createdAt = now

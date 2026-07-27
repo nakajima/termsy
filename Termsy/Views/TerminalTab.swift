@@ -11,6 +11,11 @@ import SwiftUI
 
 import UIKit
 
+struct TerminalSnapshot {
+	let image: UIImage
+	let viewportSize: CGSize
+}
+
 /// Represents a single open terminal tab.
 @Observable @MainActor
 class TerminalTab: Identifiable {
@@ -108,8 +113,8 @@ class TerminalTab: Identifiable {
 	var connectionLog: [String] = []
 	private(set) var isRecording = false
 	private(set) var recordingDataByteCount: Int64 = 0
-	@ObservationIgnored private var restorationSnapshot: UIImage?
-	var displaySnapshot: UIImage? {
+	@ObservationIgnored private var restorationSnapshot: TerminalSnapshot?
+	var displaySnapshot: TerminalSnapshot? {
 		restorationSnapshot
 	}
 	@ObservationIgnored var onFirstRemoteOutput: (() -> Void)?
@@ -144,11 +149,7 @@ class TerminalTab: Identifiable {
 		self.terminalView = TerminalView(frame: .zero)
 		if session.isOpen {
 			self.restorationMode = .launch
-			if let snapshotData = session.lastTerminalSnapshotJPEGData {
-				self.restorationSnapshot = UIImage(data: snapshotData)
-			} else {
-				self.restorationSnapshot = nil
-			}
+			self.restorationSnapshot = Self.persistedRestorationSnapshot(for: session)
 		} else {
 			self.restorationMode = nil
 			self.restorationSnapshot = nil
@@ -673,8 +674,40 @@ class TerminalTab: Identifiable {
 			if case .backgroundReconnect = restorationMode, restorationSnapshot != nil {
 				return
 			}
-			beginRestoration(.backgroundReconnect, snapshot: restorationSnapshot ?? terminalView.captureSnapshot())
+			beginRestoration(.backgroundReconnect, snapshot: restorationSnapshot ?? captureRestorationSnapshot())
 		}
+	}
+
+	private func captureRestorationSnapshot() -> TerminalSnapshot? {
+		let viewportSize = terminalView.bounds.size
+		guard viewportSize.width > 0, viewportSize.height > 0,
+		      let image = terminalView.captureSnapshot()
+		else {
+			return nil
+		}
+		return TerminalSnapshot(image: image, viewportSize: viewportSize)
+	}
+
+	private static func persistedRestorationSnapshot(for session: Session) -> TerminalSnapshot? {
+		guard let data = session.lastTerminalSnapshotJPEGData,
+		      let width = session.lastTerminalSnapshotWidth,
+		      let height = session.lastTerminalSnapshotHeight,
+		      width > 0,
+		      height > 0,
+		      let image = UIImage(data: data)
+		else {
+			return nil
+		}
+		return TerminalSnapshot(
+			image: image,
+			viewportSize: CGSize(width: CGFloat(width), height: CGFloat(height))
+		)
+	}
+
+	private func persistedRestorationSnapshot(from data: Data?) -> TerminalSnapshot? {
+		guard var session, let data else { return nil }
+		session.lastTerminalSnapshotJPEGData = data
+		return Self.persistedRestorationSnapshot(for: session)
 	}
 
 	private func finishRestorationPresentation() {
@@ -686,7 +719,7 @@ class TerminalTab: Identifiable {
 		notifyOverlayStateChanged()
 	}
 
-	private func beginRestoration(_ mode: RestorationMode, snapshot: UIImage?) {
+	private func beginRestoration(_ mode: RestorationMode, snapshot: TerminalSnapshot?) {
 		restorationRevealTask?.cancel()
 		restorationRevealTask = nil
 		restorationFirstRemoteOutputAt = nil
@@ -822,12 +855,9 @@ class TerminalTab: Identifiable {
 			guard !isPassivePreview else { return }
 			guard terminalView.surface != nil else { return }
 
-			let displaySnapshot = terminalView.captureSnapshot()
-			let snapshotJPEGData = terminalView.capturePersistedSnapshotJPEGData()
-			if let snapshotJPEGData {
-				session?.lastTerminalSnapshotJPEGData = snapshotJPEGData
-			}
-			let snapshot = displaySnapshot ?? snapshotJPEGData.flatMap(UIImage.init(data:)) ?? restorationSnapshot
+			let displaySnapshot = captureRestorationSnapshot()
+			let snapshotJPEGData = capturePersistedSnapshotJPEGData()
+			let snapshot = displaySnapshot ?? persistedRestorationSnapshot(from: snapshotJPEGData) ?? restorationSnapshot
 			let wasConnectionActive = connectionIsActive
 			let wasConnecting = phase == .connecting
 			let shouldReconnectOnSelection = wasConnectionActive || wasConnecting || phase == .connected || restorationMode != nil
@@ -873,12 +903,17 @@ class TerminalTab: Identifiable {
 		guard terminalView.surface != nil, terminalView.hasAttachedWindow else {
 			return session?.lastTerminalSnapshotJPEGData
 		}
-		guard let jpegData = terminalView.capturePersistedSnapshotJPEGData() else {
+		let viewportSize = terminalView.bounds.size
+		guard viewportSize.width > 0, viewportSize.height > 0,
+		      let jpegData = terminalView.capturePersistedSnapshotJPEGData()
+		else {
 			return session?.lastTerminalSnapshotJPEGData
 		}
 		session?.lastTerminalSnapshotJPEGData = jpegData
+		session?.lastTerminalSnapshotWidth = Double(viewportSize.width)
+		session?.lastTerminalSnapshotHeight = Double(viewportSize.height)
 		if restorationMode == .launch {
-			restorationSnapshot = UIImage(data: jpegData)
+			restorationSnapshot = persistedRestorationSnapshot(from: jpegData)
 		}
 		return jpegData
 	}
@@ -896,7 +931,7 @@ class TerminalTab: Identifiable {
 			}
 			return
 		}
-		beginRestoration(.backgroundReconnect, snapshot: terminalView.captureSnapshot())
+		beginRestoration(.backgroundReconnect, snapshot: captureRestorationSnapshot())
 		print("[Screenshots] ready \(readinessLabel)")
 	}
 
@@ -1048,7 +1083,7 @@ class TerminalTab: Identifiable {
 		   !isPassivePreview,
 		   terminalView.hasAttachedWindow
 		{
-			restorationSnapshot = terminalView.captureSnapshot()
+			restorationSnapshot = captureRestorationSnapshot()
 		}
 		if ApplicationActivity.hasBackgroundExecution, shouldRequestBackgroundExecution {
 			logConnectionEvent("Requested iOS background execution to keep the SSH session alive")
@@ -1175,12 +1210,12 @@ class TerminalTab: Identifiable {
 		}
 	}
 
-	func prepareForReconnectAfterBackgroundLoss(snapshot: UIImage? = nil) {
+	func prepareForReconnectAfterBackgroundLoss(snapshot: TerminalSnapshot? = nil) {
 		guard case .remote = endpoint, !isPassivePreview else {
 			retryConnection()
 			return
 		}
-		beginRestoration(.backgroundReconnect, snapshot: snapshot ?? restorationSnapshot ?? terminalView.captureSnapshot())
+		beginRestoration(.backgroundReconnect, snapshot: snapshot ?? restorationSnapshot ?? captureRestorationSnapshot())
 		resetTerminalView()
 		retryConnection(preservingRestoration: true)
 	}
@@ -1340,7 +1375,7 @@ class TerminalTab: Identifiable {
 		guard phase != .connecting else { return }
 		logConnectionEvent("Terminal input could not be sent because the SSH session channel is inactive")
 		connectionError = nil
-		prepareForReconnectAfterBackgroundLoss(snapshot: displaySnapshot ?? terminalView.captureSnapshot())
+		prepareForReconnectAfterBackgroundLoss(snapshot: displaySnapshot ?? captureRestorationSnapshot())
 	}
 
 	func handleDroppedFileURLs(_ urls: [URL]) {
@@ -1639,7 +1674,7 @@ class TerminalTab: Identifiable {
 				if wasConnectedBeforeClose || restorationMode != nil {
 					beginRestoration(
 						.backgroundReconnect,
-						snapshot: displaySnapshot ?? restorationSnapshot ?? terminalView.captureSnapshot()
+						snapshot: displaySnapshot ?? restorationSnapshot ?? captureRestorationSnapshot()
 					)
 				} else {
 					notifyOverlayStateChanged()

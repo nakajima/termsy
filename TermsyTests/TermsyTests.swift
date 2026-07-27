@@ -340,6 +340,8 @@ struct TermsyTests {
 			)
 			session.isOpen = true
 			session.lastTerminalSnapshotJPEGData = snapshotData
+			session.lastTerminalSnapshotWidth = 320
+			session.lastTerminalSnapshotHeight = 240
 
 			try db.queue.write { database in
 				try session.save(database)
@@ -352,7 +354,30 @@ struct TermsyTests {
 			#expect(tab.isRestoring)
 			#expect(tab.restorationMode == .launch)
 			#expect(tab.showsRestoringProgress)
-			#expect(tab.displaySnapshot != nil)
+			#expect(tab.displaySnapshot?.viewportSize == CGSize(width: 320, height: 240))
+		}
+
+		@MainActor
+		@Test func restoredLegacySnapshotWithoutViewportDimensionsIsNotDisplayed() throws {
+			let snapshotData = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { context in
+				UIColor.white.setFill()
+				context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+			}.jpegData(compressionQuality: 0.8)
+
+			var session = Session(
+				hostname: "prod.example.com",
+				username: "pat",
+				tmuxSessionName: nil,
+				port: 22,
+				autoconnect: false
+			)
+			session.isOpen = true
+			session.lastTerminalSnapshotJPEGData = snapshotData
+
+			let tab = TerminalTab(session: session)
+
+			#expect(tab.isRestoring)
+			#expect(tab.displaySnapshot == nil)
 		}
 	#endif
 

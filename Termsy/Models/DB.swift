@@ -96,6 +96,13 @@ struct DB {
 			}
 		}
 
+		migrator.registerMigration("AddSessionTerminalSnapshotDimensions") { db in
+			try db.alter(table: "session") { t in
+				t.add(column: "lastTerminalSnapshotWidth", .double)
+				t.add(column: "lastTerminalSnapshotHeight", .double)
+			}
+		}
+
 		try migrator.migrate(queue)
 	}
 }

@@ -39,6 +39,8 @@ class ViewCoordinator {
 	private struct PersistedTerminalSnapshot {
 		let sessionID: Int64
 		let jpegData: Data
+		let viewportWidth: Double
+		let viewportHeight: Double
 	}
 
 	private var appIsActive = true
@@ -562,8 +564,19 @@ class ViewCoordinator {
 				}
 				for snapshotRecord in snapshotRecords {
 					try db.execute(
-						sql: "UPDATE session SET lastTerminalSnapshotJPEGData = ? WHERE id = ?",
-						arguments: [snapshotRecord.jpegData, snapshotRecord.sessionID]
+						sql: """
+						UPDATE session
+						SET lastTerminalSnapshotJPEGData = ?,
+							lastTerminalSnapshotWidth = ?,
+							lastTerminalSnapshotHeight = ?
+						WHERE id = ?
+						""",
+						arguments: [
+							snapshotRecord.jpegData,
+							snapshotRecord.viewportWidth,
+							snapshotRecord.viewportHeight,
+							snapshotRecord.sessionID,
+						]
 					)
 				}
 			}
@@ -577,11 +590,18 @@ class ViewCoordinator {
 		private func capturePersistedTerminalSnapshots() -> [PersistedTerminalSnapshot] {
 			tabs.compactMap { tab in
 				guard let sessionID = tab.session?.id,
-				      let jpegData = tab.capturePersistedSnapshotJPEGData()
+				      let jpegData = tab.capturePersistedSnapshotJPEGData(),
+				      let viewportWidth = tab.session?.lastTerminalSnapshotWidth,
+				      let viewportHeight = tab.session?.lastTerminalSnapshotHeight
 				else {
 					return nil
 				}
-				return PersistedTerminalSnapshot(sessionID: sessionID, jpegData: jpegData)
+				return PersistedTerminalSnapshot(
+					sessionID: sessionID,
+					jpegData: jpegData,
+					viewportWidth: viewportWidth,
+					viewportHeight: viewportHeight
+				)
 			}
 		}
 	#endif

@@ -859,6 +859,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Teletype;
 				INFOPLIST_KEY_CFBundleName = Teletype;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Termsy allows command-line tools to access Bluetooth.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -892,6 +893,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Teletype;
 				INFOPLIST_KEY_CFBundleName = Teletype;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Termsy allows command-line tools to access Bluetooth.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
