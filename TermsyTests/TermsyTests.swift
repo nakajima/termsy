@@ -514,6 +514,46 @@ struct TermsyTests {
 		#expect(!command.hasPrefix("/bin/sh -lc "))
 	}
 
+	@Test func remoteStartupCommandNormalizesTmuxSessionName() {
+		for name in [nil, "", "   "] as [String?] {
+			#expect(ShellTitleIntegration.normalizedTmuxSessionName(name) == nil)
+			let command = ShellTitleIntegration.remoteStartupCommand(
+				tmuxSessionName: name,
+				initialWorkingDirectory: nil
+			)
+			#expect(!command.contains("export TERMSY_STARTUP_TMUX_SESSION="))
+		}
+
+		#expect(ShellTitleIntegration.normalizedTmuxSessionName("  api  ") == "api")
+		let namedCommand = ShellTitleIntegration.remoteStartupCommand(
+			tmuxSessionName: "  api  ",
+			initialWorkingDirectory: nil
+		)
+		#expect(namedCommand.contains("export TERMSY_STARTUP_TMUX_SESSION="))
+		#expect(!namedCommand.contains("  api  "))
+	}
+
+	@Test func bashStartupUsesCustomRcfile() throws {
+		let localLaunch = try #require(
+			ShellTitleIntegration.localLaunch(shellPath: "/bin/bash", environment: [:])
+		)
+		defer {
+			if let cleanupDirectory = localLaunch.cleanupDirectory {
+				try? FileManager.default.removeItem(at: cleanupDirectory)
+			}
+		}
+
+		#expect(localLaunch.arguments.contains("--rcfile"))
+		#expect(!localLaunch.arguments.contains("--norc"))
+
+		let remoteCommand = ShellTitleIntegration.remoteStartupCommand(
+			tmuxSessionName: "api",
+			initialWorkingDirectory: nil
+		)
+		#expect(remoteCommand.contains("--noprofile --rcfile"))
+		#expect(!remoteCommand.contains("--norc"))
+	}
+
 	@Test func remoteStartupCommandIncludesInitialWorkingDirectory() {
 		let command = ShellTitleIntegration.remoteStartupCommand(
 			tmuxSessionName: "api",

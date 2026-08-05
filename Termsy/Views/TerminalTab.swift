@@ -514,7 +514,7 @@ class TerminalTab: Identifiable {
 		remoteConnectAttempt += 1
 		let attempt = remoteConnectAttempt
 		let sshSession = resetSSHSessionForNewConnection(attempt: attempt)
-		let tmuxSessionName = configuredTmuxSessionName(for: session)
+		let tmuxSessionName = session.trimmedTmuxSessionName
 		let initialWorkingDirectory = session.trimmedInitialWorkingDirectory
 		let startupModeMessage = if let tmuxSessionName {
 			"Attempt \(attempt): starting remote session directly in tmux \(tmuxSessionName)"
@@ -628,15 +628,6 @@ class TerminalTab: Identifiable {
 		}
 	}
 
-
-	private func configuredTmuxSessionName(for session: Session?) -> String? {
-		guard let rawTmuxSessionName = session?.tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
-		      !rawTmuxSessionName.isEmpty
-		else {
-			return nil
-		}
-		return rawTmuxSessionName
-	}
 
 	private func resetSSHSessionForNewConnection(attempt: Int) -> SSHTerminalSession {
 		let newSession = replaceSSHSession(attempt: attempt)

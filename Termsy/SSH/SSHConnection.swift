@@ -173,7 +173,7 @@ enum ShellTitleIntegration {
 				let rcfile = root.appendingPathComponent("termsy-title.bash")
 				try bashScript.write(to: rcfile, atomically: true, encoding: .utf8)
 				return LocalLaunch(
-					arguments: [shellName, "--noprofile", "--norc", "--rcfile", rcfile.path, "-i"],
+					arguments: [shellName, "--noprofile", "--rcfile", rcfile.path, "-i"],
 					environment: launchEnvironment,
 					cleanupDirectory: root
 				)
@@ -222,9 +222,15 @@ enum ShellTitleIntegration {
 		}
 	}
 
+	static func normalizedTmuxSessionName(_ tmuxSessionName: String?) -> String? {
+		guard let tmuxSessionName else { return nil }
+		let trimmedName = tmuxSessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+		return trimmedName.isEmpty ? nil : trimmedName
+	}
+
 	static func remoteStartupCommand(tmuxSessionName: String?, initialWorkingDirectory: String?) -> String {
 		let script = remoteBootstrapScript(
-			tmuxSessionName: tmuxSessionName,
+			tmuxSessionName: normalizedTmuxSessionName(tmuxSessionName),
 			initialWorkingDirectory: initialWorkingDirectory
 		)
 		// Keep the bootstrap shell non-login. The real shell below loads profiles;
@@ -661,7 +667,7 @@ enum ShellTitleIntegration {
 			"export TERM_PROGRAM_VERSION=\(shellQuoted(termProgramVersion))\n"
 		}
 
-		let tmuxStartupExport = if let tmuxSessionName, !tmuxSessionName.isEmpty {
+		let tmuxStartupExport = if let tmuxSessionName {
 			"export TERMSY_STARTUP_TMUX_SESSION=\(shellQuoted(tmuxSessionName))\n"
 		} else {
 			""
@@ -781,7 +787,7 @@ enum ShellTitleIntegration {
 		__TERMSY_BASH_SCRIPT__
 		__TERMSY_BASH__
 		    ); then
-		      exec "$shell_path" --noprofile --norc --rcfile "$bash_dir/termsy-title.bash" -i
+		      exec "$shell_path" --noprofile --rcfile "$bash_dir/termsy-title.bash" -i
 		    fi
 		    termsy_log 'failed to prepare bash integration; starting normal shell'
 		    termsy_exec_user_shell

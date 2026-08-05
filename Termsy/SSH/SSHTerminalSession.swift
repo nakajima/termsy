@@ -72,12 +72,9 @@ final class SSHTerminalSession {
 	}
 
 	nonisolated static func startupFallbackPolicy(tmuxSessionName: String?) -> SSHConnection.StartupCommandFallbackPolicy {
-		guard let tmuxSessionName = tmuxSessionName?.trimmingCharacters(in: .whitespacesAndNewlines),
-		      !tmuxSessionName.isEmpty
-		else {
-			return .plainShellOnBootstrapFailure
-		}
-		return .requireStartupCommand
+		ShellTitleIntegration.normalizedTmuxSessionName(tmuxSessionName) == nil
+			? .plainShellOnBootstrapFailure
+			: .requireStartupCommand
 	}
 
 	func connect(
@@ -88,14 +85,15 @@ final class SSHTerminalSession {
 		tmuxSessionName: String? = nil,
 		initialWorkingDirectory: String? = nil
 	) async throws {
+		let normalizedTmuxSessionName = ShellTitleIntegration.normalizedTmuxSessionName(tmuxSessionName)
 		try await connection.connect(host: host, port: port, username: username, password: password)
 		try await connection.startShell(
 			size: terminalSize,
 			startupCommand: ShellTitleIntegration.remoteStartupCommand(
-				tmuxSessionName: tmuxSessionName,
+				tmuxSessionName: normalizedTmuxSessionName,
 				initialWorkingDirectory: initialWorkingDirectory
 			),
-			startupFallbackPolicy: Self.startupFallbackPolicy(tmuxSessionName: tmuxSessionName)
+			startupFallbackPolicy: Self.startupFallbackPolicy(tmuxSessionName: normalizedTmuxSessionName)
 		)
 	}
 
