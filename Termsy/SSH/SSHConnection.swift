@@ -356,7 +356,7 @@ enum ShellTitleIntegration {
 	  PROMPT_COMMAND="__termsy_prompt_title"
 	fi
 
-	if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
+	if (( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 3) )); then
 	  PS0='${ __termsy_preexec "$BASH_COMMAND"; }'"${PS0-}"
 	else
 	  trap '__termsy_preexec "$BASH_COMMAND"' DEBUG

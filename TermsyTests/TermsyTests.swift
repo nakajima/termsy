@@ -552,6 +552,11 @@ struct TermsyTests {
 		)
 		#expect(remoteCommand.contains("--noprofile --rcfile"))
 		#expect(!remoteCommand.contains("--norc"))
+		#expect(
+			remoteCommand.contains(
+				"BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 3)"
+			)
+		)
 	}
 
 	@Test func remoteStartupCommandIncludesInitialWorkingDirectory() {
