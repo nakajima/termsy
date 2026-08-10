@@ -17,6 +17,28 @@ import Testing
 
 @Suite(.serialized)
 struct TermsyTests {
+	#if canImport(UIKit)
+		@MainActor
+		@Test func osc52WritesToSystemClipboard() async throws {
+			let pasteboard = UIPasteboard.general
+			let originalValue = pasteboard.string
+			defer { pasteboard.string = originalValue }
+
+			pasteboard.string = "osc52-baseline"
+
+			let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+			view.start()
+			defer { view.stop() }
+
+			let expected = "osc52-ipad-verified"
+			let encoded = Data(expected.utf8).base64EncodedString()
+			view.feedData(Data("\u{1B}]52;c;\(encoded)\u{07}".utf8))
+			try await Task.sleep(for: .milliseconds(100))
+
+			#expect(pasteboard.string == expected)
+		}
+	#endif
+
 	@MainActor
 	@Test func resetTerminalViewPreservesDisplayActivity() {
 		let session = Session(

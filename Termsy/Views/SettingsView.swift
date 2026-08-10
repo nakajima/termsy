@@ -4,6 +4,9 @@
 //
 
 import SwiftUI
+#if canImport(UIKit)
+	import UIKit
+#endif
 
 struct SettingsView: View {
 	@AppStorage("terminalTheme") private var selectedTheme = TerminalTheme.mocha.rawValue
@@ -15,6 +18,9 @@ struct SettingsView: View {
 	@AppStorage(TerminalScrollSettings.indirectSensitivityKey) private var indirectScrollSensitivity = TerminalScrollSettings.defaultIndirectSensitivity
 	@AppStorage(TerminalScrollSettings.momentumScrollingEnabledKey) private var momentumScrollingEnabled = TerminalScrollSettings.defaultMomentumScrollingEnabled
 	@AppStorage(TerminalScrollSettings.smoothVisualScrollingEnabledKey) private var smoothVisualScrollingEnabled = TerminalScrollSettings.defaultSmoothVisualScrollingEnabled
+	#if os(iOS)
+		@AppStorage(TerminalPointerSettings.bottomEdgeLiftEnabledKey) private var bottomEdgeLiftEnabled = TerminalPointerSettings.defaultBottomEdgeLiftEnabled
+	#endif
 	@Environment(ViewCoordinator.self) private var coordinator
 	@Environment(\.appTheme) private var theme
 	@Environment(\.dismiss) private var dismiss
@@ -88,6 +94,20 @@ struct SettingsView: View {
 				} footer: {
 					Text("Termsy uses monospaced fonts only.")
 				}
+
+				#if os(iOS)
+					if UIDevice.current.userInterfaceIdiom == .pad {
+						Section {
+							Toggle("Lift Terminal Near Bottom Edge", isOn: $bottomEdgeLiftEnabled)
+								.accessibilityIdentifier("settings.bottomEdgeLift")
+								.listRowBackground(theme.cardBackground)
+						} header: {
+							Text("Pointer")
+						} footer: {
+							Text("Moves the terminal up while the pointer is near the bottom edge, keeping terminal controls clear of the Home indicator.")
+						}
+					}
+				#endif
 
 				Section {
 					Toggle("Momentum Scrolling", isOn: $momentumScrollingEnabled)

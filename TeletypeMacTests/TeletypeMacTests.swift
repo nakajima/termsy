@@ -38,7 +38,33 @@ note: required because it appears within the type `SaveError<App<seekwel::Invali
     = note: required for `anyhow::Error` to implement `From<SaveError<App<seekwel::Invalid<NewRecord, AppColumns>>>>`
 """
 
+@Suite(.serialized)
 struct TeletypeMacTests {
+	@MainActor
+	@Test func osc52WritesToSystemClipboard() {
+		let pasteboard = NSPasteboard.general
+		let originalValue = pasteboard.string(forType: .string)
+		defer {
+			pasteboard.clearContents()
+			if let originalValue {
+				pasteboard.setString(originalValue, forType: .string)
+			}
+		}
+
+		pasteboard.clearContents()
+		pasteboard.setString("osc52-baseline", forType: .string)
+
+		let view = MacTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+		view.start()
+		defer { view.stop() }
+
+		let expected = "osc52-mac-verified"
+		let encoded = Data(expected.utf8).base64EncodedString()
+		view.feedData(Data("\u{1B}]52;c;\(encoded)\u{07}".utf8))
+
+		#expect(pasteboard.string(forType: .string) == expected)
+	}
+
 	/// Regression test for a freeze observed when pasting a multi-line Rust compiler error
 	/// (~1.6 KB). Smaller pastes work; larger pastes hang the terminal - display stops
 	/// updating, keystrokes stop reaching the shell.

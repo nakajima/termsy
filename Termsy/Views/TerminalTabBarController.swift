@@ -14,14 +14,20 @@
 
 	struct TerminalHostRepresentable: UIViewControllerRepresentable {
 		@Environment(\.appTheme) private var theme
+		@AppStorage(TerminalPointerSettings.bottomEdgeLiftEnabledKey) private var bottomEdgeLiftEnabled = TerminalPointerSettings.defaultBottomEdgeLiftEnabled
 		let tab: TerminalTab
 
 		func makeUIViewController(context _: Context) -> TerminalHostController {
-			TerminalHostController(terminalTab: tab, theme: theme)
+			TerminalHostController(
+				terminalTab: tab,
+				theme: theme,
+				bottomEdgeLiftEnabled: bottomEdgeLiftEnabled
+			)
 		}
 
 		func updateUIViewController(_ controller: TerminalHostController, context _: Context) {
 			controller.applyTheme(theme)
+			controller.setBottomEdgeLiftEnabled(bottomEdgeLiftEnabled)
 		}
 
 		static func dismantleUIViewController(_ controller: TerminalHostController, coordinator _: ()) {
@@ -32,10 +38,16 @@
 	// MARK: - Per-Tab Host Controller
 
 	@MainActor
-	final class TerminalHostController: UIViewController {
+	final class TerminalHostController: UIViewController, UIGestureRecognizerDelegate {
 		let terminalTab: TerminalTab
 		private var theme: AppTheme
 		private var terminalView: TerminalView?
+		private var terminalLayoutConstraints: [NSLayoutConstraint] = []
+		private var terminalTopConstraint: NSLayoutConstraint?
+		private var terminalBottomConstraint: NSLayoutConstraint?
+		private weak var bottomEdgeHoverRecognizer: UIHoverGestureRecognizer?
+		private var bottomEdgeLiftEnabled: Bool
+		private var isTerminalLifted = false
 		private var overlayHostController: UIHostingController<AnyView>?
 		private var recordingBadgeHostController: UIHostingController<AnyView>?
 
@@ -43,9 +55,10 @@
 			[.bottom]
 		}
 
-		init(terminalTab: TerminalTab, theme: AppTheme) {
+		init(terminalTab: TerminalTab, theme: AppTheme, bottomEdgeLiftEnabled: Bool) {
 			self.terminalTab = terminalTab
 			self.theme = theme
+			self.bottomEdgeLiftEnabled = bottomEdgeLiftEnabled
 			super.init(nibName: nil, bundle: nil)
 		}
 
@@ -56,6 +69,7 @@
 			super.viewDidLoad()
 			view.clipsToBounds = true
 			setNeedsUpdateOfScreenEdgesDeferringSystemGestures()
+			setupBottomEdgeHoverRecognizer()
 			terminalTab.onOverlayStateChange = { [weak self] in
 				self?.updateOverlay()
 			}
@@ -95,8 +109,7 @@
 			guard terminalView == nil else { return }
 
 			let tv = terminalTab.terminalView
-			tv.frame = view.bounds
-			tv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+			tv.translatesAutoresizingMaskIntoConstraints = false
 			tv.applyTheme(theme)
 			tv.removeFromSuperview()
 			if let overlayView = overlayHostController?.view {
@@ -104,7 +117,20 @@
 			} else {
 				view.addSubview(tv)
 			}
+			let verticalOffset = isTerminalLifted ? -TerminalPointerSettings.bottomEdgeLiftDistance : 0
+			let topConstraint = tv.topAnchor.constraint(equalTo: view.topAnchor, constant: verticalOffset)
+			let bottomConstraint = tv.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: verticalOffset)
+			terminalTopConstraint = topConstraint
+			terminalBottomConstraint = bottomConstraint
+			terminalLayoutConstraints = [
+				topConstraint,
+				bottomConstraint,
+				tv.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+				tv.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+			]
+			NSLayoutConstraint.activate(terminalLayoutConstraints)
 			terminalView = tv
+			view.layoutIfNeeded()
 			syncTerminalSizeToSession()
 			terminalTab.renderPendingPreviewIfNeeded()
 			updateOverlay()
@@ -114,12 +140,20 @@
 			terminalTab.setDisplayActive(false)
 			terminalTab.onOverlayStateChange = nil
 			terminalTab.onTerminalViewReplacementRequested = nil
+			NSLayoutConstraint.deactivate(terminalLayoutConstraints)
+			terminalLayoutConstraints = []
+			terminalTopConstraint = nil
+			terminalBottomConstraint = nil
 			terminalView?.removeFromSuperview()
 			terminalView = nil
 		}
 
 		private func reloadTerminalView() {
 			guard isViewLoaded else { return }
+			NSLayoutConstraint.deactivate(terminalLayoutConstraints)
+			terminalLayoutConstraints = []
+			terminalTopConstraint = nil
+			terminalBottomConstraint = nil
 			terminalView?.removeFromSuperview()
 			terminalView = nil
 			setupTerminal()
@@ -193,9 +227,92 @@
 			}
 		}
 
+		func setBottomEdgeLiftEnabled(_ isEnabled: Bool) {
+			guard bottomEdgeLiftEnabled != isEnabled else { return }
+			bottomEdgeLiftEnabled = isEnabled
+			if !isEnabled {
+				setTerminalLifted(false)
+			}
+		}
+
+		private func setupBottomEdgeHoverRecognizer() {
+			guard UIDevice.current.userInterfaceIdiom == .pad else { return }
+			let recognizer = UIHoverGestureRecognizer(
+				target: self,
+				action: #selector(handleBottomEdgeHover(_:))
+			)
+			recognizer.allowedTouchTypes = [
+				NSNumber(value: UITouch.TouchType.indirectPointer.rawValue),
+			]
+			recognizer.cancelsTouchesInView = false
+			recognizer.delegate = self
+			view.addGestureRecognizer(recognizer)
+			bottomEdgeHoverRecognizer = recognizer
+		}
+
+		@objc private func handleBottomEdgeHover(_ recognizer: UIHoverGestureRecognizer) {
+			guard bottomEdgeLiftEnabled else {
+				setTerminalLifted(false)
+				return
+			}
+
+			switch recognizer.state {
+			case .began, .changed:
+				let location = recognizer.location(in: view)
+				let distanceFromBottom = distanceFromScreenBottom(for: location)
+				let threshold = isTerminalLifted
+					? TerminalPointerSettings.bottomEdgeReleaseDistance
+					: TerminalPointerSettings.bottomEdgeActivationDistance
+				setTerminalLifted(distanceFromBottom <= threshold)
+			case .ended, .cancelled, .failed:
+				setTerminalLifted(false)
+			default:
+				break
+			}
+		}
+
+		private func distanceFromScreenBottom(for locationInView: CGPoint) -> CGFloat {
+			guard let window = view.window else {
+				return max(view.bounds.maxY - locationInView.y, 0)
+			}
+			let locationInWindow = view.convert(locationInView, to: window)
+			let screenCoordinateSpace = window.screen.coordinateSpace
+			let locationInScreen = screenCoordinateSpace.convert(locationInWindow, from: window)
+			return max(screenCoordinateSpace.bounds.maxY - locationInScreen.y, 0)
+		}
+
+		private func setTerminalLifted(_ isLifted: Bool, animated: Bool = true) {
+			guard isTerminalLifted != isLifted else { return }
+			isTerminalLifted = isLifted
+			guard let terminalTopConstraint, let terminalBottomConstraint else { return }
+			let verticalOffset = isLifted ? -TerminalPointerSettings.bottomEdgeLiftDistance : 0
+			terminalTopConstraint.constant = verticalOffset
+			terminalBottomConstraint.constant = verticalOffset
+
+			let animations = { [weak self] in
+				_ = self?.view.layoutIfNeeded()
+			}
+			guard animated, !UIAccessibility.isReduceMotionEnabled else {
+				animations()
+				return
+			}
+			UIView.animate(
+				withDuration: 0.2,
+				delay: 0,
+				options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut],
+				animations: animations
+			)
+		}
+
+		func gestureRecognizer(
+			_ gestureRecognizer: UIGestureRecognizer,
+			shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+		) -> Bool {
+			gestureRecognizer === bottomEdgeHoverRecognizer || otherGestureRecognizer === bottomEdgeHoverRecognizer
+		}
+
 		private func syncTerminalSizeToSession() {
 			guard let terminalView else { return }
-			terminalView.frame = view.bounds
 			guard let size = terminalView.syncSizeAndReadBack() else { return }
 			terminalTab.updateTerminalSize(size)
 		}
