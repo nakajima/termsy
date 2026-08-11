@@ -20,6 +20,7 @@ struct SettingsView: View {
 	@AppStorage(TerminalScrollSettings.smoothVisualScrollingEnabledKey) private var smoothVisualScrollingEnabled = TerminalScrollSettings.defaultSmoothVisualScrollingEnabled
 	#if os(iOS)
 		@AppStorage(TerminalPointerSettings.bottomEdgeLiftEnabledKey) private var bottomEdgeLiftEnabled = TerminalPointerSettings.defaultBottomEdgeLiftEnabled
+		@AppStorage(TerminalPointerSettings.bottomEdgeLiftDistanceKey) private var bottomEdgeLiftDistance = TerminalPointerSettings.defaultBottomEdgeLiftDistance
 	#endif
 	@Environment(ViewCoordinator.self) private var coordinator
 	@Environment(\.appTheme) private var theme
@@ -32,6 +33,12 @@ struct SettingsView: View {
 	private var indirectSensitivityLabel: String {
 		"\(indirectScrollSensitivity.formatted(.number.precision(.fractionLength(2))))×"
 	}
+
+	#if os(iOS)
+		private var bottomEdgeLiftDistanceLabel: String {
+			"\(bottomEdgeLiftDistance.formatted(.number.precision(.fractionLength(0)))) pt"
+		}
+	#endif
 
 	private var whatsNewContent: WhatsNewContent {
 		WhatsNewGenerated.current
@@ -101,6 +108,26 @@ struct SettingsView: View {
 							Toggle("Lift Terminal Near Bottom Edge", isOn: $bottomEdgeLiftEnabled)
 								.accessibilityIdentifier("settings.bottomEdgeLift")
 								.listRowBackground(theme.cardBackground)
+
+							VStack(alignment: .leading, spacing: 8) {
+								HStack {
+									Text("Lift Distance")
+									Spacer()
+									Text(bottomEdgeLiftDistanceLabel)
+										.foregroundStyle(theme.secondaryText)
+										.monospacedDigit()
+								}
+
+								Slider(
+									value: $bottomEdgeLiftDistance,
+									in: TerminalPointerSettings.minBottomEdgeLiftDistance ... TerminalPointerSettings.maxBottomEdgeLiftDistance,
+									step: 1
+								)
+								.tint(theme.accent)
+								.accessibilityIdentifier("settings.bottomEdgeLiftDistance")
+							}
+							.disabled(!bottomEdgeLiftEnabled)
+							.listRowBackground(theme.cardBackground)
 						} header: {
 							Text("Pointer")
 						} footer: {

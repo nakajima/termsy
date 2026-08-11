@@ -15,19 +15,22 @@
 	struct TerminalHostRepresentable: UIViewControllerRepresentable {
 		@Environment(\.appTheme) private var theme
 		@AppStorage(TerminalPointerSettings.bottomEdgeLiftEnabledKey) private var bottomEdgeLiftEnabled = TerminalPointerSettings.defaultBottomEdgeLiftEnabled
+		@AppStorage(TerminalPointerSettings.bottomEdgeLiftDistanceKey) private var bottomEdgeLiftDistance = TerminalPointerSettings.defaultBottomEdgeLiftDistance
 		let tab: TerminalTab
 
 		func makeUIViewController(context _: Context) -> TerminalHostController {
 			TerminalHostController(
 				terminalTab: tab,
 				theme: theme,
-				bottomEdgeLiftEnabled: bottomEdgeLiftEnabled
+				bottomEdgeLiftEnabled: bottomEdgeLiftEnabled,
+				bottomEdgeLiftDistance: bottomEdgeLiftDistance
 			)
 		}
 
 		func updateUIViewController(_ controller: TerminalHostController, context _: Context) {
 			controller.applyTheme(theme)
 			controller.setBottomEdgeLiftEnabled(bottomEdgeLiftEnabled)
+			controller.setBottomEdgeLiftDistance(bottomEdgeLiftDistance)
 		}
 
 		static func dismantleUIViewController(_ controller: TerminalHostController, coordinator _: ()) {
@@ -47,6 +50,7 @@
 		private var terminalBottomConstraint: NSLayoutConstraint?
 		private weak var bottomEdgeHoverRecognizer: UIHoverGestureRecognizer?
 		private var bottomEdgeLiftEnabled: Bool
+		private var bottomEdgeLiftDistance: CGFloat
 		private var isTerminalLifted = false
 		private var overlayHostController: UIHostingController<AnyView>?
 		private var recordingBadgeHostController: UIHostingController<AnyView>?
@@ -55,10 +59,16 @@
 			[.bottom]
 		}
 
-		init(terminalTab: TerminalTab, theme: AppTheme, bottomEdgeLiftEnabled: Bool) {
+		init(
+			terminalTab: TerminalTab,
+			theme: AppTheme,
+			bottomEdgeLiftEnabled: Bool,
+			bottomEdgeLiftDistance: Double
+		) {
 			self.terminalTab = terminalTab
 			self.theme = theme
 			self.bottomEdgeLiftEnabled = bottomEdgeLiftEnabled
+			self.bottomEdgeLiftDistance = TerminalPointerSettings.clampedBottomEdgeLiftDistance(bottomEdgeLiftDistance)
 			super.init(nibName: nil, bundle: nil)
 		}
 
@@ -117,7 +127,7 @@
 			} else {
 				view.addSubview(tv)
 			}
-			let verticalOffset = isTerminalLifted ? -TerminalPointerSettings.bottomEdgeLiftDistance : 0
+			let verticalOffset = isTerminalLifted ? -bottomEdgeLiftDistance : 0
 			let topConstraint = tv.topAnchor.constraint(equalTo: view.topAnchor, constant: verticalOffset)
 			let bottomConstraint = tv.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: verticalOffset)
 			terminalTopConstraint = topConstraint
@@ -235,6 +245,15 @@
 			}
 		}
 
+		func setBottomEdgeLiftDistance(_ rawValue: Double) {
+			let distance = TerminalPointerSettings.clampedBottomEdgeLiftDistance(rawValue)
+			guard bottomEdgeLiftDistance != distance else { return }
+			bottomEdgeLiftDistance = distance
+			if isTerminalLifted {
+				updateTerminalPosition()
+			}
+		}
+
 		private func setupBottomEdgeHoverRecognizer() {
 			guard UIDevice.current.userInterfaceIdiom == .pad else { return }
 			let recognizer = UIHoverGestureRecognizer(
@@ -261,7 +280,7 @@
 				let location = recognizer.location(in: view)
 				let distanceFromBottom = distanceFromScreenBottom(for: location)
 				let threshold = isTerminalLifted
-					? TerminalPointerSettings.bottomEdgeReleaseDistance
+					? TerminalPointerSettings.bottomEdgeActivationDistance + bottomEdgeLiftDistance
 					: TerminalPointerSettings.bottomEdgeActivationDistance
 				setTerminalLifted(distanceFromBottom <= threshold)
 			case .ended, .cancelled, .failed:
@@ -284,8 +303,12 @@
 		private func setTerminalLifted(_ isLifted: Bool, animated: Bool = true) {
 			guard isTerminalLifted != isLifted else { return }
 			isTerminalLifted = isLifted
+			updateTerminalPosition(animated: animated)
+		}
+
+		private func updateTerminalPosition(animated: Bool = true) {
 			guard let terminalTopConstraint, let terminalBottomConstraint else { return }
-			let verticalOffset = isLifted ? -TerminalPointerSettings.bottomEdgeLiftDistance : 0
+			let verticalOffset = isTerminalLifted ? -bottomEdgeLiftDistance : 0
 			terminalTopConstraint.constant = verticalOffset
 			terminalBottomConstraint.constant = verticalOffset
 
