@@ -20,6 +20,7 @@ struct SettingsView: View {
 	@AppStorage(TerminalScrollSettings.smoothVisualScrollingEnabledKey) private var smoothVisualScrollingEnabled = TerminalScrollSettings.defaultSmoothVisualScrollingEnabled
 	#if os(iOS)
 		@AppStorage(TerminalPointerSettings.bottomEdgeLiftEnabledKey) private var bottomEdgeLiftEnabled = TerminalPointerSettings.defaultBottomEdgeLiftEnabled
+		@AppStorage(TerminalPointerSettings.bottomEdgeDetectionDistanceKey) private var bottomEdgeDetectionDistance = TerminalPointerSettings.defaultBottomEdgeDetectionDistance
 		@AppStorage(TerminalPointerSettings.bottomEdgeLiftDistanceKey) private var bottomEdgeLiftDistance = TerminalPointerSettings.defaultBottomEdgeLiftDistance
 	#endif
 	@Environment(ViewCoordinator.self) private var coordinator
@@ -35,6 +36,10 @@ struct SettingsView: View {
 	}
 
 	#if os(iOS)
+		private var bottomEdgeDetectionDistanceLabel: String {
+			"\(bottomEdgeDetectionDistance.formatted(.number.precision(.fractionLength(0)))) pt"
+		}
+
 		private var bottomEdgeLiftDistanceLabel: String {
 			"\(bottomEdgeLiftDistance.formatted(.number.precision(.fractionLength(0)))) pt"
 		}
@@ -111,6 +116,26 @@ struct SettingsView: View {
 
 							VStack(alignment: .leading, spacing: 8) {
 								HStack {
+									Text("Detection Distance")
+									Spacer()
+									Text(bottomEdgeDetectionDistanceLabel)
+										.foregroundStyle(theme.secondaryText)
+										.monospacedDigit()
+								}
+
+								Slider(
+									value: $bottomEdgeDetectionDistance,
+									in: TerminalPointerSettings.minBottomEdgeDetectionDistance ... TerminalPointerSettings.maxBottomEdgeDetectionDistance,
+									step: 1
+								)
+								.tint(theme.accent)
+								.accessibilityIdentifier("settings.bottomEdgeDetectionDistance")
+							}
+							.disabled(!bottomEdgeLiftEnabled)
+							.listRowBackground(theme.cardBackground)
+
+							VStack(alignment: .leading, spacing: 8) {
+								HStack {
 									Text("Lift Distance")
 									Spacer()
 									Text(bottomEdgeLiftDistanceLabel)
@@ -131,7 +156,7 @@ struct SettingsView: View {
 						} header: {
 							Text("Pointer")
 						} footer: {
-							Text("Moves the terminal up while the pointer is near the bottom edge, keeping terminal controls clear of the Home indicator.")
+							Text("Detection distance controls how close the pointer must be to the bottom edge. Lift distance controls how far the terminal moves.")
 						}
 					}
 				#endif

@@ -15,6 +15,7 @@
 	struct TerminalHostRepresentable: UIViewControllerRepresentable {
 		@Environment(\.appTheme) private var theme
 		@AppStorage(TerminalPointerSettings.bottomEdgeLiftEnabledKey) private var bottomEdgeLiftEnabled = TerminalPointerSettings.defaultBottomEdgeLiftEnabled
+		@AppStorage(TerminalPointerSettings.bottomEdgeDetectionDistanceKey) private var bottomEdgeDetectionDistance = TerminalPointerSettings.defaultBottomEdgeDetectionDistance
 		@AppStorage(TerminalPointerSettings.bottomEdgeLiftDistanceKey) private var bottomEdgeLiftDistance = TerminalPointerSettings.defaultBottomEdgeLiftDistance
 		let tab: TerminalTab
 
@@ -23,6 +24,7 @@
 				terminalTab: tab,
 				theme: theme,
 				bottomEdgeLiftEnabled: bottomEdgeLiftEnabled,
+				bottomEdgeDetectionDistance: bottomEdgeDetectionDistance,
 				bottomEdgeLiftDistance: bottomEdgeLiftDistance
 			)
 		}
@@ -30,6 +32,7 @@
 		func updateUIViewController(_ controller: TerminalHostController, context _: Context) {
 			controller.applyTheme(theme)
 			controller.setBottomEdgeLiftEnabled(bottomEdgeLiftEnabled)
+			controller.setBottomEdgeDetectionDistance(bottomEdgeDetectionDistance)
 			controller.setBottomEdgeLiftDistance(bottomEdgeLiftDistance)
 		}
 
@@ -50,6 +53,7 @@
 		private var terminalBottomConstraint: NSLayoutConstraint?
 		private weak var bottomEdgeHoverRecognizer: UIHoverGestureRecognizer?
 		private var bottomEdgeLiftEnabled: Bool
+		private var bottomEdgeDetectionDistance: CGFloat
 		private var bottomEdgeLiftDistance: CGFloat
 		private var isTerminalLifted = false
 		private var overlayHostController: UIHostingController<AnyView>?
@@ -63,11 +67,13 @@
 			terminalTab: TerminalTab,
 			theme: AppTheme,
 			bottomEdgeLiftEnabled: Bool,
+			bottomEdgeDetectionDistance: Double,
 			bottomEdgeLiftDistance: Double
 		) {
 			self.terminalTab = terminalTab
 			self.theme = theme
 			self.bottomEdgeLiftEnabled = bottomEdgeLiftEnabled
+			self.bottomEdgeDetectionDistance = TerminalPointerSettings.clampedBottomEdgeDetectionDistance(bottomEdgeDetectionDistance)
 			self.bottomEdgeLiftDistance = TerminalPointerSettings.clampedBottomEdgeLiftDistance(bottomEdgeLiftDistance)
 			super.init(nibName: nil, bundle: nil)
 		}
@@ -245,6 +251,10 @@
 			}
 		}
 
+		func setBottomEdgeDetectionDistance(_ rawValue: Double) {
+			bottomEdgeDetectionDistance = TerminalPointerSettings.clampedBottomEdgeDetectionDistance(rawValue)
+		}
+
 		func setBottomEdgeLiftDistance(_ rawValue: Double) {
 			let distance = TerminalPointerSettings.clampedBottomEdgeLiftDistance(rawValue)
 			guard bottomEdgeLiftDistance != distance else { return }
@@ -280,8 +290,8 @@
 				let location = recognizer.location(in: view)
 				let distanceFromBottom = distanceFromScreenBottom(for: location)
 				let threshold = isTerminalLifted
-					? TerminalPointerSettings.bottomEdgeActivationDistance + bottomEdgeLiftDistance
-					: TerminalPointerSettings.bottomEdgeActivationDistance
+					? bottomEdgeDetectionDistance + bottomEdgeLiftDistance
+					: bottomEdgeDetectionDistance
 				setTerminalLifted(distanceFromBottom <= threshold)
 			case .ended, .cancelled, .failed:
 				setTerminalLifted(false)
