@@ -737,7 +737,11 @@ struct SessionListContent: View {
 
 	private func submitFilter() {
 		if let parsedDirectTarget {
-			connect(to: parsedDirectTarget)
+			if let selectedItemID, visibleItemIDs.contains(selectedItemID) {
+				activateSelection()
+			} else {
+				connect(to: parsedDirectTarget)
+			}
 			return
 		}
 

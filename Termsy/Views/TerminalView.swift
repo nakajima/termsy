@@ -65,6 +65,7 @@
 			_ = self.handleKey(key, action: GHOSTTY_ACTION_REPEAT, surface: surface)
 		}
 		private var lastMouseLocation: CGPoint?
+		private var lastMouseModifiers = GHOSTTY_MODS_NONE
 		private var lastIndirectPointerHoverLocation: CGPoint?
 		private var activePointerButton: ghostty_input_mouse_button_e?
 		private weak var directTapRecognizer: UITapGestureRecognizer?
@@ -359,6 +360,7 @@
 			stopDisplayActivity()
 			ClipboardAccessAuthorization.clear(for: self)
 			lastMouseLocation = nil
+			lastMouseModifiers = GHOSTTY_MODS_NONE
 			clipboardConfirmer.denyOutstandingReadConfirmations()
 			if let surface {
 				ghostty_surface_set_focus(surface, false)
@@ -913,11 +915,15 @@
 			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, button, GHOSTTY_MODS_NONE)
 		}
 
-		private func sendMousePosition(_ point: CGPoint) {
+		private func sendMousePosition(
+			_ point: CGPoint,
+			modifiers: ghostty_input_mods_e = GHOSTTY_MODS_NONE
+		) {
 			guard let surface else { return }
-			guard lastMouseLocation != point else { return }
+			guard lastMouseLocation != point || lastMouseModifiers.rawValue != modifiers.rawValue else { return }
 			lastMouseLocation = point
-			ghostty_surface_mouse_pos(surface, point.x, point.y, GHOSTTY_MODS_NONE)
+			lastMouseModifiers = modifiers
+			ghostty_surface_mouse_pos(surface, point.x, point.y, modifiers)
 		}
 
 		private func pointerButton(from event: UIEvent?) -> ghostty_input_mouse_button_e {
@@ -956,9 +962,11 @@
 			requestFirstResponder()
 			cancelActiveScrollAnimationForInteraction()
 			let location = recognizer.location(in: self)
+			let modifiers = GHOSTTY_MODS_SUPER
+			sendMousePosition(location, modifiers: modifiers)
+			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, modifiers)
+			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, modifiers)
 			sendMousePosition(location)
-			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
-			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
 		}
 
 		@objc private func handleDirectSelection(_ recognizer: UILongPressGestureRecognizer) {

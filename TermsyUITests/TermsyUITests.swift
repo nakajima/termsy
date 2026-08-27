@@ -89,6 +89,33 @@ final class TermsyUITests: XCTestCase {
 	}
 
 	@MainActor
+	func testReturnOpensHighlightedSessionInsteadOfDirectTarget() throws {
+		let app = XCUIApplication()
+		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.savedSessions.scenario)
+		XCUIDevice.shared.orientation = .landscapeLeft
+		app.launch()
+		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not reach foreground")
+
+		let filterField = app.textFields["field.sessionFilter"]
+		let directRow = app.buttons["row.directSession"]
+		let savedRow = app.buttons["row.session.user@my.teletype.computer:2222#-"]
+		XCTAssertTrue(filterField.waitForExistence(timeout: 10), "Session filter field did not appear")
+		filterField.typeText("user@my.teletype.computer")
+		XCTAssertTrue(directRow.waitForExistence(timeout: 5), "Direct session row did not appear")
+		XCTAssertTrue(savedRow.waitForExistence(timeout: 5), "Matching saved session row did not appear")
+
+		filterField.typeKey("n", modifierFlags: .control)
+		waitForSelected(savedRow)
+		filterField.typeText("\n")
+
+		XCTAssertTrue(app.otherElements["screen.terminal"].waitForExistence(timeout: 10), "Selected session did not open a terminal")
+		XCTAssertTrue(
+			app.descendants(matching: .any)["tab.user@my.teletype.computer -p 2222"].waitForExistence(timeout: 5),
+			"Return opened the direct target instead of the highlighted saved session"
+		)
+	}
+
+	@MainActor
 	func testSavedSessionCanEditCwdAndTmuxSession() throws {
 		let app = XCUIApplication()
 		configureLaunchEnvironment(for: app, scenario: ScreenshotPlan.savedSessions.scenario)
