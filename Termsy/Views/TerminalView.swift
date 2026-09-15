@@ -878,10 +878,11 @@
 			cancelActiveScrollAnimationForInteraction()
 
 			let pos = touch.location(in: self)
-			sendMousePosition(pos)
+			let modifiers = ghosttyMods(from: event?.modifierFlags ?? [])
+			sendMousePosition(pos, modifiers: modifiers)
 			let button = pointerButton(from: event)
 			activePointerButton = button
-			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, button, GHOSTTY_MODS_NONE)
+			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, button, modifiers)
 		}
 
 		override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -889,7 +890,7 @@
 			guard let touch = touches.first(where: { $0.type == .indirectPointer }) else {
 				return
 			}
-			sendMousePosition(touch.location(in: self))
+			sendMousePosition(touch.location(in: self), modifiers: ghosttyMods(from: event?.modifierFlags ?? []))
 		}
 
 		override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -899,10 +900,11 @@
 			else {
 				return
 			}
-			sendMousePosition(touch.location(in: self))
+			let modifiers = ghosttyMods(from: event?.modifierFlags ?? [])
+			sendMousePosition(touch.location(in: self), modifiers: modifiers)
 			let button = activePointerButton ?? pointerButton(from: event)
 			activePointerButton = nil
-			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, button, GHOSTTY_MODS_NONE)
+			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, button, modifiers)
 		}
 
 		override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -912,7 +914,7 @@
 			}
 			let button = activePointerButton ?? pointerButton(from: event)
 			activePointerButton = nil
-			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, button, GHOSTTY_MODS_NONE)
+			ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, button, ghosttyMods(from: event?.modifierFlags ?? []))
 		}
 
 		private func sendMousePosition(
@@ -942,7 +944,7 @@
 			switch recognizer.state {
 			case .began, .changed:
 				lastIndirectPointerHoverLocation = location
-				sendMousePosition(location)
+				sendMousePosition(location, modifiers: ghosttyMods(from: recognizer.modifierFlags))
 			case .ended, .cancelled:
 				lastIndirectPointerHoverLocation = nil
 			default:

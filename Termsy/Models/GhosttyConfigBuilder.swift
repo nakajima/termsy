@@ -25,6 +25,10 @@ enum GhosttyConfigBuilder {
 			"background-opacity = \(backgroundOpacity.formatted(.number.precision(.fractionLength(0 ... 3))))",
 			"term = \(GhosttyTerminfo.terminalName)",
 		]
+		#if canImport(UIKit)
+			// Keep Shift-drag available for local selection, even when an app requests Shift capture.
+			lines.append("mouse-shift-capture = never")
+		#endif
 		if let fontFamily = TerminalFontSettings.family {
 			lines.append("font-family = \(quotedConfigValue(fontFamily))")
 		}
