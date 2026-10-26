@@ -12,6 +12,7 @@ struct SettingsView: View {
 	@AppStorage("terminalTheme") private var selectedTheme = TerminalTheme.mocha.rawValue
 	@AppStorage("cursorStyle") private var cursorStyle = "block"
 	@AppStorage("cursorBlink") private var cursorBlink = true
+	@AppStorage(DirectSessionTarget.defaultUsernameKey) private var defaultUsername = ""
 	@AppStorage(TerminalFontSettings.familyKey) private var terminalFontFamily = ""
 	@AppStorage(TerminalScrollSettings.reverseVerticalScrollKey) private var reverseVerticalScroll = TerminalScrollSettings.defaultReverseVerticalScroll
 	@AppStorage(TerminalScrollSettings.touchSensitivityKey) private var touchScrollSensitivity = TerminalScrollSettings.defaultTouchSensitivity
@@ -56,6 +57,22 @@ struct SettingsView: View {
 	var body: some View {
 		NavigationStack {
 			Form {
+				Section {
+					TextField("Default Username", text: $defaultUsername)
+						.accessibilityIdentifier("settings.defaultUsername")
+						.textContentType(.username)
+						.autocorrectionDisabled()
+						#if os(iOS)
+							.textInputAutocapitalization(.never)
+						#endif
+						.foregroundStyle(theme.primaryText)
+						.listRowBackground(theme.cardBackground)
+				} header: {
+					Text("Connections")
+				} footer: {
+					Text("Used when quick connect text has no username@, like example.com.")
+				}
+
 				Section("Cursor") {
 					Picker("Style", selection: $cursorStyle) {
 						Text("Block").tag("block")

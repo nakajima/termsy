@@ -895,7 +895,6 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	private static let sessionStartupTimeout: TimeAmount = .seconds(10)
 	private static let channelRequestTimeout: TimeAmount = .seconds(10)
 	private static let fileUploadQueue = DispatchQueue(label: "termsy.ssh.file-upload", qos: .utility)
-	private static let fileUploadChunkSize = 256 * 1024
 
 	private let group = NIOTSEventLoopGroup()
 	private var channel: Channel?
@@ -1255,15 +1254,8 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	}
 
 	func prepareFileDropDirectory(dropID: String) async throws -> String {
-		let command = Self.fileDropDirectoryCommand(dropID: dropID)
-		let result = try await runDetachedCommand(command)
-		guard result.exitStatus == 0, result.exitSignal == nil else {
-			throw TerminalFileDropError.uploadFailed(Self.commandFailureMessage(result, fallback: "Could not create remote upload directory."))
-		}
-		guard let directory = Self.parseTaggedOutput(result.output, tag: "__TERMSY_DROP_DIR__") else {
-			throw TerminalFileDropError.invalidRemoteResponse(result.output)
-		}
-		return directory
+		let result = try await runDetachedCommand(TerminalFileDropSupport.fileDropDirectoryCommand(dropID: dropID))
+		return try TerminalFileDropSupport.remoteDirectory(from: result)
 	}
 
 	func uploadFileForDrop(
@@ -1275,7 +1267,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 	) async throws -> String {
 		guard let channel, channel.isActive else { throw TerminalFileDropError.notConnected }
 		let uploadChannel = try await openUploadChannel(on: channel)
-		let command = Self.fileUploadCommand(
+		let command = TerminalFileDropSupport.fileUploadCommand(
 			remoteDirectory: remoteDirectory,
 			remoteFileName: remoteFileName,
 			posixPermissions: posixPermissions
@@ -1284,14 +1276,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 		do {
 			try await requestExec(command, on: uploadChannel.channel)
 			try await streamFileUpload(from: localURL, to: uploadChannel.channel, onProgress: onProgress)
-			let result = try await uploadChannel.resultFuture.get()
-			guard result.exitStatus == 0, result.exitSignal == nil else {
-				throw TerminalFileDropError.uploadFailed(Self.commandFailureMessage(result, fallback: "Remote upload failed."))
-			}
-			guard let remotePath = Self.parseTaggedOutput(result.output, tag: "__TERMSY_UPLOAD_PATH__") else {
-				throw TerminalFileDropError.invalidRemoteResponse(result.output)
-			}
-			return remotePath
+			return try await TerminalFileDropSupport.uploadedRemotePath(from: uploadChannel.resultFuture.get())
 		} catch {
 			uploadChannel.channel.close(mode: .all, promise: nil)
 			throw error
@@ -1340,7 +1325,7 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 
 					var uploadedBytes: Int64 = 0
 					while true {
-						let data = try handle.read(upToCount: Self.fileUploadChunkSize) ?? Data()
+						let data = try handle.read(upToCount: TerminalFileDropSupport.uploadChunkSize) ?? Data()
 						guard !data.isEmpty else { break }
 						try self.writeUploadChunk(data, to: childChannel)
 						uploadedBytes += Int64(data.count)
@@ -1366,108 +1351,6 @@ final nonisolated class SSHConnection: @unchecked Sendable {
 			let channelData = SSHChannelData(type: .channel, data: .byteBuffer(buffer))
 			return childChannel.writeAndFlush(channelData)
 		}.wait()
-	}
-
-	private static func fileDropDirectoryCommand(dropID: String) -> String {
-		let safeDropID = dropID.filter { character in
-			character.isLetter || character.isNumber || character == "-" || character == "_"
-		}
-		let directoryName = safeDropID.isEmpty ? makeSafeShellToken() : safeDropID
-		let quotedDirectoryName = TerminalFileDropSupport.shellQuote(directoryName)
-		let script = #"""
-		set -eu
-		uid="$(id -u 2>/dev/null || true)"
-		user="${USER:-}"
-		if [ -z "$user" ]; then
-		  user="$(id -un 2>/dev/null || printf 'user')"
-		fi
-		try_root() {
-		  root="$1"
-		  [ -n "$root" ] || return 1
-		  mkdir -p "$root" 2>/dev/null || return 1
-		  chmod 700 "$root" 2>/dev/null || return 1
-		  if [ -n "$uid" ]; then
-		    owner="$(stat -c '%u' "$root" 2>/dev/null || stat -f '%u' "$root" 2>/dev/null || true)"
-		    if [ -n "$owner" ] && [ "$owner" != "$uid" ]; then
-		      return 1
-		    fi
-		  fi
-		  [ -d "$root" ] && [ -r "$root" ] && [ -w "$root" ] && [ -x "$root" ] || return 1
-		  return 0
-		}
-		root=""
-		if try_root /tmp/termsy; then
-		  root=/tmp/termsy
-		elif [ -n "$uid" ] && try_root "/tmp/termsy-$uid"; then
-		  root="/tmp/termsy-$uid"
-		elif try_root "/tmp/termsy-$user"; then
-		  root="/tmp/termsy-$user"
-		else
-		  printf 'Termsy: could not create a writable private upload directory under /tmp\n' >&2
-		  exit 1
-		fi
-		drop_dir="$root"/__TERMSY_DROP_NAME__
-		mkdir "$drop_dir"
-		chmod 700 "$drop_dir"
-		printf '__TERMSY_DROP_DIR__=%s\n' "$drop_dir"
-		"""#.replacingOccurrences(of: "__TERMSY_DROP_NAME__", with: quotedDirectoryName)
-		return "/bin/sh -c \(TerminalFileDropSupport.shellQuote(script))"
-	}
-
-	private static func fileUploadCommand(
-		remoteDirectory: String,
-		remoteFileName: String,
-		posixPermissions: Int
-	) -> String {
-		let tempName = ".\(remoteFileName).termsy-upload-\(makeSafeShellToken()).tmp"
-		let mode = TerminalFileDropSupport.chmodModeString(posixPermissions)
-		let script = #"""
-		set -eu
-		dir=__TERMSY_REMOTE_DIR__
-		name=__TERMSY_REMOTE_NAME__
-		tmp_name=__TERMSY_TMP_NAME__
-		mode=__TERMSY_MODE__
-		final="$dir/$name"
-		tmp="$dir/$tmp_name"
-		trap 'rm -f "$tmp"' HUP INT TERM EXIT
-		cat > "$tmp"
-		chmod "$mode" "$tmp"
-		mv -f "$tmp" "$final"
-		trap - HUP INT TERM EXIT
-		printf '__TERMSY_UPLOAD_PATH__=%s\n' "$final"
-		"""#
-		let filled = script
-			.replacingOccurrences(of: "__TERMSY_REMOTE_DIR__", with: TerminalFileDropSupport.shellQuote(remoteDirectory))
-			.replacingOccurrences(of: "__TERMSY_REMOTE_NAME__", with: TerminalFileDropSupport.shellQuote(remoteFileName))
-			.replacingOccurrences(of: "__TERMSY_TMP_NAME__", with: TerminalFileDropSupport.shellQuote(tempName))
-			.replacingOccurrences(of: "__TERMSY_MODE__", with: TerminalFileDropSupport.shellQuote(mode))
-		return "/bin/sh -c \(TerminalFileDropSupport.shellQuote(filled))"
-	}
-
-	private static func makeSafeShellToken() -> String {
-		UUID().uuidString.lowercased()
-	}
-
-	private static func parseTaggedOutput(_ output: String, tag: String) -> String? {
-		for line in output.components(separatedBy: .newlines) {
-			guard line.hasPrefix(tag + "=") else { continue }
-			return String(line.dropFirst(tag.count + 1))
-		}
-		return nil
-	}
-
-	private static func commandFailureMessage(_ result: SSHCommandResult, fallback: String) -> String {
-		let trimmedOutput = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-		if !trimmedOutput.isEmpty {
-			return trimmedOutput
-		}
-		if let exitSignal = result.exitSignal {
-			return "\(fallback) Remote command terminated by signal \(exitSignal)."
-		}
-		if let exitStatus = result.exitStatus {
-			return "\(fallback) Remote command exited with status \(exitStatus)."
-		}
-		return fallback
 	}
 
 	private func withTimeout<T>(

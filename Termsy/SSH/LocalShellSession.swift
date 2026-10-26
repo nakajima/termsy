@@ -46,6 +46,21 @@
 			return Self.hasLiveDescendantProcess(of: childPID)
 		}
 
+		/// The `ssh` client in the foreground of this shell, if the user is attached to a remote host.
+		var attachedSSHInvocation: SSHClientInvocation? {
+			guard masterFD >= 0 else { return nil }
+			let foregroundPID = tcgetpgrp(masterFD)
+			guard foregroundPID > 0,
+			      let executablePath = Self.executablePath(for: foregroundPID),
+			      let processArguments = Self.processArguments(for: foregroundPID)
+			else { return nil }
+			return SSHClientInvocation(
+				executablePath: executablePath,
+				arguments: processArguments.arguments,
+				environment: processArguments.environment
+			)
+		}
+
 		func start() throws {
 			guard childPID == 0 else { return }
 
@@ -295,6 +310,43 @@
 			let byteCount = proc_pidpath(pid, &buffer, UInt32(buffer.count))
 			guard byteCount > 0 else { return nil }
 			return String(cString: buffer)
+		}
+
+		/// Reads a process's argv and environment from `KERN_PROCARGS2`.
+		static func processArguments(for pid: pid_t) -> (arguments: [String], environment: [String: String])? {
+			var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+			var size = 0
+			guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0 else { return nil }
+			var buffer = [UInt8](repeating: 0, count: size)
+			guard sysctl(&mib, u_int(mib.count), &buffer, &size, nil, 0) == 0,
+			      size > MemoryLayout<Int32>.size
+			else { return nil }
+
+			// Layout: argc, executable path, NUL padding, argv strings, environment strings.
+			let argumentCount = buffer.withUnsafeBytes { Int($0.loadUnaligned(as: Int32.self)) }
+			var index = MemoryLayout<Int32>.size
+			func nextString() -> String? {
+				guard index < size else { return nil }
+				let end = buffer[index ..< size].firstIndex(of: 0) ?? size
+				defer { index = end + 1 }
+				return String(decoding: buffer[index ..< end], as: UTF8.self)
+			}
+
+			_ = nextString()
+			while index < size, buffer[index] == 0 {
+				index += 1
+			}
+			var arguments: [String] = []
+			for _ in 0 ..< argumentCount {
+				guard let argument = nextString() else { return nil }
+				arguments.append(argument)
+			}
+			var environment: [String: String] = [:]
+			while let entry = nextString(), !entry.isEmpty {
+				guard let separator = entry.firstIndex(of: "=") else { continue }
+				environment[String(entry[..<separator])] = String(entry[entry.index(after: separator)...])
+			}
+			return (arguments, environment)
 		}
 
 		private static func pathsReferToSameFile(_ lhs: String, _ rhs: String) -> Bool {

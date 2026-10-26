@@ -25,7 +25,7 @@
 		func terminalViewRequestsShowSettings(_ view: TerminalView)
 		func terminalViewShouldDismissAuxiliaryUI(_ view: TerminalView) -> Bool
 		func terminalView(_ view: TerminalView, didChangeFontSize fontSize: Float)
-		func terminalView(_ view: TerminalView, didReceiveFileDropURLs urls: [URL])
+		func terminalView(_ view: TerminalView, didReceiveFileDrop batch: TerminalFileDropBatch)
 		func terminalView(_ view: TerminalView, didFailFileDropWithMessage message: String)
 	}
 
@@ -1619,14 +1619,24 @@
 		}
 
 		func dropInteraction(_: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
-			allDropItemsAreFileURLs(session)
+			let canHandle = allDropItemsAreFiles(session)
+			DiagnosticLogStore.shared.record(
+				"terminalView.fileDrop.canHandle",
+				metadata: [
+					"accepted": canHandle,
+					"items": session.items.map { item in
+						"\(item.itemProvider.registeredTypeIdentifiers) inPlace=\(item.itemProvider.registeredTypeIdentifiers(fileOptions: [.openInPlace]))"
+					}.joined(separator: "; "),
+				]
+			)
+			return canHandle
 		}
 
 		func dropInteraction(
 			_: UIDropInteraction,
 			sessionDidUpdate session: UIDropSession
 		) -> UIDropProposal {
-			guard allDropItemsAreFileURLs(session) else {
+			guard allDropItemsAreFiles(session) else {
 				return UIDropProposal(operation: .forbidden)
 			}
 			return UIDropProposal(operation: .copy)
@@ -1634,37 +1644,54 @@
 
 		func dropInteraction(_: UIDropInteraction, performDrop session: UIDropSession) {
 			let providers = session.items.map(\.itemProvider)
-			guard allDropItemsAreFileURLs(session) else {
+			guard allDropItemsAreFiles(session) else {
 				delegate?.terminalView(self, didFailFileDropWithMessage: TerminalFileDropError.noFileURLs.localizedDescription)
 				return
 			}
 			restoreKeyboardFocusIfNeeded(retryCount: 10)
-			loadDroppedFileURLs(from: providers)
+			loadDroppedFiles(from: providers)
 		}
 
-		private func allDropItemsAreFileURLs(_ session: UIDropSession) -> Bool {
+		private func allDropItemsAreFiles(_ session: UIDropSession) -> Bool {
 			!session.items.isEmpty && session.items.allSatisfy {
-				$0.itemProvider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+				TerminalFileDropSupport.itemProviderIsFile($0.itemProvider)
 			}
 		}
 
-		private func loadDroppedFileURLs(from providers: [NSItemProvider]) {
+		private func loadDroppedFiles(from providers: [NSItemProvider]) {
+			let stagingDirectory = TerminalFileDropSupport.makeStagingDirectory()
 			let collector = TerminalDroppedFileURLCollector(count: providers.count) { [weak self] loadedURLs, message in
 				Task { @MainActor [weak self] in
 					guard let self else { return }
-					if let message {
-						self.delegate?.terminalView(self, didFailFileDropWithMessage: message)
-					} else if !loadedURLs.isEmpty {
-						self.delegate?.terminalView(self, didReceiveFileDropURLs: loadedURLs)
+					let batch = TerminalFileDropBatch(urls: loadedURLs, stagingDirectory: stagingDirectory)
+					if message == nil, !loadedURLs.isEmpty {
+						self.delegate?.terminalView(self, didReceiveFileDrop: batch)
 					} else {
-						self.delegate?.terminalView(self, didFailFileDropWithMessage: TerminalFileDropError.noFileURLs.localizedDescription)
+						batch.removeStagedFiles()
+						self.delegate?.terminalView(self, didFailFileDropWithMessage: message ?? TerminalFileDropError.noFileURLs.localizedDescription)
 					}
 				}
 			}
 
 			for (index, provider) in providers.enumerated() {
-				provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
-					collector.finish(index: index, item: item, error: error)
+				if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+					provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
+						collector.finish(index: index, item: item, error: error)
+					}
+				} else if let typeIdentifier = provider.registeredTypeIdentifiers(fileOptions: [.openInPlace]).first {
+					let preferredName = provider.suggestedName
+					provider.loadInPlaceFileRepresentation(forTypeIdentifier: typeIdentifier) { url, _, error in
+						do {
+							let stagedURL = try url.map {
+								try TerminalFileDropSupport.stageDroppedFile(at: $0, preferredName: preferredName, in: stagingDirectory)
+							}
+							collector.finish(index: index, url: stagedURL, error: error)
+						} catch {
+							collector.finish(index: index, url: nil, error: error)
+						}
+					}
+				} else {
+					collector.finish(index: index, url: nil, error: nil)
 				}
 			}
 		}
@@ -2220,6 +2247,10 @@
 		}
 
 		nonisolated func finish(index: Int, item: NSSecureCoding?, error: Error?) {
+			finish(index: index, url: Self.fileURL(from: item), error: error)
+		}
+
+		nonisolated func finish(index: Int, url: URL?, error: Error?) {
 			let shouldFinish: Bool
 			let loadedURLs: [URL]
 			let message: String?
@@ -2227,7 +2258,7 @@
 			lock.lock()
 			if let error {
 				failureMessage = "Could not load dropped file: \(error.localizedDescription)"
-			} else if let url = Self.fileURL(from: item), url.isFileURL {
+			} else if let url, url.isFileURL {
 				urls[index] = url
 			} else {
 				failureMessage = "Drop contains no file URLs."

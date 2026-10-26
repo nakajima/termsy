@@ -221,9 +221,19 @@ final class TermsyUITests: XCTestCase {
 
 	@MainActor
 	func testDraggingFileURLOntoTerminalShowsDisconnectedSSHDropError() throws {
+		try assertDroppingFixtureShowsDisconnectedSSHDropError("uitest.fileDrop.fileSource")
+	}
+
+	@MainActor
+	func testDraggingInPlaceFileOntoTerminalShowsDisconnectedSSHDropError() throws {
+		try assertDroppingFixtureShowsDisconnectedSSHDropError("uitest.fileDrop.inPlaceFileSource")
+	}
+
+	@MainActor
+	private func assertDroppingFixtureShowsDisconnectedSSHDropError(_ identifier: String) throws {
 		let app = launchFileDropUITestTerminal()
 
-		dragFileDropFixture("uitest.fileDrop.fileSource", in: app)
+		dragFileDropFixture(identifier, in: app)
 
 		let errorTitle = app.staticTexts["fileDrop.error.title"]
 		XCTAssertTrue(errorTitle.waitForExistence(timeout: 8), "File drop error overlay did not appear")
@@ -276,6 +286,7 @@ final class TermsyUITests: XCTestCase {
 		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "App did not reach foreground", file: file, line: line)
 		XCTAssertTrue(app.otherElements["screen.terminal"].waitForExistence(timeout: 10), "Terminal screen did not appear", file: file, line: line)
 		XCTAssertTrue(app.descendants(matching: .any)["uitest.fileDrop.fileSource"].waitForExistence(timeout: 10), "File drag source did not appear", file: file, line: line)
+		XCTAssertTrue(app.descendants(matching: .any)["uitest.fileDrop.inPlaceFileSource"].waitForExistence(timeout: 10), "In-place file drag source did not appear", file: file, line: line)
 		XCTAssertTrue(app.descendants(matching: .any)["uitest.fileDrop.textSource"].waitForExistence(timeout: 10), "Text drag source did not appear", file: file, line: line)
 		return app
 	}

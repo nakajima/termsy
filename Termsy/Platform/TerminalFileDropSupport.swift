@@ -1,12 +1,21 @@
 import Foundation
+import UniformTypeIdentifiers
 
 struct TerminalFileDropBatch: Identifiable, Equatable {
 	let id: String
 	let urls: [URL]
+	/// Holds copies of dropped files that only existed for the duration of the drop.
+	let stagingDirectory: URL?
 
-	init(urls: [URL], id: String = TerminalFileDropSupport.makeDropID()) {
+	init(urls: [URL], stagingDirectory: URL? = nil, id: String = TerminalFileDropSupport.makeDropID()) {
 		self.id = id
 		self.urls = urls
+		self.stagingDirectory = stagingDirectory
+	}
+
+	func removeStagedFiles() {
+		guard let stagingDirectory else { return }
+		try? FileManager.default.removeItem(at: stagingDirectory)
 	}
 }
 
@@ -139,6 +148,34 @@ enum TerminalFileDropSupport {
 		return paths.map(shellQuote).joined(separator: " ") + " "
 	}
 
+	/// Whether a dragged item is a file rather than, say, selected text. Apps like Files
+	/// register in-place file representations instead of a `public.file-url` item.
+	nonisolated static func itemProviderIsFile(_ provider: NSItemProvider) -> Bool {
+		provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+			|| !provider.registeredTypeIdentifiers(fileOptions: [.openInPlace]).isEmpty
+	}
+
+	nonisolated static func makeStagingDirectory() -> URL {
+		FileManager.default.temporaryDirectory
+			.appendingPathComponent("termsy-file-drops", isDirectory: true)
+			.appendingPathComponent(makeDropID(), isDirectory: true)
+	}
+
+	/// Copies a dropped file into `stagingDirectory`, since the source URL may vanish
+	/// once the item provider's completion handler returns.
+	nonisolated static func stageDroppedFile(at sourceURL: URL, preferredName: String?, in stagingDirectory: URL) throws -> URL {
+		let name = sanitizedRemoteFileName(preferredName?.isEmpty == false ? preferredName! : sourceURL.lastPathComponent)
+		let itemDirectory = stagingDirectory.appendingPathComponent(makeDropID(), isDirectory: true)
+		try FileManager.default.createDirectory(at: itemDirectory, withIntermediateDirectories: true)
+		let destinationURL = itemDirectory.appendingPathComponent(name, isDirectory: false)
+		let didStartAccess = sourceURL.startAccessingSecurityScopedResource()
+		defer {
+			if didStartAccess { sourceURL.stopAccessingSecurityScopedResource() }
+		}
+		try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+		return destinationURL
+	}
+
 	nonisolated static func localShellInsertText(for urls: [URL]) throws -> String {
 		let fileURLs = urls.filter(\.isFileURL)
 		guard !fileURLs.isEmpty else { throw TerminalFileDropError.noFileURLs }
@@ -211,6 +248,126 @@ enum TerminalFileDropSupport {
 
 	nonisolated static func chmodModeString(_ mode: Int) -> String {
 		String(mode & 0o7777, radix: 8)
+	}
+
+	nonisolated static let uploadChunkSize = 256 * 1024
+
+	nonisolated static func remoteDirectory(from result: SSHCommandResult) throws -> String {
+		guard result.exitStatus == 0, result.exitSignal == nil else {
+			throw TerminalFileDropError.uploadFailed(commandFailureMessage(result, fallback: "Could not create remote upload directory."))
+		}
+		guard let directory = parseTaggedOutput(result.output, tag: "__TERMSY_DROP_DIR__") else {
+			throw TerminalFileDropError.invalidRemoteResponse(result.output)
+		}
+		return directory
+	}
+
+	nonisolated static func uploadedRemotePath(from result: SSHCommandResult) throws -> String {
+		guard result.exitStatus == 0, result.exitSignal == nil else {
+			throw TerminalFileDropError.uploadFailed(commandFailureMessage(result, fallback: "Remote upload failed."))
+		}
+		guard let remotePath = parseTaggedOutput(result.output, tag: "__TERMSY_UPLOAD_PATH__") else {
+			throw TerminalFileDropError.invalidRemoteResponse(result.output)
+		}
+		return remotePath
+	}
+
+	nonisolated static func fileDropDirectoryCommand(dropID: String) -> String {
+		let safeDropID = dropID.filter { character in
+			character.isLetter || character.isNumber || character == "-" || character == "_"
+		}
+		let directoryName = safeDropID.isEmpty ? makeDropID() : safeDropID
+		let quotedDirectoryName = TerminalFileDropSupport.shellQuote(directoryName)
+		let script = #"""
+		set -eu
+		uid="$(id -u 2>/dev/null || true)"
+		user="${USER:-}"
+		if [ -z "$user" ]; then
+		  user="$(id -un 2>/dev/null || printf 'user')"
+		fi
+		try_root() {
+		  root="$1"
+		  [ -n "$root" ] || return 1
+		  mkdir -p "$root" 2>/dev/null || return 1
+		  chmod 700 "$root" 2>/dev/null || return 1
+		  if [ -n "$uid" ]; then
+		    owner="$(stat -c '%u' "$root" 2>/dev/null || stat -f '%u' "$root" 2>/dev/null || true)"
+		    if [ -n "$owner" ] && [ "$owner" != "$uid" ]; then
+		      return 1
+		    fi
+		  fi
+		  [ -d "$root" ] && [ -r "$root" ] && [ -w "$root" ] && [ -x "$root" ] || return 1
+		  return 0
+		}
+		root=""
+		if try_root /tmp/termsy; then
+		  root=/tmp/termsy
+		elif [ -n "$uid" ] && try_root "/tmp/termsy-$uid"; then
+		  root="/tmp/termsy-$uid"
+		elif try_root "/tmp/termsy-$user"; then
+		  root="/tmp/termsy-$user"
+		else
+		  printf 'Termsy: could not create a writable private upload directory under /tmp\n' >&2
+		  exit 1
+		fi
+		drop_dir="$root"/__TERMSY_DROP_NAME__
+		mkdir "$drop_dir"
+		chmod 700 "$drop_dir"
+		printf '__TERMSY_DROP_DIR__=%s\n' "$drop_dir"
+		"""#.replacingOccurrences(of: "__TERMSY_DROP_NAME__", with: quotedDirectoryName)
+		return "/bin/sh -c \(TerminalFileDropSupport.shellQuote(script))"
+	}
+
+	nonisolated static func fileUploadCommand(
+		remoteDirectory: String,
+		remoteFileName: String,
+		posixPermissions: Int
+	) -> String {
+		let tempName = ".\(remoteFileName).termsy-upload-\(makeDropID()).tmp"
+		let mode = TerminalFileDropSupport.chmodModeString(posixPermissions)
+		let script = #"""
+		set -eu
+		dir=__TERMSY_REMOTE_DIR__
+		name=__TERMSY_REMOTE_NAME__
+		tmp_name=__TERMSY_TMP_NAME__
+		mode=__TERMSY_MODE__
+		final="$dir/$name"
+		tmp="$dir/$tmp_name"
+		trap 'rm -f "$tmp"' HUP INT TERM EXIT
+		cat > "$tmp"
+		chmod "$mode" "$tmp"
+		mv -f "$tmp" "$final"
+		trap - HUP INT TERM EXIT
+		printf '__TERMSY_UPLOAD_PATH__=%s\n' "$final"
+		"""#
+		let filled = script
+			.replacingOccurrences(of: "__TERMSY_REMOTE_DIR__", with: TerminalFileDropSupport.shellQuote(remoteDirectory))
+			.replacingOccurrences(of: "__TERMSY_REMOTE_NAME__", with: TerminalFileDropSupport.shellQuote(remoteFileName))
+			.replacingOccurrences(of: "__TERMSY_TMP_NAME__", with: TerminalFileDropSupport.shellQuote(tempName))
+			.replacingOccurrences(of: "__TERMSY_MODE__", with: TerminalFileDropSupport.shellQuote(mode))
+		return "/bin/sh -c \(TerminalFileDropSupport.shellQuote(filled))"
+	}
+
+	private nonisolated static func parseTaggedOutput(_ output: String, tag: String) -> String? {
+		for line in output.components(separatedBy: .newlines) {
+			guard line.hasPrefix(tag + "=") else { continue }
+			return String(line.dropFirst(tag.count + 1))
+		}
+		return nil
+	}
+
+	private nonisolated static func commandFailureMessage(_ result: SSHCommandResult, fallback: String) -> String {
+		let trimmedOutput = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+		if !trimmedOutput.isEmpty {
+			return trimmedOutput
+		}
+		if let exitSignal = result.exitSignal {
+			return "\(fallback) Remote command terminated by signal \(exitSignal)."
+		}
+		if let exitStatus = result.exitStatus {
+			return "\(fallback) Remote command exited with status \(exitStatus)."
+		}
+		return fallback
 	}
 
 	private nonisolated static func regularFileAttributes(for url: URL) throws -> [FileAttributeKey: Any] {

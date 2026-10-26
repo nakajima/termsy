@@ -35,7 +35,7 @@
 		@ObservationIgnored private var terminalDidFinish = false
 		@ObservationIgnored private var terminalRecorder: TerminalSessionRecorder?
 		@ObservationIgnored private var shellActivityState: ShellActivityState?
-		@ObservationIgnored private var fileDropBatches: [TerminalFileDropBatch] = []
+		@ObservationIgnored private var fileDropBatches: [(batch: TerminalFileDropBatch, uploader: any TerminalFileDropUploader)] = []
 		@ObservationIgnored private var fileDropTask: Task<Void, Never>?
 		@ObservationIgnored private static var didLogTerminalIOActivation = false
 
@@ -342,9 +342,17 @@
 			guard !urls.isEmpty else { return }
 			switch source {
 			case .localShell:
-				insertLocalShellDroppedPaths(urls)
+				if let invocation = localShellSession?.attachedSSHInvocation {
+					enqueueRemoteFileDrop(urls: urls, uploader: SSHClientFileDropUploader(invocation: invocation))
+				} else {
+					insertLocalShellDroppedPaths(urls)
+				}
 			case .ssh:
-				enqueueRemoteFileDrop(urls: urls)
+				guard let sshSession else {
+					handleFileDropFailure(message: TerminalFileDropError.notConnected.localizedDescription)
+					return
+				}
+				enqueueRemoteFileDrop(urls: urls, uploader: sshSession)
 			}
 		}
 
@@ -366,9 +374,9 @@
 			}
 		}
 
-		private func enqueueRemoteFileDrop(urls: [URL]) {
+		private func enqueueRemoteFileDrop(urls: [URL], uploader: any TerminalFileDropUploader) {
 			guard fileDropOverlayState.errorMessage == nil else { return }
-			fileDropBatches.append(TerminalFileDropBatch(urls: urls))
+			fileDropBatches.append((TerminalFileDropBatch(urls: urls), uploader))
 			refreshQueuedFileDropCount()
 			startRemoteFileDropQueueIfNeeded()
 		}
@@ -383,9 +391,9 @@
 		private func processRemoteFileDropQueue() async {
 			defer { fileDropTask = nil }
 			while !fileDropBatches.isEmpty {
-				let batch = fileDropBatches.removeFirst()
+				let (batch, uploader) = fileDropBatches.removeFirst()
 				do {
-					try await uploadRemoteFileDropBatch(batch)
+					try await uploadRemoteFileDropBatch(batch, uploader: uploader)
 				} catch {
 					fileDropBatches.removeAll()
 					setFileDropOverlayState(.error(error.localizedDescription))
@@ -395,8 +403,10 @@
 			setFileDropOverlayState(.idle)
 		}
 
-		private func uploadRemoteFileDropBatch(_ batch: TerminalFileDropBatch) async throws {
-			guard let sshSession, sshSession.isActive else { throw TerminalFileDropError.notConnected }
+		private func uploadRemoteFileDropBatch(
+			_ batch: TerminalFileDropBatch,
+			uploader: any TerminalFileDropUploader
+		) async throws {
 			let prepared = try TerminalFileDropSupport.prepareSSHUploadBatch(urls: batch.urls)
 			defer { prepared.stopAccessingSecurityScopedResources() }
 
@@ -408,7 +418,7 @@
 				currentFileName: prepared.files.first?.displayName
 			)
 
-			let remoteDirectory = try await sshSession.prepareFileDropDirectory(dropID: batch.id)
+			let remoteDirectory = try await uploader.prepareFileDropDirectory(dropID: batch.id)
 			var remotePaths: [String] = []
 			var completedBytes: Int64 = 0
 
@@ -421,7 +431,7 @@
 					completedBytes: completedBeforeFile,
 					currentFileName: file.displayName
 				)
-				let remotePath = try await sshSession.uploadFileForDrop(
+				let remotePath = try await uploader.uploadFileForDrop(
 					localURL: file.sourceURL,
 					remoteDirectory: remoteDirectory,
 					remoteFileName: file.remoteFileName,
@@ -525,7 +535,21 @@
 	}
 
 	@MainActor
-	final class MacSSHTerminalSession {
+	protocol TerminalFileDropUploader {
+		func prepareFileDropDirectory(dropID: String) async throws -> String
+		func uploadFileForDrop(
+			localURL: URL,
+			remoteDirectory: String,
+			remoteFileName: String,
+			posixPermissions: Int,
+			onProgress: @escaping @Sendable (Int64) -> Void
+		) async throws -> String
+	}
+
+	extension SSHClientFileDropUploader: TerminalFileDropUploader {}
+
+	@MainActor
+	final class MacSSHTerminalSession: TerminalFileDropUploader {
 		let session: Session
 		let sshSession = SSHTerminalSession()
 		var onOutput: ((Data) -> Void)?
@@ -562,7 +586,8 @@
 		}
 
 		func prepareFileDropDirectory(dropID: String) async throws -> String {
-			try await sshSession.prepareFileDropDirectory(dropID: dropID)
+			guard isActive else { throw TerminalFileDropError.notConnected }
+			return try await sshSession.prepareFileDropDirectory(dropID: dropID)
 		}
 
 		func uploadFileForDrop(

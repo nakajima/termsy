@@ -103,6 +103,6 @@ private final class PointerOutputRecorder: TerminalViewDelegate {
 	func terminalViewRequestsShowSettings(_: TerminalView) {}
 	func terminalViewShouldDismissAuxiliaryUI(_: TerminalView) -> Bool { false }
 	func terminalView(_: TerminalView, didChangeFontSize _: Float) {}
-	func terminalView(_: TerminalView, didReceiveFileDropURLs _: [URL]) {}
+	func terminalView(_: TerminalView, didReceiveFileDrop _: TerminalFileDropBatch) {}
 	func terminalView(_: TerminalView, didFailFileDropWithMessage _: String) {}
 }

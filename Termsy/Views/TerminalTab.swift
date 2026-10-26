@@ -1369,14 +1369,14 @@ class TerminalTab: Identifiable {
 		prepareForReconnectAfterBackgroundLoss(snapshot: displaySnapshot ?? captureRestorationSnapshot())
 	}
 
-	func handleDroppedFileURLs(_ urls: [URL]) {
-		guard !urls.isEmpty else { return }
+	func handleDroppedFileBatch(_ batch: TerminalFileDropBatch) {
+		guard !batch.urls.isEmpty else { return }
 		terminalView.restoreKeyboardFocusIfNeeded(retryCount: 10)
 		switch endpoint {
 		case .remote:
-			enqueueRemoteFileDrop(urls: urls)
+			enqueueRemoteFileDrop(batch)
 		case .localShell:
-			insertLocalShellDroppedPaths(urls)
+			insertLocalShellDroppedPaths(batch.urls)
 		}
 	}
 
@@ -1398,9 +1398,12 @@ class TerminalTab: Identifiable {
 		}
 	}
 
-	private func enqueueRemoteFileDrop(urls: [URL]) {
-		guard fileDropOverlayState.errorMessage == nil else { return }
-		fileDropBatches.append(TerminalFileDropBatch(urls: urls))
+	private func enqueueRemoteFileDrop(_ batch: TerminalFileDropBatch) {
+		guard fileDropOverlayState.errorMessage == nil else {
+			batch.removeStagedFiles()
+			return
+		}
+		fileDropBatches.append(batch)
 		refreshQueuedFileDropCount()
 		startRemoteFileDropQueueIfNeeded()
 	}
@@ -1416,10 +1419,11 @@ class TerminalTab: Identifiable {
 		defer { fileDropTask = nil }
 		while !fileDropBatches.isEmpty {
 			let batch = fileDropBatches.removeFirst()
+			defer { batch.removeStagedFiles() }
 			do {
 				try await uploadRemoteFileDropBatch(batch)
 			} catch {
-				fileDropBatches.removeAll()
+				clearQueuedFileDrops()
 				setFileDropOverlayState(.error(error.localizedDescription))
 				return
 			}
@@ -1520,8 +1524,15 @@ class TerminalTab: Identifiable {
 	private func cancelFileDropQueue() {
 		fileDropTask?.cancel()
 		fileDropTask = nil
-		fileDropBatches.removeAll()
+		clearQueuedFileDrops()
 		setFileDropOverlayState(.idle)
+	}
+
+	private func clearQueuedFileDrops() {
+		for batch in fileDropBatches {
+			batch.removeStagedFiles()
+		}
+		fileDropBatches.removeAll()
 	}
 
 	private func configureTerminalView() {
@@ -1755,8 +1766,8 @@ extension TerminalTab: TerminalViewDelegate {
 		onTerminalFontSizeChange?(fontSize)
 	}
 
-	func terminalView(_: TerminalView, didReceiveFileDropURLs urls: [URL]) {
-		handleDroppedFileURLs(urls)
+	func terminalView(_: TerminalView, didReceiveFileDrop batch: TerminalFileDropBatch) {
+		handleDroppedFileBatch(batch)
 	}
 
 	func terminalView(_: TerminalView, didFailFileDropWithMessage message: String) {

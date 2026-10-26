@@ -302,6 +302,11 @@ struct ContentView: View {
 					itemProvider: Self.fileItemProvider
 				)
 				dragSource(
+					title: "In-Place File",
+					identifier: "uitest.fileDrop.inPlaceFileSource",
+					itemProvider: Self.inPlaceFileItemProvider
+				)
+				dragSource(
 					title: "Text",
 					identifier: "uitest.fileDrop.textSource",
 					itemProvider: Self.textItemProvider
@@ -326,15 +331,32 @@ struct ContentView: View {
 		}
 
 		nonisolated private static func fileItemProvider() -> NSItemProvider {
-			let url = FileManager.default.temporaryDirectory
-				.appendingPathComponent("termsy-file-drop-ui-test.txt", isDirectory: false)
-			try? "Termsy file drop UI test\n".write(to: url, atomically: true, encoding: .utf8)
+			let url = fixtureFileURL()
 			let provider = NSItemProvider(
 				item: url.dataRepresentation as NSData,
 				typeIdentifier: UTType.fileURL.identifier
 			)
 			provider.suggestedName = url.lastPathComponent
 			return provider
+		}
+
+		/// Mirrors a drag from the Files app: an in-place file representation and no file URL item.
+		nonisolated private static func inPlaceFileItemProvider() -> NSItemProvider {
+			let url = fixtureFileURL()
+			let provider = NSItemProvider()
+			provider.suggestedName = url.lastPathComponent
+			provider.registerFileRepresentation(forTypeIdentifier: UTType.plainText.identifier, fileOptions: [.openInPlace], visibility: .all) { completion in
+				completion(url, true, nil)
+				return nil
+			}
+			return provider
+		}
+
+		nonisolated private static func fixtureFileURL() -> URL {
+			let url = FileManager.default.temporaryDirectory
+				.appendingPathComponent("termsy-file-drop-ui-test.txt", isDirectory: false)
+			try? "Termsy file drop UI test\n".write(to: url, atomically: true, encoding: .utf8)
+			return url
 		}
 
 		nonisolated private static func textItemProvider() -> NSItemProvider {

@@ -11,13 +11,15 @@ struct SessionsRequest: ValueObservationQueryable {
 }
 
 struct DirectSessionTarget: Hashable {
+	static let defaultUsernameKey = "defaultUsername"
+
 	let username: String
 	let hostname: String
 	let initialWorkingDirectory: String?
 	let port: Int
 	let tmuxSessionName: String?
 
-	init?(_ input: String) {
+	init?(_ input: String, defaultUsername: String? = nil) {
 		let trimmedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
 		guard !trimmedInput.isEmpty else { return nil }
 
@@ -48,10 +50,13 @@ struct DirectSessionTarget: Hashable {
 			}
 		}
 
-		guard let atIndex = targetText.firstIndex(of: "@") else { return nil }
-
-		let username = String(targetText[..<atIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-		targetText = String(targetText[targetText.index(after: atIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+		let username: String
+		if let atIndex = targetText.firstIndex(of: "@") {
+			username = String(targetText[..<atIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+			targetText = String(targetText[targetText.index(after: atIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+		} else {
+			username = defaultUsername?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+		}
 		guard !username.isEmpty, !targetText.isEmpty, !targetText.contains("@") else { return nil }
 
 		let tmuxSessionName: String?
@@ -246,6 +251,7 @@ struct SessionListContent: View {
 	@Environment(\.databaseContext) private var dbContext
 	@Environment(\.appTheme) private var theme
 	@Query(SessionsRequest()) private var sessions: [Session]
+	@AppStorage(DirectSessionTarget.defaultUsernameKey) private var defaultUsername = ""
 	@State private var filterText = ""
 	@State private var directConnectError: String?
 	@State private var remoteTmuxLookupState: RemoteTmuxSessionLookupState = .idle
@@ -297,8 +303,9 @@ struct SessionListContent: View {
 		Session.groupByHost(filteredSessions)
 	}
 
+	// Without an "@", text only becomes a direct target when it doesn't match a saved session.
 	private var parsedDirectTarget: DirectSessionTarget? {
-		DirectSessionTarget(filterText)
+		DirectSessionTarget(filterText, defaultUsername: filteredSessions.isEmpty ? defaultUsername : nil)
 	}
 
 	private var directConnectTarget: DirectSessionTarget? {

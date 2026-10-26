@@ -700,6 +700,27 @@ struct TermsyTests {
 		#expect(target.port == 2022)
 	}
 
+	@Test func directSessionTargetUsesDefaultUsernameWithoutAt() throws {
+		let target = try #require(DirectSessionTarget("example.com:src#api -p 2200", defaultUsername: " pat "))
+
+		#expect(target.username == "pat")
+		#expect(target.hostname == "example.com")
+		#expect(target.initialWorkingDirectory == "src")
+		#expect(target.tmuxSessionName == "api")
+		#expect(target.port == 2200)
+	}
+
+	@Test func directSessionTargetPrefersExplicitUsernameOverDefault() throws {
+		let target = try #require(DirectSessionTarget("root@example.com", defaultUsername: "pat"))
+
+		#expect(target.username == "root")
+	}
+
+	@Test func directSessionTargetRequiresUsernameWithoutDefault() {
+		#expect(DirectSessionTarget("example.com") == nil)
+		#expect(DirectSessionTarget("example.com", defaultUsername: "  ") == nil)
+	}
+
 	@Test func directSessionTargetRejectsInvalidPort() {
 		#expect(DirectSessionTarget("pat@example.com:src -70000") == nil)
 		#expect(DirectSessionTarget("pat@example.com -p nope") == nil)
