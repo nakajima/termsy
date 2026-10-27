@@ -303,9 +303,8 @@ struct SessionListContent: View {
 		Session.groupByHost(filteredSessions)
 	}
 
-	// Without an "@", text only becomes a direct target when it doesn't match a saved session.
 	private var parsedDirectTarget: DirectSessionTarget? {
-		DirectSessionTarget(filterText, defaultUsername: filteredSessions.isEmpty ? defaultUsername : nil)
+		DirectSessionTarget(filterText, defaultUsername: defaultUsername)
 	}
 
 	private var directConnectTarget: DirectSessionTarget? {
